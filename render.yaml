@@ -1,0 +1,38 @@
+# Render Blueprint for genspec-api (NestJS).
+# Build uses the SWC builder (nest-cli.json) → low memory, fixes the
+# "Reached heap limit / JavaScript heap out of memory" OOM on Free 512MB.
+services:
+  - type: web
+    name: genspec-api
+    runtime: node
+    plan: free
+    # region: singapore
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/main
+    healthCheckPath: /
+    envVars:
+      # Cap V8 heap so the build/runtime stay within the 512MB box.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=460
+      - key: NODE_ENV
+        value: production
+      # Render injects PORT automatically; main.ts reads process.env.PORT.
+      # Secrets — set these in the Render dashboard (sync:false keeps them out of git):
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 30d
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
