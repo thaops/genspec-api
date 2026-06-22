@@ -88,7 +88,7 @@ export class AiService {
         for (;;) {
           const { value, done } = await reader.read();
           if (done) return;
-          buf += dec.decode(value, { stream: true });
+          buf = (buf + dec.decode(value, { stream: true })).replace(/\r/g, '');
           let i: number;
           while ((i = buf.indexOf('\n\n')) >= 0) {
             const block = buf.slice(0, i);
