@@ -1,0 +1,127 @@
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { compute } from './boq.engine';
+import { Estimate, EstimateDocument } from './estimate.schema';
+import { Action, DEFAULT_MARKUPS, EstimateState } from './estimate.types';
+import { applyActions } from './reducer';
+import { buildActivity, previewActions } from './transparency';
+
+function stateOf(doc: EstimateDocument): EstimateState {
+  return {
+    projectInfo: doc.projectInfo ?? {},
+    takeoff: doc.takeoff ?? [],
+    analyses: doc.analyses ?? [],
+    materials: doc.materials ?? [],
+    labor: doc.labor ?? [],
+    equipment: doc.equipment ?? [],
+    markups: doc.markups ?? { ...DEFAULT_MARKUPS },
+  };
+}
+
+export function toEstimateDto(doc: EstimateDocument) {
+  const ts = doc as unknown as { createdAt?: Date; updatedAt?: Date };
+  const state = stateOf(doc);
+  const computed = compute(state);
+  return {
+    id: doc._id.toString(),
+    userId: doc.userId,
+    name: doc.name,
+    ...state,
+    ...computed, // boq, materialSummary, costSummary, costs
+    activityLog: (doc.activityLog ?? []).slice(-100),
+    createdAt: ts.createdAt,
+    updatedAt: ts.updatedAt,
+  };
+}
+
+@Injectable()
+export class EstimateService {
+  constructor(@InjectModel(Estimate.name) private readonly model: Model<EstimateDocument>) {}
+
+  async create(userId: string, name: string) {
+    const doc = await this.model.create({
+      userId,
+      name: name?.trim() || 'Dự án mới',
+      projectInfo: { name: name?.trim() },
+      markups: { ...DEFAULT_MARKUPS },
+    });
+    return toEstimateDto(doc);
+  }
+
+  async list(userId: string) {
+    const docs = await this.model.find({ userId }).sort({ updatedAt: -1 }).exec();
+    return docs.map((d) => {
+      const dto = toEstimateDto(d);
+      return {
+        id: dto.id,
+        name: dto.name,
+        projectInfo: dto.projectInfo,
+        costs: dto.costs,
+        itemCount: dto.boq.length,
+        takeoffCount: dto.takeoff.length,
+        createdAt: dto.createdAt,
+        updatedAt: dto.updatedAt,
+      };
+    });
+  }
+
+  async getOwned(userId: string, id: string) {
+    const doc = await this.model.findById(id).exec();
+    if (!doc) throw new NotFoundException('Estimate not found');
+    if (doc.userId !== userId) throw new ForbiddenException();
+    return doc;
+  }
+
+  async getOne(userId: string, id: string) {
+    return toEstimateDto(await this.getOwned(userId, id));
+  }
+
+  async rename(userId: string, id: string, name: string) {
+    const doc = await this.getOwned(userId, id);
+    doc.name = name.trim() || doc.name;
+    await doc.save();
+    return toEstimateDto(doc);
+  }
+
+  async remove(userId: string, id: string) {
+    const doc = await this.getOwned(userId, id);
+    await doc.deleteOne();
+    return { ok: true };
+  }
+
+  private async saveState(doc: EstimateDocument, state: EstimateState) {
+    const computed = compute(state);
+    doc.projectInfo = state.projectInfo;
+    doc.takeoff = state.takeoff;
+    doc.analyses = state.analyses;
+    doc.materials = state.materials;
+    doc.labor = state.labor;
+    doc.equipment = state.equipment;
+    doc.markups = state.markups;
+    doc.costs = computed.costs;
+    await doc.save();
+    return toEstimateDto(doc);
+  }
+
+  /** Single mutation path — manual edits and AI-confirmed proposals both flow through here. */
+  async applyActions(userId: string, id: string, actions: Action[], src: 'ai' | 'manual' = 'manual') {
+    const doc = await this.getOwned(userId, id);
+    const before = stateOf(doc);
+    const { state, applied, warnings } = applyActions(before, actions);
+    const log = buildActivity(before, actions, new Date().toISOString(), src);
+    doc.activityLog = [...(doc.activityLog ?? []), ...log].slice(-200);
+    const estimate = await this.saveState(doc, state);
+    return { estimate, applied, warnings };
+  }
+
+  /** Dry-run preview of a batch of actions (no persistence) — for the AI change preview. */
+  async preview(userId: string, id: string, actions: Action[]) {
+    const doc = await this.getOwned(userId, id);
+    return previewActions(stateOf(doc), actions);
+  }
+
+  stateForPrompt(doc: EstimateDocument): EstimateState {
+    return stateOf(doc);
+  }
+}
