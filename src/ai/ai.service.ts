@@ -56,45 +56,60 @@ export class AiService {
   async *stream(parts: GeminiPart[]): AsyncGenerator<string> {
     const key = this.config.get<string>('GEMINI_API_KEY');
     if (!key) throw new Error('GEMINI_API_KEY missing');
-    const model = this.models[0];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${key}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: { temperature: 0.2 },
-      }),
+    const body = JSON.stringify({
+      contents: [{ role: 'user', parts }],
+      generationConfig: { temperature: 0.2 },
     });
-    if (!res.ok || !res.body) {
-      throw new Error(`stream HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
-    }
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let i: number;
-      while ((i = buf.indexOf('\n\n')) >= 0) {
-        const block = buf.slice(0, i);
-        buf = buf.slice(i + 2);
-        const dataLine = block.split('\n').find((l) => l.startsWith('data:'));
-        if (!dataLine) continue;
-        const json = dataLine.slice(5).trim();
-        if (!json || json === '[DONE]') continue;
+
+    let lastErr: unknown;
+    for (const model of this.models) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${key}`;
+        let res: Response;
         try {
-          const obj = JSON.parse(json) as {
-            candidates?: { content?: { parts?: { text?: string }[] } }[];
-          };
-          const tx = (obj.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
-          if (tx) yield tx;
-        } catch {
-          // skip partial/non-JSON keep-alive frames
+          res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        } catch (err) {
+          lastErr = err;
+          await this.sleep(1200 * attempt);
+          continue;
+        }
+        if (res.status === 429 || res.status === 503 || res.status === 500) {
+          lastErr = new Error(`stream HTTP ${res.status}`);
+          await this.sleep(Math.min(1500 * attempt * attempt, 6000));
+          continue; // retry same model, then fall through to next model
+        }
+        if (!res.ok || !res.body) {
+          throw new Error(`stream HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
+        }
+        // Success — stream the SSE body.
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          buf += dec.decode(value, { stream: true });
+          let i: number;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const block = buf.slice(0, i);
+            buf = buf.slice(i + 2);
+            const dataLine = block.split('\n').find((l) => l.startsWith('data:'));
+            if (!dataLine) continue;
+            const json = dataLine.slice(5).trim();
+            if (!json || json === '[DONE]') continue;
+            try {
+              const obj = JSON.parse(json) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+              const tx = (obj.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+              if (tx) yield tx;
+            } catch {
+              // skip partial/keep-alive frames
+            }
+          }
         }
       }
+      this.logger.warn(`stream model ${model} exhausted, trying next`);
     }
+    throw lastErr ?? new Error('stream failed');
   }
 
   private sleep(ms: number) {
