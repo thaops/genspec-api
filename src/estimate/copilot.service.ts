@@ -72,7 +72,7 @@ export class CopilotService {
       return;
     }
     if (!this.ai.available) {
-      yield { event: 'error', data: { message: 'OPENROUTER_API_KEY chưa cấu hình — copilot không khả dụng.' } };
+      yield { event: 'error', data: { message: 'Hệ thống AI chưa được cấu hình.' } };
       return;
     }
 

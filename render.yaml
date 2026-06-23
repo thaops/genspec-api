@@ -24,18 +24,6 @@ services:
         sync: false
       - key: JWT_EXPIRES_IN
         value: 30d
-      - key: OPENROUTER_API_KEY
-        sync: false
-      - key: OPENROUTER_MODEL
-        value: qwen/qwen3-next-80b-a3b-instruct:free
-      - key: OPENROUTER_MODEL_FALLBACK
-        value: google/gemma-4-31b-it:free
-      - key: OPENROUTER_MODEL_FALLBACK2
-        value: google/gemma-4-26b-a4b-it:free
-      - key: OPENROUTER_MODEL_FALLBACK3
-        value: openai/gpt-oss-120b:free
-      - key: OPENROUTER_WEB_SEARCH
-        value: 'false'
       # Gemini = MAIN engine (review + bóc tách) + web search grounding.
       - key: GEMINI_API_KEY
         sync: false
