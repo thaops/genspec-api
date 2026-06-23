@@ -109,7 +109,7 @@ export class AiService {
   private async *streamGemini(parts: GeminiPart[]): AsyncGenerator<string> {
     const body = JSON.stringify({
       contents: [{ role: 'user', parts }],
-      generationConfig: { temperature: 0.2 },
+      generationConfig: { temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } },
     });
     let lastErr: unknown;
     for (const model of this.geminiEstimateModels) {
@@ -184,13 +184,13 @@ export class AiService {
       return null;
     }
     for (const modelName of this.geminiEstimateModels) {
-      const model = this.gemini.getGenerativeModel({
-        model: modelName,
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
-      });
+      const model = this.gemini.getGenerativeModel({ model: modelName });
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const r = await model.generateContent(parts as unknown as never);
+          const r = await model.generateContent({
+            contents: [{ role: 'user', parts: parts as unknown as never }],
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } } as unknown as never,
+          });
           return r.response.text();
         } catch (err) {
           if (!this.isTransient(err)) {
