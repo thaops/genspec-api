@@ -36,9 +36,11 @@ services:
         value: openai/gpt-oss-120b:free
       - key: OPENROUTER_WEB_SEARCH
         value: 'false'
-      # Gemini — chỉ dùng cho web search grounding (free theo quota Gemini).
+      # Gemini = MAIN engine (review + bóc tách) + web search grounding.
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
       - key: GEMINI_SEARCH_MODEL
         value: gemini-2.5-flash
       - key: CLOUDINARY_CLOUD_NAME

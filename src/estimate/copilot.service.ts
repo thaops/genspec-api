@@ -5,7 +5,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import { compute } from './boq.engine';
 import { parseBenchmarkFromText, staticBenchmark } from './benchmark';
 import { EstimateService } from './estimate.service';
-import { Action, Benchmark, Confidence, EstimateState, TraceItem, ValidationReport } from './estimate.types';
+import { Action, Benchmark, Confidence, EstimateState, PriceSource, TraceItem, ValidationReport } from './estimate.types';
 import { applyActions } from './reducer';
 import { inferSourceType } from './source';
 import { buildTrace } from './trace';
@@ -40,6 +40,11 @@ export type StreamEvent =
 type ReviewFocus = 'completeness' | 'pricing';
 
 const PRICE_INTENT = /(giá|đơn giá|vật liệu|vật tư|định mức|dự toán|lập|bóc|khối lượng|báo giá|thị trường|cập nhật)/i;
+
+// Trust gate: iterate reviewer passes until the validation score reaches this, then
+// stop. Bounded by a round cap so free-tier models don't loop/burn tokens forever.
+const TRUST_TARGET = 75;
+const TRUST_MAX_ROUNDS = 4;
 
 @Injectable()
 export class CopilotService {
@@ -163,29 +168,51 @@ export class CopilotService {
     // LAYER 2 — Validate BOQ: dry-run the estimator's actions and score the state.
     let nextState = applyActions(state, reply.actions).state;
     let validation = validate(nextState, compute(nextState), benchmark);
+    let stalls = 0;
     yield { event: 'step', data: { text: `Kiểm tra BOQ & khối lượng — trust ${validation.score}` } };
 
-    // STAGED MULTI-AGENT PIPELINE: each stage is a focused reviewer pass, and the
-    // Validation Engine re-scores BETWEEN stages (Estimator → Validate → Reviewer →
-    // Validate → Cost Manager → Validate). A stage's fix is adopted only if trust rises.
-    const stages: { focus: ReviewFocus; label: string; layer: string }[] = [
-      { focus: 'completeness', label: 'Reviewer Agent', layer: 'thiếu sót & khối lượng' },
-      { focus: 'pricing', label: 'Cost Manager Agent', layer: 'đơn giá & benchmark' },
-    ];
-    for (const stage of stages) {
-      const optimal =
-        validation.score >= 90 && validation.findings.length === 0 && validation.consistency.length === 0;
-      if (optimal || reply.actions.length === 0) break;
-      yield { event: 'step', data: { text: `${stage.label}: rà soát ${stage.layer}` } };
-      const res = await this.reviewPass(state, reply, validation, benchmark, stage.focus);
+    // ITERATIVE TRUST LOOP: keep running focused reviewer passes (Validation Engine
+    // re-scores between each) until trust reaches TRUST_TARGET, or we hit the round cap,
+    // or two consecutive passes fail to improve (stall). Each round targets whatever the
+    // engine is failing on most (completeness vs pricing). A pass is adopted only if
+    // trust strictly rises — so the score is monotonic and never regresses.
+    for (let round = 1; round <= TRUST_MAX_ROUNDS; round++) {
+      const done =
+        validation.score >= TRUST_TARGET &&
+        !validation.consistency.some((c) => c.severity === 'error') &&
+        !validation.findings.some((f) => f.severity === 'error');
+      if (done || reply.actions.length === 0) break;
+
+      const focus = this.pickFocus(validation);
+      const layer = focus === 'completeness' ? 'thiếu sót & khối lượng' : 'đơn giá & benchmark';
+      yield { event: 'step', data: { text: `Gemini soi (tra web) ${layer} — vòng ${round}…` } };
+
+      const res = await this.reviewPass(state, reply, validation, benchmark, focus);
       if (res) {
-        yield { event: 'step', data: { text: `${stage.label}: đã hiệu chỉnh (trust ${validation.score} → ${res.validation.score})` } };
+        yield { event: 'step', data: { text: `Qwen sửa theo review — trust ${validation.score} → ${res.validation.score}` } };
         reply = res.reply;
         nextState = res.state;
         validation = res.validation;
+        stalls = 0;
+      } else if (++stalls >= 2) {
+        yield { event: 'step', data: { text: 'Không thể cải thiện thêm với dữ liệu hiện có' } };
+        break;
       } else {
-        yield { event: 'step', data: { text: `${stage.label}: không cần sửa thêm` } };
+        yield { event: 'step', data: { text: 'Chưa cải thiện, thử hướng khác…' } };
       }
+    }
+
+    if (validation.score < TRUST_TARGET) {
+      yield {
+        event: 'step',
+        data: { text: `Độ tin cậy ${validation.score}/${TRUST_TARGET} — bản nháp, cần bổ sung dữ liệu để chốt` },
+      };
+    }
+
+    // Attach grounded source links to priced actions (so the per-price popover and the
+    // saved DB record carry a real reference, not "chưa có link").
+    if (research.sources.length > 0) {
+      reply = { ...reply, actions: this.attachSourceLinks(reply.actions, research.sources) };
     }
 
     // LAYER 3 — Validate Cost + build the audit trail.
@@ -201,11 +228,19 @@ export class CopilotService {
           : 'Phát hiện số liệu có thể không thực tế';
     yield { event: 'step', data: { text: `Hoàn thành báo cáo — ${verdict}` } };
 
+    // Below the trust gate → flag the proposal as a draft so the user doesn't treat
+    // a 0–60% estimate as final. The engine already lists exactly what's weak.
+    const belowGate = validation.score < TRUST_TARGET;
+    const draftNote =
+      belowGate && reply.actions.length > 0
+        ? `⚠ Bản nháp (độ tin cậy ${validation.score}/100). Đã tối ưu tối đa với dữ liệu hiện có — xem các điểm cần xử lý ở bảng kiểm tra để nâng độ tin cậy.\n\n`
+        : '';
+
     yield {
       event: 'proposal',
       data: {
         thinking: reply.thinking,
-        message: reply.message || 'Đã chuẩn bị đề xuất.',
+        message: draftNote + (reply.message || 'Đã chuẩn bị đề xuất.'),
         confidence: reply.confidence,
         actions: reply.actions,
         sources: research.sources,
@@ -217,9 +252,11 @@ export class CopilotService {
   }
 
   /**
-   * One focused reviewer stage: a distinct persona re-audits the current proposal
-   * (using the engine's findings), and the result is re-validated. Returns the
-   * improved triple only when trust score strictly increases, else null.
+   * One focused reviewer stage — TWO models, distinct roles:
+   *  1) GEMINI reviews (web-grounded): reads Qwen's proposal + the engine's findings,
+   *     reaches the web to verify prices/định mức, and reports what's wrong or made-up.
+   *  2) QWEN fixes: regenerates a corrected, complete action set using Gemini's critique.
+   * Re-validated after; the fix is adopted only when the trust score strictly increases.
    */
   private async reviewPass(
     base: EstimateState,
@@ -229,15 +266,19 @@ export class CopilotService {
     focus: ReviewFocus,
   ): Promise<{ reply: CopilotReply; state: EstimateState; validation: ValidationReport } | null> {
     try {
-      const critiqued = this.parse(
-        await this.ai.generate([{ text: this.buildCritiquePrompt(base, reply, validation, benchmark, focus) }]),
+      // 1) Gemini reviewer — web-grounded critique (may be '' if Gemini unavailable).
+      const critique = await this.ai.reviewGemini(this.buildReviewPrompt(base, reply, validation, benchmark, focus));
+
+      // 2) Qwen fixes per Gemini's critique + the engine findings.
+      const fixed = this.parse(
+        await this.ai.generate([{ text: this.buildCritiquePrompt(base, reply, validation, benchmark, focus, critique) }]),
       );
-      if (critiqued.actions.length === 0) return null;
-      const fixedState = applyActions(base, critiqued.actions).state;
+      if (fixed.actions.length === 0) return null;
+      const fixedState = applyActions(base, fixed.actions).state;
       const fixedValidation = validate(fixedState, compute(fixedState), benchmark);
       if (fixedValidation.score <= validation.score) return null;
       return {
-        reply: { ...critiqued, thinking: [...reply.thinking, ...critiqued.thinking].slice(0, 8) },
+        reply: { ...fixed, thinking: [...reply.thinking, ...fixed.thinking].slice(0, 8) },
         state: fixedState,
         validation: fixedValidation,
       };
@@ -245,6 +286,112 @@ export class CopilotService {
       this.logger.warn(`review pass (${focus}) skipped: ${(err as Error).message}`);
       return null;
     }
+  }
+
+  /**
+   * Prompt for the GEMINI reviewer. Gemini reaches the web to fact-check Qwen's figures
+   * and reports problems as plain findings — it does NOT rewrite the estimate. Kept text
+   * (not JSON) so its web grounding works; Qwen consumes this critique to fix.
+   */
+  private buildReviewPrompt(
+    state: EstimateState,
+    reply: CopilotReply,
+    validation: ValidationReport,
+    benchmark: Benchmark | undefined,
+    focus: ReviewFocus,
+  ): string {
+    const loc = state.projectInfo.location ? ` tại ${state.projectInfo.location}` : ' tại Việt Nam';
+    const engineIssues = [
+      ...validation.consistency.map((c) => `- [${c.severity}] ${c.message}`),
+      ...validation.findings.map((f) => `- [${f.severity}] ${f.title}: ${f.detail}`),
+    ].join('\n');
+    const lens =
+      focus === 'completeness'
+        ? 'TẬP TRUNG: hạng mục THIẾU, sai KHỐI LƯỢNG/định mức, mã hiệu công tác sai.'
+        : 'TẬP TRUNG: ĐƠN GIÁ vật liệu/nhân công/ca máy có thực tế không, tổng mức so benchmark, nguồn giá.';
+    return [
+      `Bạn là QS REVIEWER độc lập. Một AI khác (Qwen) vừa lập dự toán${loc}. Nhiệm vụ của bạn: TRA WEB để kiểm chứng và CHỈ RA chỗ SAI / BỊA / THIẾU — KHÔNG viết lại dự toán.`,
+      lens,
+      'Hãy DÙNG Google Search kiểm chứng giá vật liệu (xi măng, thép, cát, đá, gạch…) & đơn giá nhân công hiện hành. Với mỗi số liệu Qwen đưa ra mà SAI hoặc bịa, nêu: hạng mục, giá Qwen ghi, GIÁ ĐÚNG theo nguồn (kèm tên nguồn), và mức lệch.',
+      '',
+      'Bộ phát hiện tự động của hệ thống (engine) đã cảnh báo:',
+      engineIssues || '- (engine chưa thấy lỗi cứng — vẫn hãy soi giá & độ đầy đủ)',
+      '',
+      'DỰ TOÁN QWEN ĐỀ XUẤT (actions JSON):',
+      JSON.stringify(reply.actions).slice(0, 7000),
+      benchmark ? `\nBenchmark tổng mức hợp lý: ${Math.round(benchmark.low).toLocaleString('vi-VN')}–${Math.round(benchmark.high).toLocaleString('vi-VN')} đ.` : '',
+      '',
+      'Trả về DANH SÁCH NGẮN GỌN (gạch đầu dòng) các vấn đề + đề xuất sửa cụ thể (giá đúng, hạng mục cần thêm). Không markdown thừa, không JSON.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  /**
+   * Backfill `source.url` on priced actions from the grounded research sources, so the
+   * per-price popover links to a real reference instead of "chưa có link". The price
+   * model only receives research TEXT (not the URLs), so it can't cite links itself —
+   * we attach them here: prefer a source whose host appears in the price's source name,
+   * else the top grounded source of the SAME type. `ai_estimate` prices are left
+   * link-less on purpose (they are the model's own guess, not a cited figure).
+   */
+  private attachSourceLinks(actions: Action[], researchSources: { title?: string; uri?: string }[]): Action[] {
+    const refs = researchSources
+      .filter((s) => !!s.uri)
+      .map((s) => {
+        // Gemini grounding URIs are vertexaisearch redirects; the real host is in `title`.
+        const titleHost = /([a-z0-9-]+\.)+[a-z]{2,}/i.exec(s.title ?? '')?.[0]?.toLowerCase();
+        return {
+          host: titleHost ?? this.hostOf(s.uri!),
+          uri: s.uri!,
+          type: inferSourceType({ url: s.uri, name: s.title }),
+        };
+      });
+    if (refs.length === 0) return actions;
+
+    const linkFor = (src: PriceSource): string | undefined => {
+      if (src.type === 'ai_estimate') return undefined;
+      const hay = `${src.name ?? ''} ${src.url ?? ''}`.toLowerCase();
+      const byHost = refs.find((r) => r.host && hay.includes(r.host));
+      if (byHost) return byHost.uri;
+      const sameType = refs.filter((r) => r.type && r.type === src.type);
+      return (sameType[0] ?? refs[0]).uri;
+    };
+
+    return actions.map((a) => {
+      if ('source' in a && a.source && !a.source.url) {
+        const url = linkFor(a.source);
+        if (url) return { ...a, source: { ...a.source, url } } as Action;
+      }
+      return a;
+    });
+  }
+
+  private hostOf(url: string): string {
+    try {
+      return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Pick the reviewer focus that targets whatever the engine is failing on most.
+   * Completeness owns structural/quantity gaps (orphan analyses, missing groups);
+   * pricing owns unit-price/benchmark/source problems. Ties → completeness first
+   * (a missing item distorts pricing review anyway).
+   */
+  private pickFocus(validation: ValidationReport): ReviewFocus {
+    const w = (sev: 'error' | 'warn' | 'info') => (sev === 'error' ? 3 : sev === 'warn' ? 1 : 0);
+    let completeness = 0;
+    let pricing = 0;
+    for (const c of validation.consistency) completeness += w(c.severity); // orphan/empty/ref/sum
+    for (const f of validation.findings) {
+      if (f.area === 'missing' || f.area === 'quantity') completeness += w(f.severity);
+      else if (f.area === 'unitPrice' || f.area === 'benchmark' || f.area === 'source' || f.area === 'total')
+        pricing += w(f.severity);
+    }
+    return pricing > completeness ? 'pricing' : 'completeness';
   }
 
   private researchQuery(state: EstimateState, message: string): string {
@@ -261,9 +408,12 @@ export class CopilotService {
   }
 
   private buildPrompt(state: EstimateState, message: string, fileCount: number, excelText: string, research: string, streaming = false): string {
+    // Feed the catalog WITH its reference unit prices (VL/NC/Máy) so the model anchors
+    // to real figures instead of inventing them. đg = đơn giá tham khảo / đơn vị.
+    const k = (n: number) => (n > 0 ? Math.round(n).toLocaleString('vi-VN') : '—');
     const catalogCodes = this.catalog
       .all()
-      .map((c) => `${c.code} | ${c.name} | ${c.unit}`)
+      .map((c) => `${c.code} | ${c.name} | ${c.unit} | đg VL ${k(c.material)} · NC ${k(c.labor)} · Máy ${k(c.machine)}`)
       .join('\n');
 
     const stateSummary = {
@@ -297,6 +447,8 @@ export class CopilotService {
       '- {"type":"clear"}',
       '',
       'QUY TRÌNH tạo dự toán đầy đủ: (1) set_project_info (kèm normVersion, priceVersion), (2) upsert đủ materials/labor/equipment với GIÁ THỰC TẾ, (3) upsert_analysis cho từng mã công tác (components định mức trỏ ref tới tài nguyên), (4) upsert_takeoff các công tác, (5) set_markups.',
+      'ĐẦY ĐỦ (BẮT BUỘC, đừng bỏ sót): một công trình dân dụng phải phủ các phần — ĐÀO/ĐẮP đất, BÊ TÔNG LÓT, MÓNG (bê tông + cốt thép + ván khuôn), GIẰNG/ĐÀI nếu có, KHUNG THÂN (cột, dầm, sàn — mỗi cái đủ bê tông + cốt thép + ván khuôn), XÂY tường, TRÁT trong/ngoài, MÁI, HOÀN THIỆN (láng/lát/ốp, sơn, trần), CỬA, ĐIỆN, NƯỚC (MEP cơ bản). Mỗi cấu kiện bê tông cốt thép PHẢI có ĐỦ 3 công tác: đổ bê tông + gia công lắp dựng cốt thép + ván khuôn. Thiếu phần nào ghi rõ trong "missing" của confidence.',
+      'Mỗi analysis bê tông phải có components đủ: xi măng + cát + đá + nước (vật liệu) + nhân công + máy trộn/đầm. Cốt thép: thép + dây buộc + nhân công + máy cắt/uốn. Đừng để analysis rỗng → đơn giá 0.',
       'BÓC TÁCH DỄ ĐỌC (rất quan trọng): ƯU TIÊN tách mỗi cấu kiện thành MỘT dòng takeoff đơn giản, có "note" diễn giải rõ (vd "Sàn tầng 2", "Dầm biên trục A", "Cột C1 ×4"). Điền dài/rộng/cao/count để truy vết. KHÔNG gộp thành một công thức khổng lồ khó hiểu; công thức nên ngắn (vd "5×20×0.12"). Mỗi dòng phải TỰ HIỂU ĐƯỢC sau vài tháng.',
       'Mã hiệu công tác nên theo chuẩn (tham khảo danh mục dưới). Định mức (norm) lấy theo định mức hiện hành; giá lấy theo dữ liệu web bên dưới nếu có. MỌI giá VL/NC/Máy PHẢI có "source" truy vết — không để giá "magic number".',
       'source.date = NGÀY/QUÝ phát hành THỰC của nguồn (vd "Q2/2025", "15/03/2025"); source.url = link dẫn chứng thật nếu có.',
@@ -306,7 +458,7 @@ export class CopilotService {
       research ? 'DỮ LIỆU WEB (giá/định mức mới — hãy dùng để điền giá vật liệu & ghi source, đặt priceVersion phù hợp):' : '',
       research ? research.slice(0, 4000) : '',
       '',
-      'Danh mục mã hiệu công tác tham khảo (code | tên | đơn vị):',
+      'Danh mục mã hiệu công tác + ĐƠN GIÁ THAM KHẢO (code | tên | đv | đg VL · NC · Máy). DÙNG các đơn giá này làm MỐC khi lập analyses/giá tài nguyên — chỉ lệch khi có dữ liệu web mới hơn, đừng chế giá lệch xa mốc:',
       catalogCodes,
       '',
       'STATE hiện tại (JSON):',
@@ -345,6 +497,7 @@ export class CopilotService {
     validation: ValidationReport,
     benchmark?: { low: number; high: number; basis?: string },
     focus: ReviewFocus = 'completeness',
+    geminiReview = '',
   ): string {
     // Each stage emphasises a different class of findings — a genuinely different reviewer.
     const relevant =
@@ -361,6 +514,9 @@ export class CopilotService {
         : 'Bạn là COST MANAGER độc lập (KHÔNG phải người đã lập). Nhiệm vụ: soát ĐƠN GIÁ vật liệu/nhân công/ca máy và TỔNG MỨC so với benchmark thị trường; thay giá từ nguồn cấp thấp bằng nguồn chính thống; đảm bảo mọi giá có source.type hợp lệ.';
     return [
       `${persona} Hãy PHẢN BIỆN gay gắt đề xuất dưới đây rồi SỬA LẠI cho đúng trước khi trả người dùng.`,
+      geminiReview
+        ? `REVIEWER (Gemini — đã TRA WEB kiểm chứng) chỉ ra các vấn đề sau. BẮT BUỘC sửa theo, dùng đúng GIÁ ĐÚNG mà reviewer nêu (ghi source.type "government"/"supplier" + giá đó):\n${geminiReview.slice(0, 3500)}\n`
+        : '',
       'Validation Engine đã phát hiện các vấn đề sau (BẮT BUỘC xử lý từng mục liên quan vai của bạn):',
       issues || '- (không có — chỉ tinh chỉnh nếu cần)',
       benchmark ? `Khoảng benchmark tổng mức hợp lý: ${Math.round(benchmark.low).toLocaleString('vi-VN')} – ${Math.round(benchmark.high).toLocaleString('vi-VN')} đ${benchmark.basis ? ` (${benchmark.basis})` : ''}. Nếu tổng lệch lớn, rà lại khối lượng & đơn giá cho hợp lý, đừng bịa.` : '',
