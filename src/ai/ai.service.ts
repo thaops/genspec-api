@@ -153,8 +153,13 @@ export class AiService {
               continue;
             }
             try {
-              const obj = JSON.parse(json) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-              const tx = (obj.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+              const obj = JSON.parse(json) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
+              // Filter out Gemini 2.5 thinking (thought) parts — they appear before output text
+              // and contain reasoning with JSON-like content that breaks the stream parser.
+              const tx = (obj.candidates?.[0]?.content?.parts ?? [])
+                .filter((p) => !p.thought)
+                .map((p) => p.text ?? '')
+                .join('');
               if (tx) {
                 yield tx;
               }

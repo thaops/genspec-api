@@ -114,6 +114,7 @@ export class CopilotService {
 
     // Read the STEP+JSON stream; emit STEP lines live, accumulate the JSON tail.
     let buf = '';
+    let fullText = ''; // full accumulated stream text for fallback extraction
     let jsonStarted = false;
     let jsonBuf = '';
     let streamErr = false;
@@ -121,12 +122,12 @@ export class CopilotService {
       for await (const chunk of this.ai.stream(streamParts)) {
         if (!jsonStarted) {
           const ji = chunk.search(/JSON:/i);
-          const braceIdx = chunk.indexOf('{');
-          const cutIdx = ji >= 0 ? ji : (braceIdx >= 0 ? braceIdx : -1);
+          const cutIdx = ji >= 0 ? ji : -1;
           const visible = (cutIdx >= 0 ? chunk.slice(0, cutIdx) : chunk).replace(/\bSTEP:\s*/gi, '');
           if (visible.trim()) yield { event: 'token', data: { text: visible } };
         }
         buf += chunk;
+        fullText += chunk;
         let idx: number;
         while ((idx = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, idx);
@@ -138,19 +139,27 @@ export class CopilotService {
           const m = line.match(/^\s*STEP:\s*(.+)/i);
           if (m) {
             yield { event: 'step', data: { text: m[1].trim() } };
-          } else if (/^\s*(\*|#)*JSON/i.test(line) || /^\s*\{/.test(line)) {
+          } else if (/^\s*(\*|#)*JSON\s*:/i.test(line)) {
+            // Only trigger on explicit "JSON:" marker, never on bare "{".
+            // Bare "{" in STEP text or Gemini thinking would cause premature JSON collection.
             jsonStarted = true;
-            jsonBuf += line.replace(/^\s*(\*|#)*JSON\s*(:\s*)*/i, '') + '\n';
+            jsonBuf += line.replace(/^\s*(\*|#)*JSON\s*:\s*/i, '') + '\n';
           }
         }
       }
       jsonBuf += buf;
+      // Fallback: model skipped "JSON:" and emitted bare JSON — scan the full text with
+      // bracket counting to find the outermost JSON object reliably.
+      if (!jsonBuf.trim()) {
+        jsonBuf = this.extractOutermostJson(fullText);
+      }
     } catch (err) {
       this.logger.warn(`stream failed, falling back: ${(err as Error).message}`);
       streamErr = true;
     }
 
     let reply = this.parse(jsonBuf);
+    this.logger.log(`Stream parse: ${reply.actions.length} actions, jsonBuf len=${jsonBuf.length}`);
     if (streamErr || reply.actions.length === 0) {
       // Fallback: non-streaming JSON generate (with retry) so we still produce a proposal.
       yield { event: 'step', data: { text: 'Tổng hợp kết quả…' } };
@@ -159,7 +168,9 @@ export class CopilotService {
           ...visualParts,
           { text: this.buildPrompt(state, message, visualFiles.length, excelText, research.text, false) },
         ];
-        reply = this.parse(await this.ai.generate(fbParts));
+        const raw = await this.ai.generate(fbParts);
+        reply = this.parse(raw);
+        this.logger.log(`Fallback parse: ${reply.actions.length} actions`);
       } catch (err) {
         yield { event: 'error', data: { message: `Lỗi AI: ${(err as Error).message}` } };
         return;
@@ -538,12 +549,32 @@ export class CopilotService {
       .join('\n');
   }
 
+  /** Find the outermost complete JSON object in a string using bracket counting. */
+  private extractOutermostJson(text: string): string {
+    const start = text.indexOf('{');
+    if (start < 0) return '';
+    let depth = 0;
+    let inStr = false;
+    let escape = false;
+    for (let i = start; i < text.length; i++) {
+      const c = text[i];
+      if (escape) { escape = false; continue; }
+      if (c === '\\' && inStr) { escape = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === '{') depth++;
+      else if (c === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
+    }
+    return text.slice(start); // truncated — return what we have
+  }
+
   private parse(raw: string): CopilotReply {
     try {
       const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
-      const start = cleaned.indexOf('{');
-      const end = cleaned.lastIndexOf('}');
-      const obj = JSON.parse(cleaned.slice(start, end + 1)) as Partial<CopilotReply>;
+      // Use bracket-counting to find the outermost JSON object instead of indexOf/lastIndexOf,
+      // which can produce invalid JSON when the text contains multiple objects.
+      const extracted = this.extractOutermostJson(cleaned);
+      const obj = JSON.parse(extracted) as Partial<CopilotReply>;
       return {
         thinking: Array.isArray(obj.thinking) ? obj.thinking.filter((t) => typeof t === 'string') : [],
         message: typeof obj.message === 'string' ? obj.message : '',
