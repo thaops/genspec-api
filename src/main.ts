@@ -11,8 +11,19 @@ process.on('unhandledRejection', (reason) => {
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:3000')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: (process.env.FRONTEND_URL ?? 'http://localhost:3000').split(','),
+    origin: (origin, cb) => {
+      // Allow non-browser/SSR (no Origin), any localhost/127.0.0.1 port (dev),
+      // and the configured FRONTEND_URL origins (prod). Reflects the request origin.
+      if (!origin) return cb(null, true);
+      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(null, false);
+    },
     credentials: true,
   });
 

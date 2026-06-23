@@ -18,7 +18,9 @@ If you deploy via the dashboard (not the included `render.yaml`):
   - `MONGODB_URI`, `JWT_SECRET`, `JWT_EXPIRES_IN=30d`
   - `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-2.5-flash`
   - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
-  - `FRONTEND_URL` (your deployed web URL, for CORS)
+  - `FRONTEND_URL` = comma-separated allowed web origins, for CORS.
+    e.g. `https://gen-spec-web.vercel.app,http://localhost:3000`
+    (After redeploy, the API also auto-allows any localhost/127.0.0.1 port for dev.)
   - Do NOT set `PORT` — Render injects it; `main.ts` reads `process.env.PORT`.
 
 `render.yaml` (Blueprint) in this folder encodes all of the above; secrets are `sync:false`
