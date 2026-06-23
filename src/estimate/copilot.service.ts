@@ -119,10 +119,11 @@ export class CopilotService {
     let streamErr = false;
     try {
       for await (const chunk of this.ai.stream(streamParts)) {
-        // Emit raw reasoning text live (continuous typing), excluding the JSON tail.
         if (!jsonStarted) {
           const ji = chunk.search(/JSON:/i);
-          const visible = (ji >= 0 ? chunk.slice(0, ji) : chunk).replace(/\bSTEP:\s*/gi, '');
+          const braceIdx = chunk.indexOf('{');
+          const cutIdx = ji >= 0 ? ji : (braceIdx >= 0 ? braceIdx : -1);
+          const visible = (cutIdx >= 0 ? chunk.slice(0, cutIdx) : chunk).replace(/\bSTEP:\s*/gi, '');
           if (visible.trim()) yield { event: 'token', data: { text: visible } };
         }
         buf += chunk;
@@ -137,9 +138,9 @@ export class CopilotService {
           const m = line.match(/^\s*STEP:\s*(.+)/i);
           if (m) {
             yield { event: 'step', data: { text: m[1].trim() } };
-          } else if (/^\s*JSON:/i.test(line)) {
+          } else if (/^\s*(\*|#)*JSON/i.test(line) || /^\s*\{/.test(line)) {
             jsonStarted = true;
-            jsonBuf += line.replace(/^\s*JSON:\s*/i, '');
+            jsonBuf += line.replace(/^\s*(\*|#)*JSON\s*(:\s*)*/i, '') + '\n';
           }
         }
       }
