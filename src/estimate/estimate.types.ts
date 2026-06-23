@@ -14,12 +14,22 @@ export interface ProjectInfo {
   note?: string;
 }
 
+// Kind of price source — drives reliability deterministically (Source Ranking Engine).
+export type SourceType =
+  | 'government' // thông báo giá Sở/Bộ Xây dựng, định mức nhà nước
+  | 'supplier' // báo giá nhà cung cấp/đại lý
+  | 'market' // khảo sát thị trường, sàn TMĐT
+  | 'forum' // diễn đàn, hỏi đáp
+  | 'ai_estimate' // AI tự suy luận, không nguồn
+  | 'manual'; // người dùng nhập tay
+
 // Traceable price provenance (data transparency)
 export interface PriceSource {
   name?: string; // tên nguồn, e.g. "Steel Online", "Thông báo giá Bình Dương"
   date?: string; // ngày cập nhật, e.g. "Q2/2026" hoặc "22/06/2026"
   region?: string; // khu vực
-  confidence?: number; // độ tin cậy 0–100
+  type?: SourceType; // loại nguồn — backend chấm reliability theo loại
+  confidence?: number; // độ tin cậy 0–100 (DERIVED từ type, không để AI tự bịa)
   url?: string; // link nguồn
 }
 
@@ -210,6 +220,110 @@ export interface Confidence {
   labor?: number;
   equipment?: number;
   overall?: number;
+  reasons?: string[]; // căn cứ cho điểm tin cậy (vd "Diện tích sàn đầy đủ")
+  missing?: string[]; // dữ liệu còn thiếu (vd "Bản vẽ kết cấu")
+  uncertaintyPct?: number; // sai số ước lượng ±%
+}
+
+// ===== Trace engine (auditable derivation per BOQ item) =====
+
+/** One take-off line feeding a BOQ quantity (with its dimensions & formula). */
+export interface QuantityTraceLine {
+  takeoffId: string;
+  note?: string;
+  group?: string;
+  formula?: string;
+  dims?: { length?: number; width?: number; height?: number; count?: number };
+  quantity: number;
+}
+
+/** One định mức component of a unit price, fully resolved to its source. */
+export interface UnitPriceComponentTrace {
+  kind: ResourceKind;
+  ref: string;
+  name: string;
+  unit?: string;
+  norm: number; // định mức
+  price: number; // đơn giá tài nguyên
+  amount: number; // norm × price
+  source?: PriceSource;
+}
+
+/** Full audit trail for a BOQ line: Source → Assumption → Formula → Quantity → Unit price → Cost. */
+export interface TraceItem {
+  code: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  material: number;
+  labor: number;
+  machine: number;
+  total: number;
+  assumptions: string[]; // diễn giải từ note bóc tách
+  quantityTrace: QuantityTraceLine[];
+  components: UnitPriceComponentTrace[];
+}
+
+// ===== Validation & consistency (AI self-check) =====
+
+/** Market benchmark to sanity-check the estimate total (AI-provided or static table). */
+export interface Benchmark {
+  metric: 'total' | 'perM2';
+  low: number;
+  high: number;
+  mid?: number;
+  source?: { name?: string; url?: string; date?: string };
+  basis?: string; // diễn giải cách suy ra (vd "Suất đầu tư nhà phố 6–8 tr/m²")
+}
+
+export type ValidationStatus = 'reasonable' | 'warning' | 'unrealistic';
+
+export type ValidationArea =
+  | 'quantity'
+  | 'unitPrice'
+  | 'total'
+  | 'missing'
+  | 'benchmark'
+  | 'source';
+
+/** One sanity/benchmark finding from the validation engine. */
+export interface ValidationFinding {
+  id: string;
+  severity: 'info' | 'warn' | 'error';
+  area: ValidationArea;
+  title: string;
+  detail: string;
+  refCode?: string;
+  expected?: string;
+  actual?: string;
+  deviationPct?: number;
+}
+
+export type ConsistencyKind =
+  | 'orphan_takeoff' // công tác có KL nhưng thiếu phân tích đơn giá
+  | 'unresolved_ref' // component trỏ tới tài nguyên không tồn tại
+  | 'empty_analysis' // phân tích đơn giá rỗng / đơn giá = 0
+  | 'zero_price' // tài nguyên đang dùng nhưng giá ≤ 0
+  | 'sum_mismatch'; // tổng mức không khớp tái dựng A→F
+
+/** One cross-sheet consistency issue. */
+export interface ConsistencyIssue {
+  id: string;
+  severity: 'warn' | 'error';
+  kind: ConsistencyKind;
+  message: string;
+  refCode?: string;
+}
+
+/** Full self-check report — computed live in the DTO and embedded in proposals. */
+export interface ValidationReport {
+  status: ValidationStatus;
+  score: number; // 0-100 mức độ "đáng tin"
+  benchmark?: Benchmark;
+  deviationPct?: number; // lệch của total so với benchmark mid
+  findings: ValidationFinding[];
+  consistency: ConsistencyIssue[];
 }
 
 /** Effect of applying a batch of actions (dry-run, for the change preview). */

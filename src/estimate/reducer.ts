@@ -1,5 +1,6 @@
 import { v4 as uuid } from 'uuid';
 import { Action, EstimateState } from './estimate.types';
+import { rankSource } from './source';
 
 export interface ApplyResult {
   state: EstimateState;
@@ -63,7 +64,7 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
         materials: upsert(
           state.materials,
           (m) => (a.id ? m.id === a.id : m.code.toLowerCase() === a.code.toLowerCase()),
-          (ex) => ({ id: ex?.id ?? a.id ?? uuid(), code: a.code, name: a.name, unit: a.unit, price: num(a.price), source: a.source ?? ex?.source }),
+          (ex) => ({ id: ex?.id ?? a.id ?? uuid(), code: a.code, name: a.name, unit: a.unit, price: num(a.price), source: rankSource(a.source ?? ex?.source) }),
         ),
       };
     case 'delete_material':
@@ -75,7 +76,7 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
         labor: upsert(
           state.labor,
           (l) => (a.id ? l.id === a.id : l.grade.toLowerCase() === a.grade.toLowerCase()),
-          (ex) => ({ id: ex?.id ?? a.id ?? uuid(), grade: a.grade, name: a.name, dayRate: num(a.dayRate), source: a.source ?? ex?.source }),
+          (ex) => ({ id: ex?.id ?? a.id ?? uuid(), grade: a.grade, name: a.name, dayRate: num(a.dayRate), source: rankSource(a.source ?? ex?.source) }),
         ),
       };
     case 'delete_labor':
@@ -87,7 +88,7 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
         equipment: upsert(
           state.equipment,
           (e) => (a.id ? e.id === a.id : e.code.toLowerCase() === a.code.toLowerCase()),
-          (ex) => ({ id: ex?.id ?? a.id ?? uuid(), code: a.code, name: a.name, unit: a.unit, shiftRate: num(a.shiftRate), source: a.source ?? ex?.source }),
+          (ex) => ({ id: ex?.id ?? a.id ?? uuid(), code: a.code, name: a.name, unit: a.unit, shiftRate: num(a.shiftRate), source: rankSource(a.source ?? ex?.source) }),
         ),
       };
     case 'delete_equipment':

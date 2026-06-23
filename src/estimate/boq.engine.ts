@@ -14,7 +14,7 @@ function num(v: unknown): number {
 }
 
 /** Resolve the unit price of a resource referenced by an analysis component. */
-function resourcePrice(state: EstimateState, kind: ResourceKind, ref: string): { price: number; name: string; unit: string } {
+export function resourcePrice(state: EstimateState, kind: ResourceKind, ref: string): { price: number; name: string; unit: string } {
   const key = (ref ?? '').toLowerCase();
   if (kind === 'material') {
     const m = state.materials.find((r) => r.code.toLowerCase() === key || r.name.toLowerCase() === key);

@@ -2,10 +2,13 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { compute } from './boq.engine';
+import { staticBenchmark } from './benchmark';
 import { Estimate, EstimateDocument } from './estimate.schema';
 import { Action, DEFAULT_MARKUPS, EstimateState } from './estimate.types';
 import { applyActions } from './reducer';
 import { buildActivity, previewActions } from './transparency';
+import { buildTrace } from './trace';
+import { validate } from './validation';
 
 function stateOf(doc: EstimateDocument): EstimateState {
   return {
@@ -23,12 +26,15 @@ export function toEstimateDto(doc: EstimateDocument) {
   const ts = doc as unknown as { createdAt?: Date; updatedAt?: Date };
   const state = stateOf(doc);
   const computed = compute(state);
+  const validation = validate(state, computed, staticBenchmark(state.projectInfo));
   return {
     id: doc._id.toString(),
     userId: doc.userId,
     name: doc.name,
     ...state,
     ...computed, // boq, materialSummary, costSummary, costs
+    validation, // self-check: status, score, benchmark, findings, consistency
+    trace: buildTrace(state, computed), // auditable derivation per BOQ line
     activityLog: (doc.activityLog ?? []).slice(-100),
     createdAt: ts.createdAt,
     updatedAt: ts.updatedAt,
