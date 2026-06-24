@@ -86,7 +86,7 @@ export class EstimateController {
     });
     res.flushHeaders?.();
     try {
-      for await (const ev of this.copilot.streamChat(userId, id, dto.message ?? '', files ?? [])) {
+      for await (const ev of this.copilot.streamChat(userId, id, dto.message ?? '', files ?? [], dto.activeSheetId, dto.selectedRange)) {
         res.write(`event: ${ev.event}\ndata: ${JSON.stringify(ev.data)}\n\n`);
       }
     } catch (err) {
@@ -94,6 +94,15 @@ export class EstimateController {
     } finally {
       res.end();
     }
+  }
+
+  @Post('estimates/:id/rollback')
+  rollback(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Body('patchId') patchId: string,
+  ) {
+    return this.estimates.rollback(userId, id, patchId);
   }
 
   @Get('estimates/:id/export-f1')

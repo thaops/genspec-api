@@ -37,6 +37,7 @@ function clone(s: EstimateState): EstimateState {
     labor: [...s.labor],
     equipment: [...s.equipment],
     markups: { ...s.markups },
+    sheets: s.sheets ? [...s.sheets] : [],
   };
 }
 
@@ -150,6 +151,43 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
     case 'delete_takeoff':
       return { ...state, takeoff: state.takeoff.filter((t) => t.id !== a.id) };
 
+    case 'set_sheets':
+      return { ...state, sheets: a.sheets };
+
+    case 'update_cells': {
+      if (!state.sheets) return state;
+      const nextSheets = state.sheets.map((s) => {
+        if (s.id !== a.sheetId) return s;
+        const cellData = { ...s.data?.cellData };
+        const { row, col } = parseExcelCell(a.cell);
+        const rKey = String(row);
+        const cKey = String(col);
+        const rowData = { ...cellData[rKey] };
+        rowData[cKey] = { ...rowData[cKey], v: isFinite(Number(a.newValue)) ? Number(a.newValue) : a.newValue };
+        cellData[rKey] = rowData;
+        return {
+          ...s,
+          data: {
+            ...s.data,
+            cellData,
+          },
+        };
+      });
+
+      let nextMaterials = [...state.materials];
+      if (a.entityId && a.entityId.startsWith('mat_')) {
+        nextMaterials = state.materials.map((m) =>
+          m.id === a.entityId ? { ...m, price: Number(a.newValue) || 0 } : m
+        );
+      }
+
+      return {
+        ...state,
+        sheets: nextSheets,
+        materials: nextMaterials,
+      };
+    }
+
     case 'clear':
       return {
         projectInfo: state.projectInfo,
@@ -179,4 +217,18 @@ function numericPatch(patch: Record<string, unknown>): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(patch ?? {})) if (v != null) out[k] = num(v);
   return out;
+}
+
+export function parseExcelCell(cell: string): { row: number; col: number } {
+  const match = cell.match(/^([A-Z]+)([0-9]+)$/i);
+  if (!match) return { row: 0, col: 0 };
+  const colStr = match[1].toUpperCase();
+  const rowStr = match[2];
+  let col = 0;
+  for (let i = 0; i < colStr.length; i++) {
+    col = col * 26 + (colStr.charCodeAt(i) - 65 + 1);
+  }
+  col = col - 1;
+  const row = Number(rowStr) - 1;
+  return { row, col };
 }

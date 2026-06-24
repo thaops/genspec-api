@@ -20,4 +20,21 @@ export class CopilotDto {
   @IsOptional()
   @IsString()
   message?: string;
+
+  @IsOptional()
+  @IsString()
+  activeSheetId?: string;
+
+  @IsOptional()
+  selectedRange?: {
+    startRow: number;
+    startCol: number;
+    endRow: number;
+    endCol: number;
+  };
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  visibleSheets?: string[];
 }

@@ -11,6 +11,8 @@ import { inferSourceType } from './source';
 import { buildTrace } from './trace';
 import { previewActions } from './transparency';
 import { validate } from './validation';
+import { ContextBuilderService } from './context-builder.service';
+import { getMaterialsFromWorkbook, findDuplicateRowsInSheet, detectOutlierPrices } from './workbook.tools';
 
 interface CopilotReply {
   thinking: string[];
@@ -33,6 +35,7 @@ export type StreamEvent =
         preview: ReturnType<typeof previewActions>;
         validation: ValidationReport;
         trace: TraceItem[];
+        findings?: any[];
       };
     }
   | { event: 'error'; data: { message: string } };
@@ -41,8 +44,6 @@ type ReviewFocus = 'completeness' | 'pricing';
 
 const PRICE_INTENT = /(giá|đơn giá|vật liệu|vật tư|định mức|dự toán|lập|bóc|khối lượng|báo giá|thị trường|cập nhật)/i;
 
-// Trust gate: iterate reviewer passes until the validation score reaches this, then
-// stop. Bounded by a round cap so free-tier models don't loop/burn tokens forever.
 const TRUST_TARGET = 75;
 const TRUST_MAX_ROUNDS = 4;
 
@@ -54,6 +55,7 @@ export class CopilotService {
     private readonly ai: AiService,
     private readonly catalog: CatalogService,
     private readonly estimates: EstimateService,
+    private readonly contextBuilder: ContextBuilderService,
   ) {}
 
   /**
@@ -66,6 +68,8 @@ export class CopilotService {
     id: string,
     message: string,
     files: Express.Multer.File[] = [],
+    activeSheetId?: string,
+    selectedRange?: { startRow: number; startCol: number; endRow: number; endCol: number },
   ): AsyncGenerator<StreamEvent> {
     if (!message?.trim() && files.length === 0) {
       yield { event: 'error', data: { message: 'Cần nhập yêu cầu hoặc đính kèm tệp.' } };
@@ -78,6 +82,150 @@ export class CopilotService {
 
     const doc = await this.estimates.getOwned(userId, id);
     const state = this.estimates.stateForPrompt(doc);
+
+    const compressed = this.contextBuilder.buildContext(doc as any, activeSheetId, selectedRange);
+
+    const EDIT_INTENT = /(cập nhật|sửa|thay đổi|thêm|xóa|đổi|tăng|giảm|set|update|delete|insert)/i;
+    const isEditMode = EDIT_INTENT.test(message);
+
+    if (!isEditMode) {
+      yield { event: 'step', data: { text: 'Phân tích tài liệu (Read Mode)...' } };
+      const readPrompt = [
+        'Bạn là trợ lý AI chuyên về dự toán xây dựng (QS AI Agent).',
+        'Nhiệm vụ của bạn là đọc hiểu cấu trúc Workbook dự toán và trả lời các thắc mắc của người dùng một cách chính xác, ngắn gọn.',
+        '',
+        'CẤU TRÚC WORKBOOK HIỆN TẠI (Index):',
+        compressed.workbookSummary,
+        compressed.activeSheetSummary ? `\nSHEET HIỆN HÀNH:\n${compressed.activeSheetSummary}` : '',
+        compressed.focusedData ? `\nDỮ LIỆU ĐANG ĐƯỢC CHỌN/LÂN CẬN (JSON):\n${compressed.focusedData}` : '',
+        '',
+        'Yêu cầu của người dùng:',
+        message,
+        '',
+        'Hãy trả lời trực tiếp câu hỏi của người dùng bằng tiếng Việt, giải thích rõ ràng số liệu nếu có trong dữ liệu trên. Chỉ trả về văn bản thông thường, không trả về JSON hay code.',
+      ].filter(Boolean).join('\n');
+
+      let replyText = '';
+      try {
+        for await (const chunk of this.ai.stream([{ text: readPrompt }])) {
+          replyText += chunk;
+          yield { event: 'token', data: { text: chunk } };
+        }
+      } catch (err) {
+        yield { event: 'error', data: { message: `Lỗi AI: ${(err as Error).message}` } };
+        return;
+      }
+
+      yield {
+        event: 'proposal',
+        data: {
+          thinking: ['Giải đáp câu hỏi của người dùng'],
+          message: replyText,
+          actions: [],
+          sources: [],
+          preview: previewActions(state, []),
+          validation: validate(state, compute(state), undefined),
+          trace: buildTrace(state, compute(state)),
+        },
+      };
+      return;
+    }
+
+    const REVIEW_INTENT = /(kiểm tra|soát lỗi|tìm lỗi|audit|review|quét lỗi|outlier|bất thường|trùng)/i;
+    const isReviewMode = REVIEW_INTENT.test(message);
+
+    if (isReviewMode) {
+      yield { event: 'step', data: { text: 'Chạy bộ quét lỗi tự động (Rule Audit)...' } };
+
+      const findings: any[] = [];
+      const sheetsList = doc.sheets ?? [];
+
+      sheetsList.forEach((s) => {
+        const dups = findDuplicateRowsInSheet(s);
+        dups.forEach((d) => {
+          findings.push({
+            sheetId: s.id,
+            row: Number(d.rowKey),
+            severity: 'error',
+            message: `Mã hiệu trùng lặp: ${d.code} (${d.name})`,
+          });
+        });
+      });
+
+      const materials = getMaterialsFromWorkbook(doc as any);
+      const outliers = detectOutlierPrices(materials);
+      outliers.forEach((o) => {
+        const map = doc.entityMaps?.find((m) => m.entityId === o.materialId);
+        if (map) {
+          const sheet = sheetsList.find((s) => s.id === map.sheetId);
+          if (sheet && sheet.data?.cellData) {
+            const rows = Object.keys(sheet.data.cellData);
+            for (const rKey of rows) {
+              const row = sheet.data.cellData[rKey];
+              const cellVal = String(row ? Object.values(row).map((c: any) => c?.v).join(' ') : '');
+              if (cellVal.includes(o.code)) {
+                findings.push({
+                  sheetId: map.sheetId,
+                  row: Number(rKey),
+                  severity: 'warn',
+                  message: `Giá bất thường: ${o.name} (${o.price.toLocaleString()} VND) - ${o.reason}`,
+                });
+                break;
+              }
+            }
+          }
+        }
+      });
+
+      yield { event: 'step', data: { text: `Phát hiện ${findings.length} điểm nghi vấn bằng Rule Engine` } };
+      yield { event: 'step', data: { text: 'AI đang soát xét lỗi logic nghiệp vụ chuyên sâu...' } };
+
+      const reviewPrompt = [
+        'Bạn là chuyên gia kiểm soát chất lượng dự toán (QS Review Agent).',
+        'Nhiệm vụ của bạn là kiểm tra, phát hiện lỗi định mức và đơn giá bất thường của bảng tính dự toán.',
+        '',
+        'CẤU TRÚC WORKBOOK (Index):',
+        compressed.workbookSummary,
+        compressed.activeSheetSummary ? `\nSHEET HIỆN HÀNH:\n${compressed.activeSheetSummary}` : '',
+        compressed.focusedData ? `\nDỮ LIỆU ĐANG ĐƯỢC CHỌN (JSON):\n${compressed.focusedData}` : '',
+        '',
+        'KẾT QUẢ QUÉT LỖI TỰ ĐỘNG BẰNG RULE ENGINE (Các lỗi cứng đã phát hiện):',
+        JSON.stringify(findings),
+        '',
+        'Yêu cầu của người dùng:',
+        message,
+        '',
+        'Hãy viết một báo cáo soát lỗi dự toán ngắn gọn bằng tiếng Việt. Chỉ ra các lỗi cứng đã phát hiện được ở trên và giải thích vì sao đó là lỗi. Đồng thời phân tích thêm xem có vấn đề gì khác trong các định mức bê tông, thép hay vật liệu khác không (ví dụ: thiếu cát đá xi măng cho bê tông, hao phí thép bất thường...).',
+        'Chỉ trả về văn bản báo cáo thông thường, không trả về mã JSON.',
+      ].filter(Boolean).join('\n');
+
+      let replyText = '';
+      try {
+        for await (const chunk of this.ai.stream([{ text: reviewPrompt }])) {
+          replyText += chunk;
+          yield { event: 'token', data: { text: chunk } };
+        }
+      } catch (err) {
+        yield { event: 'error', data: { message: `Lỗi AI: ${(err as Error).message}` } };
+        return;
+      }
+
+      yield {
+        event: 'proposal',
+        data: {
+          thinking: ['Hoàn thành báo cáo soát lỗi dự toán'],
+          message: replyText,
+          actions: [],
+          sources: [],
+          preview: previewActions(state, []),
+          validation: validate(state, compute(state), undefined),
+          trace: buildTrace(state, compute(state)),
+          findings,
+        },
+      };
+      return;
+    }
+
     const isEmpty = state.takeoff.length === 0 && state.materials.length === 0;
 
     yield { event: 'step', data: { text: 'Phân tích yêu cầu dự án' } };
@@ -87,14 +235,12 @@ export class CopilotService {
       yield { event: 'step', data: { text: 'Thu thập dữ liệu vật liệu & định mức (web)…' } };
       research = await this.ai.research(this.researchQuery(state, message));
       yield { event: 'step', data: { text: `Đã tham chiếu ${research.sources.length} nguồn giá` } };
-      // LAYER 1 — Validate Sources: rank the grounded sources by type before trusting them.
       const ranked = research.sources.map((s) => inferSourceType({ url: s.uri, name: s.title }));
       const official = ranked.filter((t) => t === 'government' || t === 'supplier').length;
       if (research.sources.length > 0) {
         yield { event: 'step', data: { text: `Thẩm định nguồn: ${official}/${research.sources.length} nguồn chính thống (Sở XD / nhà cung cấp)` } };
       }
     }
-    // Benchmark suất đầu tư (AI-provided range with static fallback).
     const benchmark = parseBenchmarkFromText(research.text, state.projectInfo) ?? staticBenchmark(state.projectInfo);
 
     const visualFiles = files.filter((f) => !this.isExcel(f.originalname));
@@ -436,6 +582,7 @@ export class CopilotService {
       equipment: state.equipment.map((e) => ({ id: e.id, code: e.code, name: e.name, shiftRate: e.shiftRate })),
       analyses: state.analyses.map((a) => ({ id: a.id, code: a.code, name: a.name, unit: a.unit, components: a.components })),
       takeoff: state.takeoff.map((t) => ({ id: t.id, group: t.group, code: t.code, name: t.name, unit: t.unit, quantity: t.quantity })),
+      entityMaps: state.entityMaps,
     };
 
     return [
@@ -455,9 +602,11 @@ export class CopilotService {
       '- {"type":"upsert_equipment","code","name","unit","shiftRate","source":{...}}',
       '- {"type":"upsert_analysis","code","name","unit","components":[{"kind":"material|labor|equipment","ref","norm","unit"?}]}',
       '- {"type":"upsert_takeoff","group","code","name","unit","length"?,"width"?,"height"?,"count"?,"formula"?,"note"?,"quantity"?}',
+      '- {"type":"update_cells","sheetId","cell","oldValue","newValue","entityId"?} (DÙNG ĐỂ cập nhật giá trị ô cụ thể trên bảng tính. cell là địa chỉ ô dạng Excel như D12, E15)',
       '- {"type":"delete_material|delete_labor|delete_equipment|delete_analysis|delete_takeoff","id"}',
       '- {"type":"clear"}',
       '',
+      'ĐẶC BIỆT KHI CẬP NHẬT Ô: Khi người dùng yêu cầu thay đổi giá trị (ví dụ: cập nhật giá thép, sửa đơn giá vật tư), bạn PHẢI tìm thực thể đó trong entityMaps để xác định sheetId và index dòng vật lý rowKey (ví dụ: entityId = "mat_sheet1_12" nghĩa là vật liệu đó nằm ở sheet "sheet1", dòng index 12 - tương ứng với dòng 13 của Excel vì Excel 1-indexed. Cột đơn giá là cột D -> ô D13). Chuyển cột cần sửa thành chữ cái (A=Cột 1, B=Cột 2, C=Cột 3, D=Cột 4...) ghép với số dòng Excel để tạo địa chỉ cell và trả về action update_cells.',
       'QUY TRÌNH tạo dự toán đầy đủ: (1) set_project_info (kèm normVersion, priceVersion), (2) upsert đủ materials/labor/equipment với GIÁ THỰC TẾ, (3) upsert_analysis cho từng mã công tác (components định mức trỏ ref tới tài nguyên), (4) upsert_takeoff các công tác, (5) set_markups.',
       'ĐẦY ĐỦ (BẮT BUỘC, đừng bỏ sót): một công trình dân dụng phải phủ các phần — ĐÀO/ĐẮP đất, BÊ TÔNG LÓT, MÓNG (bê tông + cốt thép + ván khuôn), GIẰNG/ĐÀI nếu có, KHUNG THÂN (cột, dầm, sàn — mỗi cái đủ bê tông + cốt thép + ván khuôn), XÂY tường, TRÁT trong/ngoài, MÁI, HOÀN THIỆN (láng/lát/ốp, sơn, trần), CỬA, ĐIỆN, NƯỚC (MEP cơ bản). Mỗi cấu kiện bê tông cốt thép PHẢI có ĐỦ 3 công tác: đổ bê tông + gia công lắp dựng cốt thép + ván khuôn. Thiếu phần nào ghi rõ trong "missing" của confidence.',
       'Mỗi analysis bê tông phải có components đủ: xi măng + cát + đá + nước (vật liệu) + nhân công + máy trộn/đầm. Cốt thép: thép + dây buộc + nhân công + máy cắt/uốn. Đừng để analysis rỗng → đơn giá 0.',

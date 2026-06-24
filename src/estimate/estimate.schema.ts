@@ -45,11 +45,20 @@ export class Estimate {
   @Prop({ type: Object, default: () => ({ ...DEFAULT_MARKUPS }) })
   markups: Markups;
 
+  @Prop({ type: [Object], default: [] })
+  sheets: any[];
+
+  @Prop({ type: [Object], default: [] })
+  entityMaps: any[];
+
   @Prop({ type: Object, default: { material: 0, labor: 0, machine: 0, total: 0 } })
   costs: Costs;
 
   @Prop({ type: [Object], default: [] })
   activityLog: ActivityEntry[];
+
+  @Prop({ type: [Object], default: [] })
+  patchHistory: any[];
 }
 
 export const EstimateSchema = SchemaFactory.createForClass(Estimate);

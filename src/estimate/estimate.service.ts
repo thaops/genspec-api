@@ -9,6 +9,7 @@ import { applyActions } from './reducer';
 import { buildActivity, previewActions } from './transparency';
 import { buildTrace } from './trace';
 import { validate } from './validation';
+import { generatePatch, applyRollback } from './patch-history';
 
 function stateOf(doc: EstimateDocument): EstimateState {
   return {
@@ -19,6 +20,9 @@ function stateOf(doc: EstimateDocument): EstimateState {
     labor: doc.labor ?? [],
     equipment: doc.equipment ?? [],
     markups: doc.markups ?? { ...DEFAULT_MARKUPS },
+    sheets: doc.sheets ?? [],
+    entityMaps: doc.entityMaps ?? [],
+    patchHistory: (doc as any).patchHistory ?? [],
   };
 }
 
@@ -36,6 +40,7 @@ export function toEstimateDto(doc: EstimateDocument) {
     validation, // self-check: status, score, benchmark, findings, consistency
     trace: buildTrace(state, computed), // auditable derivation per BOQ line
     activityLog: (doc.activityLog ?? []).slice(-100),
+    patchHistory: (state.patchHistory ?? []).slice(-100),
     createdAt: ts.createdAt,
     updatedAt: ts.updatedAt,
   };
@@ -105,6 +110,9 @@ export class EstimateService {
     doc.labor = state.labor;
     doc.equipment = state.equipment;
     doc.markups = state.markups;
+    doc.sheets = state.sheets;
+    doc.entityMaps = state.entityMaps;
+    (doc as any).patchHistory = state.patchHistory;
     doc.costs = computed.costs;
     await doc.save();
     return toEstimateDto(doc);
@@ -115,6 +123,8 @@ export class EstimateService {
     const doc = await this.getOwned(userId, id);
     const before = stateOf(doc);
     const { state, applied, warnings } = applyActions(before, actions);
+    const patch = generatePatch(before, actions, src);
+    state.patchHistory = [...(before.patchHistory ?? []), patch].slice(-100);
     const log = buildActivity(before, actions, new Date().toISOString(), src);
     doc.activityLog = [...(doc.activityLog ?? []), ...log].slice(-200);
     const estimate = await this.saveState(doc, state);
@@ -129,5 +139,28 @@ export class EstimateService {
 
   stateForPrompt(doc: EstimateDocument): EstimateState {
     return stateOf(doc);
+  }
+
+  async rollback(userId: string, id: string, patchId: string) {
+    const doc = await this.getOwned(userId, id);
+    const state = stateOf(doc);
+    const history = state.patchHistory ?? [];
+    const idx = history.findIndex((p) => p.id === patchId);
+    if (idx === -1) throw new NotFoundException('Patch not found in history');
+    const toRollback = history.slice(idx);
+    let nextState = state;
+    for (let i = toRollback.length - 1; i >= 0; i--) {
+      nextState = applyRollback(nextState, toRollback[i]);
+    }
+    nextState.patchHistory = history.slice(0, idx);
+    const rollbackLog = {
+      at: new Date().toISOString(),
+      source: 'manual' as const,
+      kind: 'rollback',
+      label: `Khôi phục về trạng thái trước thay đổi: "${toRollback[0].description}"`,
+      detail: `Đã đảo ngược ${toRollback.length} thay đổi`,
+    };
+    doc.activityLog = [...(doc.activityLog ?? []), rollbackLog].slice(-200);
+    return this.saveState(doc, nextState);
   }
 }

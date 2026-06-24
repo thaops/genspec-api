@@ -7,6 +7,7 @@ import { EstimateController } from './estimate.controller';
 import { Estimate, EstimateSchema } from './estimate.schema';
 import { EstimateService } from './estimate.service';
 import { ExportF1Service } from './export-f1.service';
+import { ContextBuilderService } from './context-builder.service';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { ExportF1Service } from './export-f1.service';
     CatalogModule,
   ],
   controllers: [EstimateController],
-  providers: [EstimateService, CopilotService, ExportF1Service],
+  providers: [EstimateService, CopilotService, ExportF1Service, ContextBuilderService],
   exports: [EstimateService],
 })
 export class EstimateModule {}

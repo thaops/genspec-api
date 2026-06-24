@@ -106,6 +106,28 @@ export interface Markups {
   contingencyPct: number; // dự phòng (%)
 }
 
+export interface Sheet {
+  id: string;
+  name: string;
+  metadata?: Record<string, any>;
+  data: any;
+}
+
+export interface EntityMap {
+  entityId: string;
+  sheetId: string;
+  semanticPath: string;
+}
+
+export interface Workbook {
+  id: string;
+  userId: string;
+  name: string;
+  sheets: Sheet[];
+  entityMaps?: EntityMap[];
+  activityLog?: ActivityEntry[];
+}
+
 export interface EstimateState {
   projectInfo: ProjectInfo;
   takeoff: TakeoffItem[];
@@ -114,6 +136,9 @@ export interface EstimateState {
   labor: Labor[];
   equipment: Equipment[];
   markups: Markups;
+  sheets?: Sheet[];
+  entityMaps?: EntityMap[];
+  patchHistory?: Patch[];
 }
 
 export const DEFAULT_MARKUPS: Markups = {
@@ -158,6 +183,14 @@ export type Action =
       quantity?: number;
     }
   | { type: 'delete_takeoff'; id: string }
+  | {
+      type: 'update_cells';
+      sheetId: string;
+      cell: string;
+      oldValue: string;
+      newValue: string;
+      entityId?: string;
+    }
   | { type: 'clear' };
 
 // ===== Computed (DTO only) =====
@@ -212,6 +245,24 @@ export interface ActivityEntry {
   kind: string; // action type
   label: string; // human-readable, e.g. "Cập nhật giá thép"
   detail?: string; // e.g. "17.000 → 22.000"
+}
+
+export interface PatchChange {
+  op: 'update' | 'insert' | 'delete';
+  sheetId?: string;
+  cell?: string;
+  path?: string; // e.g. "materials", "takeoff", "projectInfo"
+  entityId?: string;
+  oldValue: any;
+  newValue: any;
+}
+
+export interface Patch {
+  id: string;
+  actor: 'ai' | 'manual';
+  timestamp: string;
+  description: string;
+  changes: PatchChange[];
 }
 
 export interface Confidence {

@@ -1,6 +1,6 @@
 import { compute } from './boq.engine';
 import { Action, ActivityEntry, EstimateState, ProposalPreview } from './estimate.types';
-import { applyActions } from './reducer';
+import { applyActions, parseExcelCell } from './reducer';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('vi-VN');
 
@@ -66,6 +66,18 @@ export function previewActions(before: EstimateState, actions: Action[]): Propos
       case 'delete_equipment': bump('ca máy', 'removed'); break;
       case 'delete_analysis': bump('phân tích đơn giá', 'removed'); break;
       case 'delete_takeoff': bump('công tác', 'removed'); break;
+      case 'update_cells': {
+        bump('ô dữ liệu', 'updated');
+        let ref = `${a.sheetId} -> ${a.cell}`;
+        const { row } = parseExcelCell(a.cell);
+        const derivedEntityId = a.entityId || `mat_${a.sheetId}_${row}`;
+        const mat = before.materials.find((m) => m.id === derivedEntityId);
+        if (mat) {
+          ref = `${mat.name} (${mat.code})`;
+        }
+        diffs.push({ ref, field: 'Giá trị', from: String(a.oldValue), to: String(a.newValue) });
+        break;
+      }
       default: break;
     }
   }
@@ -122,6 +134,16 @@ export function buildActivity(before: EstimateState, actions: Action[], at: stri
       case 'delete_equipment': label = 'Xóa ca máy'; break;
       case 'delete_analysis': label = 'Xóa phân tích đơn giá'; break;
       case 'delete_takeoff': label = 'Xóa công tác'; break;
+      case 'update_cells': {
+        const { row } = parseExcelCell(a.cell);
+        const derivedEntityId = a.entityId || `mat_${a.sheetId}_${row}`;
+        const mat = before.materials.find((m) => m.id === derivedEntityId);
+        label = mat
+          ? `Cập nhật đơn giá vật tư ${mat.name} (ô ${a.cell} trong sheet ${a.sheetId})`
+          : `Cập nhật ô ${a.cell} trong sheet ${a.sheetId}`;
+        detail = `${a.oldValue} → ${a.newValue}`;
+        break;
+      }
       case 'clear': label = 'Xóa toàn bộ dữ liệu'; break;
       default: break;
     }
