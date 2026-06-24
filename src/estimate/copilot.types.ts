@@ -1,0 +1,20 @@
+import { Action, Confidence, TraceItem, ValidationReport, ProposalPreview } from './estimate.types';
+
+export type StreamEvent =
+  | { event: 'token'; data: { text: string } }
+  | { event: 'step'; data: { text: string } }
+  | {
+      event: 'proposal';
+      data: {
+        thinking: string[];
+        message: string;
+        confidence?: Confidence;
+        actions: Action[];
+        sources: { title?: string; uri?: string }[];
+        preview: ProposalPreview;
+        validation: ValidationReport;
+        trace: TraceItem[];
+        findings?: any[];
+      };
+    }
+  | { event: 'error'; data: { message: string } };

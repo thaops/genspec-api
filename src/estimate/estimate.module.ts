@@ -8,6 +8,10 @@ import { Estimate, EstimateSchema } from './estimate.schema';
 import { EstimateService } from './estimate.service';
 import { ExportF1Service } from './export-f1.service';
 import { ContextBuilderService } from './context-builder.service';
+import { ReadModeHandler } from './modes/read.handler';
+import { ReviewModeHandler } from './modes/review.handler';
+import { EditModeHandler } from './modes/edit.handler';
+import { CitationEngineService } from './sources/citation-engine';
 
 @Module({
   imports: [
@@ -16,7 +20,16 @@ import { ContextBuilderService } from './context-builder.service';
     CatalogModule,
   ],
   controllers: [EstimateController],
-  providers: [EstimateService, CopilotService, ExportF1Service, ContextBuilderService],
+  providers: [
+    EstimateService,
+    CopilotService,
+    ExportF1Service,
+    ContextBuilderService,
+    ReadModeHandler,
+    ReviewModeHandler,
+    EditModeHandler,
+    CitationEngineService,
+  ],
   exports: [EstimateService],
 })
 export class EstimateModule {}

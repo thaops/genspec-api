@@ -1,12 +1,22 @@
 import { Injectable } from '@nestjs/common';
-import { Sheet, Workbook } from './estimate.types';
-import { detectSheetType } from './rule-detector';
+import { Workbook } from './estimate.types';
+import { getWorkbookSummary, getSheetSummary } from './tools/tool-registry';
 
-export interface CompressedContext {
-  workbookSummary: string;
-  activeSheetSummary: string;
-  focusedData: string;
+export interface CellRow {
+  rowKey: string;
+  cells: Record<string, string>;
 }
+
+export interface WorkbookContext {
+  workbookSummary: string;
+  activeSheetSummary?: string;
+  selectedRows?: CellRow[];
+  neighborRows?: CellRow[];
+  focusedData?: string;
+}
+
+// Kept for backward compatibility with any code that still imports CompressedContext
+export type CompressedContext = WorkbookContext;
 
 @Injectable()
 export class ContextBuilderService {
@@ -14,110 +24,58 @@ export class ContextBuilderService {
     workbook: Workbook,
     activeSheetId?: string,
     selectedRange?: { startRow: number; startCol: number; endRow: number; endCol: number },
-  ): CompressedContext {
-    const sheetsList = workbook.sheets ?? [];
+  ): WorkbookContext {
+    const summaryResult = getWorkbookSummary(workbook);
+    const workbookSummary = JSON.stringify(summaryResult.data);
 
-    const indexInfo = sheetsList.map((s) => {
-      const { sheetType } = detectSheetType(s);
-      const rowCount = s.data?.rowCount ?? 0;
-      const colCount = s.data?.columnCount ?? 0;
-      const headers = this.extractHeaders(s);
-      return {
-        id: s.id,
-        name: s.name,
-        type: sheetType,
-        rows: rowCount,
-        cols: colCount,
-        headers,
-      };
-    });
-
-    const workbookSummary = JSON.stringify({
-      workbookName: workbook.name,
-      sheets: indexInfo,
-    });
-
-    let activeSheetSummary = '';
-    let focusedData = '';
+    let activeSheetSummary: string | undefined;
+    let selectedRows: CellRow[] | undefined;
+    let neighborRows: CellRow[] | undefined;
+    let focusedData: string | undefined;
 
     if (activeSheetId) {
-      const activeSheet = sheetsList.find((s) => s.id === activeSheetId);
-      if (activeSheet) {
-        const { sheetType } = detectSheetType(activeSheet);
-        activeSheetSummary = JSON.stringify({
-          activeSheetId: activeSheet.id,
-          activeSheetName: activeSheet.name,
-          type: sheetType,
-        });
+      const sheetResult = getSheetSummary(workbook, activeSheetId);
+      if (sheetResult.ok) {
+        activeSheetSummary = JSON.stringify(sheetResult.data);
+      }
 
-        focusedData = this.extractFocusedCells(activeSheet, selectedRange);
+      if (selectedRange) {
+        const sheet = (workbook.sheets ?? []).find((s) => s.id === activeSheetId);
+        const cellData = sheet?.data?.cellData;
+        if (cellData) {
+          selectedRows = this.extractRows(cellData, selectedRange.startRow, selectedRange.endRow, selectedRange.startCol, selectedRange.endCol);
+          const beforeRows = this.extractRows(cellData, Math.max(0, selectedRange.startRow - 2), selectedRange.startRow - 1, selectedRange.startCol, selectedRange.endCol);
+          const afterRows = this.extractRows(cellData, selectedRange.endRow + 1, selectedRange.endRow + 2, selectedRange.startCol, selectedRange.endCol);
+          neighborRows = [...beforeRows, ...afterRows];
+
+          const merged: Record<string, Record<string, string>> = {};
+          [...neighborRows, ...selectedRows].forEach((r) => { merged[r.rowKey] = r.cells; });
+          focusedData = JSON.stringify(merged);
+        }
       }
     }
 
-    return {
-      workbookSummary,
-      activeSheetSummary,
-      focusedData,
-    };
+    return { workbookSummary, activeSheetSummary, selectedRows, neighborRows, focusedData };
   }
 
-  private extractHeaders(sheet: Sheet): string[] {
-    const cellData = sheet.data?.cellData;
-    if (!cellData) return [];
-
-    const maxRowsScan = Math.min(5, Object.keys(cellData).length);
-    for (let r = 0; r < maxRowsScan; r++) {
+  private extractRows(
+    cellData: Record<string, any>,
+    startRow: number,
+    endRow: number,
+    startCol: number,
+    endCol: number,
+  ): CellRow[] {
+    const rows: CellRow[] = [];
+    for (let r = startRow; r <= endRow; r++) {
       const row = cellData[String(r)];
       if (!row) continue;
-
-      const vals = Object.keys(row).map((c) => String(row[c]?.v || row[c]?.m || '').trim());
-      if (vals.filter(Boolean).length >= 2) {
-        return vals.filter(Boolean);
+      const cells: Record<string, string> = {};
+      for (let c = startCol; c <= endCol; c++) {
+        const cell = row[String(c)];
+        if (cell) cells[String(c)] = String(cell.v ?? cell.m ?? '');
       }
+      if (Object.keys(cells).length > 0) rows.push({ rowKey: String(r), cells });
     }
-    return [];
-  }
-
-  private extractFocusedCells(
-    sheet: Sheet,
-    range?: { startRow: number; startCol: number; endRow: number; endCol: number },
-  ): string {
-    const cellData = sheet.data?.cellData;
-    if (!cellData) return 'No data';
-
-    const result: Record<string, Record<string, any>> = {};
-
-    if (range) {
-      const startR = Math.max(0, range.startRow - 2);
-      const endR = Math.min(range.endRow + 2, (sheet.data?.rowCount ?? 100) - 1);
-
-      for (let r = startR; r <= endR; r++) {
-        const row = cellData[String(r)];
-        if (!row) continue;
-
-        const cols: Record<string, any> = {};
-        for (let c = range.startCol; c <= range.endCol; c++) {
-          const cell = row[String(c)];
-          if (cell) {
-            cols[String(c)] = cell.v || cell.m || '';
-          }
-        }
-        result[String(r)] = cols;
-      }
-    } else {
-      const rows = Object.keys(cellData).slice(0, 10);
-      rows.forEach((rKey) => {
-        const row = cellData[rKey];
-        if (row) {
-          const cols: Record<string, any> = {};
-          Object.keys(row).slice(0, 8).forEach((cKey) => {
-            cols[cKey] = row[cKey]?.v || row[cKey]?.m || '';
-          });
-          result[rKey] = cols;
-        }
-      });
-    }
-
-    return JSON.stringify(result);
+    return rows;
   }
 }
