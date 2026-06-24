@@ -170,27 +170,43 @@ export class EstimateService {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer);
 
+    console.log('[importExcel] worksheets:', wb.worksheets.map(w => ({ name: w.name, rowCount: w.rowCount, colCount: w.columnCount })));
+
     const sheets = wb.worksheets.map((ws) => {
       const cellData: Record<string, Record<string, { v: any }>> = {};
       let maxRow = 0;
       let maxCol = 0;
 
+      // includeEmpty: true ensures we don't skip rows with only styling/hidden values
       ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-        const ri = rowNumber - 1; // Univer is 0-based
-        if (ri > maxRow) maxRow = ri;
-        row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-          const ci = colNumber - 1;
-          if (ci > maxCol) maxCol = ci;
-          let v: any = cell.value;
-          if (v === null || v === undefined) return;
-          if (typeof v === 'object' && 'result' in v) v = v.result; // formula cell
-          if (typeof v === 'object' && 'text' in v) v = v.text; // rich text
-          if (typeof v === 'object') v = String(v);
+        const ri = String(rowNumber - 1);
+        const vals = row.values as (ExcelJS.CellValue | undefined)[];
+        vals.forEach((raw, colNumber) => {
+          if (colNumber === 0 || raw === null || raw === undefined) return;
+          let v: any = raw;
+          // Formula → result
+          if (typeof v === 'object' && v !== null && 'formula' in v) v = (v as any).result ?? '';
+          // Rich text → join
+          if (typeof v === 'object' && v !== null && 'richText' in v) {
+            v = ((v as any).richText as Array<{ text?: string }>).map((p) => p.text ?? '').join('');
+          }
+          // Hyperlink → text
+          if (typeof v === 'object' && v !== null && 'text' in v) v = (v as any).text;
+          // Date
+          if (v instanceof Date) v = v.toLocaleDateString('vi-VN');
+          // Fallback
+          if (typeof v === 'object' && v !== null) v = String(v);
+          if (v === null || v === undefined || v === '') return;
+
+          const ci = String(colNumber - 1);
           if (!cellData[ri]) cellData[ri] = {};
           cellData[ri][ci] = { v };
+          if (rowNumber - 1 > maxRow) maxRow = rowNumber - 1;
+          if (colNumber - 1 > maxCol) maxCol = colNumber - 1;
         });
       });
 
+      console.log(`[importExcel] sheet "${ws.name}": rows=${maxRow}, cols=${maxCol}, cells=${Object.keys(cellData).length}`);
       return {
         id: `sheet-${ws.id}`,
         name: ws.name,
