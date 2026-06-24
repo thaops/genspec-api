@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import * as ExcelJS from 'exceljs';
 import { compute } from './boq.engine';
 import { staticBenchmark } from './benchmark';
 import { Estimate, EstimateDocument } from './estimate.schema';
@@ -162,5 +163,47 @@ export class EstimateService {
     };
     doc.activityLog = [...(doc.activityLog ?? []), rollbackLog].slice(-200);
     return this.saveState(doc, nextState);
+  }
+
+  async importExcel(userId: string, id: string, buffer: Buffer) {
+    const doc = await this.getOwned(userId, id);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+
+    const sheets = wb.worksheets.map((ws) => {
+      const cellData: Record<string, Record<string, { v: any }>> = {};
+      let maxRow = 0;
+      let maxCol = 0;
+
+      ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        const ri = rowNumber - 1; // Univer is 0-based
+        if (ri > maxRow) maxRow = ri;
+        row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+          const ci = colNumber - 1;
+          if (ci > maxCol) maxCol = ci;
+          let v: any = cell.value;
+          if (v === null || v === undefined) return;
+          if (typeof v === 'object' && 'result' in v) v = v.result; // formula cell
+          if (typeof v === 'object' && 'text' in v) v = v.text; // rich text
+          if (typeof v === 'object') v = String(v);
+          if (!cellData[ri]) cellData[ri] = {};
+          cellData[ri][ci] = { v };
+        });
+      });
+
+      return {
+        id: `sheet-${ws.id}`,
+        name: ws.name,
+        data: {
+          cellData,
+          rowCount: Math.max(maxRow + 10, 100),
+          columnCount: Math.max(maxCol + 5, 20),
+        },
+      };
+    });
+
+    const state = stateOf(doc);
+    const { state: next } = applyActions(state, [{ type: 'set_sheets', sheets } as any]);
+    return this.saveState(doc, next);
   }
 }

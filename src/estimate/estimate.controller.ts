@@ -8,11 +8,12 @@ import {
   Post,
   Query,
   Res,
+  UploadedFile,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { CatalogService } from '../catalog/catalog.service';
 import { CurrentUser } from '../common/current-user.decorator';
@@ -94,6 +95,16 @@ export class EstimateController {
     } finally {
       res.end();
     }
+  }
+
+  @Post('estimates/:id/import-excel')
+  @UseInterceptors(FileInterceptor('file'))
+  importExcel(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.estimates.importExcel(userId, id, file.buffer);
   }
 
   @Post('estimates/:id/rollback')
