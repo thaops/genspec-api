@@ -17,6 +17,17 @@ export interface InsightItem {
   impact?: string;
 }
 
+export interface OfficialFeedItem {
+  title: string;
+  region: string;
+  source: string;
+  issuedDate: string | null;
+  effectiveDate: string | null;
+  type: 'price_notification' | 'regulation' | 'circular' | 'decision';
+  trustScore: number;
+  url: string | null;
+}
+
 type CopilotMode = 'read' | 'review' | 'edit';
 
 // Normalize Vietnamese diacritics so "kiem tra" matches "kiểm tra"
@@ -160,6 +171,59 @@ Trả về JSON array (chỉ JSON, không markdown, không text thêm):
     } catch (err) {
       this.logger.warn('generateInsights parse failed:', err);
       return [];
+    }
+  }
+
+  private feedCache: { items: OfficialFeedItem[]; at: number } | null = null;
+  private readonly FEED_TTL_MS = 2 * 60 * 60 * 1000;
+
+  async fetchOfficialFeed(): Promise<OfficialFeedItem[]> {
+    const now = Date.now();
+    if (this.feedCache && now - this.feedCache.at < this.FEED_TTL_MS) {
+      return this.feedCache.items;
+    }
+    if (!this.ai.available) return [];
+
+    const prompt = `Tìm kiếm các thông báo giá vật liệu xây dựng và văn bản pháp luật xây dựng Việt Nam MỚI NHẤT (trong 60 ngày gần nhất).
+
+Ưu tiên nguồn chính thức:
+- https://moc.gov.vn (Bộ Xây dựng)
+- https://kinhtexaydung.gov.vn (Viện Kinh tế Xây dựng)
+- https://soxaydung.hochiminhcity.gov.vn (Sở XD TP.HCM)
+- https://soxaydung.hanoi.gov.vn (Sở XD Hà Nội)
+- https://sxd.binhduong.gov.vn (Sở XD Bình Dương)
+- https://sxd.dongnai.gov.vn (Sở XD Đồng Nai)
+- https://vbpl.vn (Cơ sở dữ liệu VBPL)
+
+Tìm: thông báo giá VLXD mới nhất các tỉnh, Thông tư/Quyết định của Bộ XD về định mức đơn giá, suất đầu tư xây dựng mới.
+
+Trả về JSON array (CHỈ JSON, không markdown, không text thêm):
+[
+  {
+    "title": "Tên văn bản hoặc thông báo",
+    "region": "TP.HCM hoặc Hà Nội hoặc Bình Dương hoặc Đồng Nai hoặc Toàn quốc",
+    "source": "Tên cơ quan ban hành",
+    "issuedDate": "yyyy-mm-dd hoặc null",
+    "effectiveDate": "yyyy-mm-dd hoặc null",
+    "type": "price_notification hoặc regulation hoặc circular hoặc decision",
+    "trustScore": 95,
+    "url": "url đầy đủ hoặc null"
+  }
+]
+Trả về 6-8 kết quả chính xác nhất, mới nhất. trustScore từ 70-98 dựa vào độ chính thức của nguồn.`;
+
+    try {
+      const raw = await this.ai.reviewGemini(prompt);
+      const start = raw.indexOf('[');
+      const end = raw.lastIndexOf(']');
+      if (start === -1 || end === -1) return this.feedCache?.items ?? [];
+      const items = JSON.parse(raw.slice(start, end + 1)) as OfficialFeedItem[];
+      const result = Array.isArray(items) ? items.slice(0, 10) : [];
+      this.feedCache = { items: result, at: now };
+      return result;
+    } catch (err) {
+      this.logger.warn('fetchOfficialFeed failed:', (err as Error).message);
+      return this.feedCache?.items ?? [];
     }
   }
 

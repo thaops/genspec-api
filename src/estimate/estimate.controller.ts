@@ -48,6 +48,11 @@ export class EstimateController {
     return this.estimates.list(userId);
   }
 
+  @Get('home/feed')
+  getHomeFeed(@CurrentUser('userId') _userId: string) {
+    return this.copilot.fetchOfficialFeed();
+  }
+
   @Get('estimates/:id')
   getOne(@CurrentUser('userId') userId: string, @Param('id') id: string) {
     return this.estimates.getOne(userId, id);
