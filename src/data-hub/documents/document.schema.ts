@@ -6,7 +6,7 @@ export type DocType = 'thong_tu' | 'nghi_dinh' | 'quyet_dinh' | 'qcvn' | 'tcvn' 
 @Schema({ collection: 'documents', timestamps: true })
 export class LegalDocument extends Document {
   @Prop({ required: true }) title: string;
-  @Prop({ enum: ['thong_tu', 'nghi_dinh', 'quyet_dinh', 'qcvn', 'tcvn', 'bang_gia', 'dinh_muc', 'other'], default: 'other' }) docType: DocType;
+  @Prop({ type: String, enum: ['thong_tu', 'nghi_dinh', 'quyet_dinh', 'qcvn', 'tcvn', 'bang_gia', 'dinh_muc', 'other'], default: 'other' }) docType: DocType;
   @Prop() number: string;
   @Prop() issuedBy: string;
   @Prop() issuedDate: Date;
