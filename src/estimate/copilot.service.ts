@@ -5,9 +5,17 @@ import { ContextBuilderService } from './context-builder.service';
 import { ReadModeHandler } from './modes/read.handler';
 import { ReviewModeHandler } from './modes/review.handler';
 import { EditModeHandler } from './modes/edit.handler';
+import { compute } from './boq.engine';
 
 import { StreamEvent } from './copilot.types';
 export type { StreamEvent } from './copilot.types';
+
+export interface InsightItem {
+  title: string;
+  detail: string;
+  type: 'cost' | 'risk' | 'saving' | 'data' | 'formula';
+  impact?: string;
+}
 
 type CopilotMode = 'read' | 'review' | 'edit';
 
@@ -89,6 +97,70 @@ export class CopilotService {
     }
 
     yield* this.editHandler.handle(state, context, message, files, research);
+  }
+
+  async generateInsights(userId: string, id: string): Promise<InsightItem[]> {
+    if (!this.ai.available) return [];
+    const doc = await this.estimates.getOwned(userId, id);
+    const state = this.estimates.stateForPrompt(doc);
+    const { boq, costSummary, costs } = compute(state);
+
+    const topItems = [...boq]
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5)
+      .map((r) => ({ name: r.name, code: r.code, total: r.total, unit: r.unit }));
+
+    const aiPriced = state.materials.filter((m) => m.source?.type === 'ai_estimate').length;
+    const noSource = state.materials.filter((m) => !m.source).length;
+    const totalCost = costSummary.total || costs.total || 0;
+    const vlPct = totalCost ? Math.round((costs.material / totalCost) * 1000) / 10 : 0;
+    const ncPct = totalCost ? Math.round((costs.labor / totalCost) * 1000) / 10 : 0;
+    const mPct = totalCost ? Math.round((costs.machine / totalCost) * 1000) / 10 : 0;
+
+    const payload = {
+      project: state.projectInfo,
+      totalCost,
+      costBreakdown: { vlPct, ncPct, mPct, overheadPct: totalCost ? Math.round((costSummary.overhead / totalCost) * 1000) / 10 : 0 },
+      rawCosts: { material: costs.material, labor: costs.labor, machine: costs.machine },
+      markups: state.markups,
+      materialCount: state.materials.length,
+      aiPricedMaterials: aiPriced,
+      noSourceMaterials: noSource,
+      takeoffCount: state.takeoff.length,
+      boqCount: boq.length,
+      topExpensiveItems: topItems,
+    };
+
+    const prompt = `Bạn là QS (Quantity Surveyor) chuyên dự toán xây dựng Việt Nam.
+Phân tích dự toán dưới đây và sinh ra đúng 6 insight quan trọng nhất.
+
+DỮ LIỆU:
+${JSON.stringify(payload, null, 2)}
+
+Quy tắc:
+- Mỗi insight phải có số liệu cụ thể từ dữ liệu trên
+- Ưu tiên: rủi ro dữ liệu AI, cơ hội tiết kiệm, cơ cấu chi phí bất thường
+- Viết bằng tiếng Việt, ngắn gọn
+
+Trả về JSON array (chỉ JSON, không markdown, không text thêm):
+[
+  {
+    "title": "Tiêu đề ngắn (≤55 ký tự)",
+    "detail": "Mô tả chi tiết có số liệu (≤110 ký tự)",
+    "type": "cost|risk|saving|data|formula",
+    "impact": "Tác động định lượng (≤35 ký tự, optional)"
+  }
+]`;
+
+    try {
+      const raw = await this.ai.generate([{ text: prompt }]);
+      const clean = raw.replace(/```(?:json)?\n?|\n?```/g, '').trim();
+      const parsed = JSON.parse(clean);
+      return Array.isArray(parsed) ? (parsed as InsightItem[]).slice(0, 8) : [];
+    } catch (err) {
+      this.logger.warn('generateInsights parse failed:', err);
+      return [];
+    }
   }
 
   private detectMode(message: string): CopilotMode {

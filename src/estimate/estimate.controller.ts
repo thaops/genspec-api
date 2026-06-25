@@ -117,6 +117,11 @@ export class EstimateController {
     return this.estimates.rollback(userId, id, patchId);
   }
 
+  @Get('estimates/:id/insights')
+  getInsights(@CurrentUser('userId') userId: string, @Param('id') id: string) {
+    return this.copilot.generateInsights(userId, id);
+  }
+
   @Get('estimates/:id/conversation')
   getConversation(@CurrentUser('userId') userId: string, @Param('id') id: string) {
     return this.estimates.getConversation(userId, id);
