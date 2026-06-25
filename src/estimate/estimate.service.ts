@@ -173,19 +173,24 @@ export class EstimateService {
     console.log('[importExcel] worksheets:', wb.worksheets.map(w => ({ name: w.name, rowCount: w.rowCount, colCount: w.columnCount })));
 
     const sheets = wb.worksheets.map((ws) => {
-      const cellData: Record<string, Record<string, { v: any }>> = {};
+      const cellData: Record<string, Record<string, { v: any; f?: string }>> = {};
       let maxRow = 0;
       let maxCol = 0;
 
-      // includeEmpty: true ensures we don't skip rows with only styling/hidden values
       ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
         const ri = String(rowNumber - 1);
         const vals = row.values as (ExcelJS.CellValue | undefined)[];
         vals.forEach((raw, colNumber) => {
           if (colNumber === 0 || raw === null || raw === undefined) return;
           let v: any = raw;
-          // Formula → result
-          if (typeof v === 'object' && v !== null && 'formula' in v) v = (v as any).result ?? '';
+          let f: string | undefined;
+
+          // Formula cell → preserve formula + result
+          if (typeof v === 'object' && v !== null && 'formula' in v) {
+            const formulaStr = String((v as any).formula ?? '').trim();
+            if (formulaStr) f = '=' + formulaStr;
+            v = (v as any).result ?? '';
+          }
           // Rich text → join
           if (typeof v === 'object' && v !== null && 'richText' in v) {
             v = ((v as any).richText as Array<{ text?: string }>).map((p) => p.text ?? '').join('');
@@ -196,11 +201,11 @@ export class EstimateService {
           if (v instanceof Date) v = v.toLocaleDateString('vi-VN');
           // Fallback
           if (typeof v === 'object' && v !== null) v = String(v);
-          if (v === null || v === undefined || v === '') return;
+          if ((v === null || v === undefined || v === '') && !f) return;
 
           const ci = String(colNumber - 1);
           if (!cellData[ri]) cellData[ri] = {};
-          cellData[ri][ci] = { v };
+          cellData[ri][ci] = f ? { v, f } : { v };
           if (rowNumber - 1 > maxRow) maxRow = rowNumber - 1;
           if (colNumber - 1 > maxCol) maxCol = colNumber - 1;
         });

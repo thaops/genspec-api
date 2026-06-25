@@ -89,6 +89,7 @@ export class EstimateController {
     try {
       for await (const ev of this.copilot.streamChat(userId, id, dto.message ?? '', files ?? [], dto.activeSheetId, dto.selectedRange)) {
         res.write(`event: ${ev.event}\ndata: ${JSON.stringify(ev.data)}\n\n`);
+        (res as any).flush?.();
       }
     } catch (err) {
       res.write(`event: error\ndata: ${JSON.stringify({ message: (err as Error).message })}\n\n`);
