@@ -36,7 +36,11 @@ export class MeilisearchService implements OnModuleInit {
   constructor(private readonly config: ConfigService) {}
 
   async onModuleInit() {
-    const host = this.config.get<string>('MEILISEARCH_HOST') ?? 'http://localhost:7700';
+    const host = this.config.get<string>('MEILISEARCH_HOST');
+    if (!host) {
+      this.logger.warn('MEILISEARCH_HOST not set — MeiliSearch disabled');
+      return;
+    }
     const apiKey = this.config.get<string>('MEILISEARCH_API_KEY') ?? '';
     try {
       this.client = new MeiliSearch({ host, apiKey });

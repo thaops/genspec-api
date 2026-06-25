@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as ExcelJS from 'exceljs';
 import { Readable } from 'stream';
 
 export interface ExcelPriceRow {
@@ -20,6 +19,7 @@ export class ExcelParserService {
 
   async parsePriceList(buffer: Buffer): Promise<ExcelPriceRow[]> {
     const rows: ExcelPriceRow[] = [];
+    const ExcelJS = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
     try {
       await workbook.xlsx.load(buffer as any);

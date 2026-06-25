@@ -1,3 +1,5 @@
+import * as https from 'node:https';
+import * as http from 'node:http';
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from '../ai/ai.service';
 import { EstimateService } from './estimate.service';
@@ -26,6 +28,8 @@ export interface OfficialFeedItem {
   type: 'price_notification' | 'regulation' | 'circular' | 'decision';
   trustScore: number;
   url: string | null;
+  imageUrl?: string | null;
+  summary?: string | null;
 }
 
 type CopilotMode = 'read' | 'review' | 'edit';
@@ -175,11 +179,76 @@ Trả về JSON array (chỉ JSON, không markdown, không text thêm):
   }
 
   private feedCache: { items: OfficialFeedItem[]; at: number } | null = null;
-  private readonly FEED_TTL_MS = 2 * 60 * 60 * 1000;
+  private readonly FEED_TTL_MS = 30 * 60 * 1000;
+  private readonly OG_CACHE_MAX = 200;
+  private readonly ogCache = new Map<string, string | null>();
+
+  private setOgCache(url: string, value: string | null) {
+    if (this.ogCache.size >= this.OG_CACHE_MAX) {
+      const firstKey = this.ogCache.keys().next().value;
+      if (firstKey !== undefined) this.ogCache.delete(firstKey);
+    }
+    this.ogCache.set(url, value);
+  }
+
+  private fetchUrl(url: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const mod = url.startsWith('https') ? https : http;
+      const req = mod.get(
+        url,
+        {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GenSpec/1.0; +https://genspec.vn)' },
+          timeout: 6000,
+        },
+        (res) => {
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            resolve(this.fetchUrl(res.headers.location));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => { if (Buffer.concat(chunks).length < 200_000) chunks.push(c); });
+          res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+          res.on('error', reject);
+        },
+      );
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+  }
+
+  private async fetchOgImage(url: string): Promise<string | null> {
+    if (this.ogCache.has(url)) return this.ogCache.get(url) ?? null;
+    try {
+      const html = await this.fetchUrl(url);
+      const ogMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+        ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+      const twMatch = html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i)
+        ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i);
+      const result = ogMatch?.[1] ?? twMatch?.[1] ?? null;
+      this.setOgCache(url, result);
+      return result;
+    } catch {
+      this.setOgCache(url, null);
+      return null;
+    }
+  }
+
+  private async enrichWithImages(items: OfficialFeedItem[]): Promise<OfficialFeedItem[]> {
+    return Promise.all(
+      items.map(async (item) => {
+        if (!item.url || item.imageUrl) return item;
+        const imageUrl = await this.fetchOgImage(item.url);
+        return { ...item, imageUrl };
+      }),
+    );
+  }
 
   async fetchOfficialFeed(): Promise<OfficialFeedItem[]> {
     const now = Date.now();
-    if (this.feedCache && now - this.feedCache.at < this.FEED_TTL_MS) {
+    if (this.feedCache && now - this.feedCache.at >= this.FEED_TTL_MS) {
+      this.feedCache = null;
+    }
+    if (this.feedCache) {
       return this.feedCache.items;
     }
     if (!this.ai.available) return [];
@@ -207,7 +276,8 @@ Trả về JSON array (CHỈ JSON, không markdown, không text thêm):
     "effectiveDate": "yyyy-mm-dd hoặc null",
     "type": "price_notification hoặc regulation hoặc circular hoặc decision",
     "trustScore": 95,
-    "url": "url đầy đủ hoặc null"
+    "url": "url đầy đủ hoặc null",
+    "summary": "Mô tả ngắn 1-2 câu nội dung chính của văn bản"
   }
 ]
 Trả về 6-8 kết quả chính xác nhất, mới nhất. trustScore từ 70-98 dựa vào độ chính thức của nguồn.`;
@@ -216,9 +286,10 @@ Trả về 6-8 kết quả chính xác nhất, mới nhất. trustScore từ 70-
       const raw = await this.ai.reviewGemini(prompt);
       const start = raw.indexOf('[');
       const end = raw.lastIndexOf(']');
-      if (start === -1 || end === -1) return this.feedCache?.items ?? [];
+      if (start === -1 || end === -1) return [];
       const items = JSON.parse(raw.slice(start, end + 1)) as OfficialFeedItem[];
-      const result = Array.isArray(items) ? items.slice(0, 10) : [];
+      const base = Array.isArray(items) ? items.slice(0, 10) : [];
+      const result = await this.enrichWithImages(base);
       this.feedCache = { items: result, at: now };
       return result;
     } catch (err) {

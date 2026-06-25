@@ -7,7 +7,7 @@ export type GeminiPart = { inlineData: { data: string; mimeType: string } } | { 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private readonly gemini?: GoogleGenerativeAI;
+  private _gemini?: GoogleGenerativeAI | null;
   private readonly geminiKey?: string;
   private readonly geminiSearchModels: string[];
   private readonly geminiEstimateModels: string[];
@@ -18,12 +18,16 @@ export class AiService {
     const search = this.config.get<string>('GEMINI_SEARCH_MODEL') ?? 'gemini-2.5-flash';
     this.geminiEstimateModels = [...new Set([estimate, 'gemini-2.5-flash-lite', 'gemini-flash-latest'])];
     this.geminiSearchModels = [...new Set([search, 'gemini-2.5-flash-lite', 'gemini-flash-latest'])];
-    if (this.geminiKey) {
-      this.gemini = new GoogleGenerativeAI(this.geminiKey);
-    }
-    if (!this.gemini) {
+    if (!this.geminiKey) {
       this.logger.warn('No AI backend (GEMINI_API_KEY) — AI features disabled');
     }
+  }
+
+  private get gemini(): GoogleGenerativeAI | undefined {
+    if (this._gemini === undefined) {
+      this._gemini = this.geminiKey ? new GoogleGenerativeAI(this.geminiKey) : null;
+    }
+    return this._gemini ?? undefined;
   }
 
   get available(): boolean {

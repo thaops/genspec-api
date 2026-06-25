@@ -1,6 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string; numpages: number }>;
 
 export interface ParsedDocument {
   text: string;
@@ -38,6 +36,8 @@ export class PdfParserService {
 
   async parse(buffer: Buffer, sourceId?: string): Promise<ParsedDocument> {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string; numpages: number }>;
       const data = await pdfParse(buffer);
       const text = data.text ?? '';
       const catalogCodes = this.extractCodes(text);
