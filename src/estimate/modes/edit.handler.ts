@@ -75,6 +75,7 @@ export class EditModeHandler {
     let jsonStarted = false;
     let jsonBuf = '';
     let streamErr = false;
+    let lastStep = '';
 
     try {
       for await (const chunk of this.ai.stream(streamParts)) {
@@ -91,7 +92,13 @@ export class EditModeHandler {
           buf = buf.slice(idx + 1);
           if (jsonStarted) { jsonBuf += line + '\n'; continue; }
           const m = line.match(/^\s*STEP:\s*(.+)/i);
-          if (m) yield { event: 'step', data: { text: m[1].trim() } };
+          if (m) {
+            const stepText = m[1].trim();
+            if (stepText !== lastStep) {
+              lastStep = stepText;
+              yield { event: 'step', data: { text: stepText } };
+            }
+          }
           else if (/^\s*(\*|#)*JSON\s*:/i.test(line)) {
             jsonStarted = true;
             jsonBuf += line.replace(/^\s*(\*|#)*JSON\s*:\s*/i, '') + '\n';

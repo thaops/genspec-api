@@ -11,9 +11,18 @@ export type { StreamEvent } from './copilot.types';
 
 type CopilotMode = 'read' | 'review' | 'edit';
 
-const EDIT_INTENT = /(cập nhật|sửa|thay đổi|thêm|xóa|đổi|tăng|giảm|set|update|delete|insert)/i;
-const REVIEW_INTENT = /(kiểm tra|soát lỗi|tìm lỗi|audit|review|quét lỗi|outlier|bất thường|trùng)/i;
-const PRICE_INTENT = /(giá|đơn giá|vật liệu|vật tư|định mức|dự toán|lập|bóc|khối lượng|báo giá|thị trường|cập nhật)/i;
+// Normalize Vietnamese diacritics so "kiem tra" matches "kiểm tra"
+function normalizeVi(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[đĐ]/g, (c) => (c === 'đ' ? 'd' : 'D'));
+}
+
+// Regex run against BOTH original and normalized input
+const EDIT_INTENT = /(cap nhat|cap_nhat|sua|thay doi|them|xoa|doi|tang|giam|set|update|delete|insert|cap nhat|cập nhật|sửa|thay đổi|thêm|xóa|đổi|tăng|giảm)/i;
+const REVIEW_INTENT = /(kiem tra|soat loi|tim loi|quet loi|bat thuong|trung|audit|review|outlier|kiểm tra|soát lỗi|tìm lỗi|quét lỗi|bất thường|trùng)/i;
+const PRICE_INTENT = /(gia|don gia|vat lieu|vat tu|dinh muc|du toan|lap|boc|khoi luong|bao gia|thi truong|giá|đơn giá|vật liệu|vật tư|định mức|dự toán|lập|bóc|khối lượng|báo giá|thị trường|cập nhật)/i;
 
 @Injectable()
 export class CopilotService {
@@ -76,8 +85,9 @@ export class CopilotService {
   }
 
   private detectMode(message: string): CopilotMode {
-    if (REVIEW_INTENT.test(message)) return 'review';
-    if (EDIT_INTENT.test(message)) return 'edit';
+    const norm = normalizeVi(message);
+    if (REVIEW_INTENT.test(message) || REVIEW_INTENT.test(norm)) return 'review';
+    if (EDIT_INTENT.test(message) || EDIT_INTENT.test(norm)) return 'edit';
     return 'read';
   }
 
