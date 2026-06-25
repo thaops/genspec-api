@@ -51,6 +51,19 @@ export function toEstimateDto(doc: EstimateDocument) {
 export class EstimateService {
   constructor(@InjectModel(Estimate.name) private readonly model: Model<EstimateDocument>) {}
 
+  async getConversation(userId: string, id: string): Promise<any[]> {
+    const doc = await this.getOwned(userId, id);
+    return (doc as any).conversationMessages ?? [];
+  }
+
+  async saveConversation(userId: string, id: string, messages: any[]): Promise<{ ok: true }> {
+    await this.getOwned(userId, id); // auth check
+    await this.model.findByIdAndUpdate(id, {
+      $set: { conversationMessages: messages.slice(-100) },
+    });
+    return { ok: true };
+  }
+
   async create(userId: string, name: string) {
     const doc = await this.model.create({
       userId,

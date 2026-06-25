@@ -44,6 +44,7 @@ export class CopilotService {
     files: Express.Multer.File[] = [],
     activeSheetId?: string,
     selectedRange?: { startRow: number; startCol: number; endRow: number; endCol: number },
+    editPermission = false,
   ): AsyncGenerator<StreamEvent> {
     if (!message?.trim() && files.length === 0) {
       yield { event: 'error', data: { message: 'Cần nhập yêu cầu hoặc đính kèm tệp.' } };
@@ -56,8 +57,14 @@ export class CopilotService {
 
     const doc = await this.estimates.getOwned(userId, id);
     const context = this.contextBuilder.buildContext(doc as any, activeSheetId, selectedRange);
-    const mode = this.detectMode(message);
-    this.logger.log(`Copilot mode: ${mode}`);
+    const rawMode = this.detectMode(message);
+    // In safe mode (no editPermission) downgrade edit intent to read
+    const mode: CopilotMode = !editPermission && rawMode === 'edit' ? 'read' : rawMode;
+    this.logger.log(`Copilot mode: ${mode} (raw=${rawMode}, editPermission=${editPermission})`);
+
+    if (!editPermission && rawMode === 'edit') {
+      yield { event: 'step', data: { text: 'Chế độ đọc — bật quyền chỉnh sửa để AI đề xuất thay đổi' } };
+    }
 
     if (mode === 'read') {
       yield* this.readHandler.handle(doc as any, context, message);
@@ -69,7 +76,7 @@ export class CopilotService {
       return;
     }
 
-    // edit mode
+    // edit mode (requires editPermission)
     const state = this.estimates.stateForPrompt(doc);
     let research = { text: '', sources: [] as { title?: string; uri?: string }[] };
     const isEmpty = state.takeoff.length === 0 && state.materials.length === 0;

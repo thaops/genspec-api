@@ -59,6 +59,9 @@ export class Estimate {
 
   @Prop({ type: [Object], default: [] })
   patchHistory: any[];
+
+  @Prop({ type: [Object], default: [] })
+  conversationMessages: any[];
 }
 
 export const EstimateSchema = SchemaFactory.createForClass(Estimate);

@@ -37,4 +37,7 @@ export class CopilotDto {
   @IsArray()
   @IsString({ each: true })
   visibleSheets?: string[];
+
+  @IsOptional()
+  editPermission?: boolean;
 }
