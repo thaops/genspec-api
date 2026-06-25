@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { DataHubModule } from './data-hub/data-hub.module';
 import { EstimateModule } from './estimate/estimate.module';
 import { StorageModule } from './storage/storage.module';
 import { UsersModule } from './users/users.module';
@@ -22,6 +23,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     AuthModule,
     CatalogModule,
+    DataHubModule,
     EstimateModule,
   ],
   controllers: [AppController],
