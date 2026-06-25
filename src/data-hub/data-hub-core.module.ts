@@ -8,6 +8,7 @@ import { CrawlJob, CrawlJobSchema } from './crawlers/crawl-job.schema';
 
 import { NormalizeService } from './normalizers/normalize.service';
 import { MeilisearchService } from './search/meilisearch.service';
+import { PdfParserService } from './parsers/pdf-parser.service';
 
 import { CatalogCode, CatalogCodeSchema } from './catalog/catalog-code.schema';
 import { CatalogDbService } from './catalog/catalog-db.service';
@@ -37,6 +38,7 @@ import { SuggestController } from './suggest/suggest.controller';
     SourceRegistryService,
     NormalizeService,
     MeilisearchService,
+    PdfParserService,
     CatalogDbService,
     PriceService,
     DocumentService,
@@ -48,6 +50,7 @@ import { SuggestController } from './suggest/suggest.controller';
     SourceRegistryService,
     NormalizeService,
     MeilisearchService,
+    PdfParserService,
   ],
 })
 export class DataHubCoreModule {}

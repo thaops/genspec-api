@@ -3,7 +3,6 @@ import { Module } from '@nestjs/common';
 import { DataHubCoreModule } from './data-hub-core.module';
 
 import { RawStorageService } from './raw-storage/raw-storage.service';
-import { PdfParserService } from './parsers/pdf-parser.service';
 import { ExcelParserService } from './parsers/excel-parser.service';
 
 import { CrawlerRunnerService } from './crawlers/crawler-runner.service';
@@ -31,7 +30,6 @@ const CRAWLERS = [
   controllers: [DataHubAdminController],
   providers: [
     RawStorageService,
-    PdfParserService,
     ExcelParserService,
     CrawlerRunnerService,
     ...CRAWLERS,
@@ -41,7 +39,6 @@ const CRAWLERS = [
   ],
   exports: [
     RawStorageService,
-    PdfParserService,
     ExcelParserService,
     CrawlerRunnerService,
     ReviewAgentService,
