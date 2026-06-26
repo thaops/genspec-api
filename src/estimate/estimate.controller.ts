@@ -89,7 +89,10 @@ export class EstimateController {
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
+      'Surrogate-Control': 'no-store',
     });
+    // Disable Nagle's algorithm so each res.write() is sent immediately as a TCP packet
+    (res.socket as any)?.setNoDelay?.(true);
     res.flushHeaders?.();
     try {
       for await (const ev of this.copilot.streamChat(userId, id, dto.message ?? '', files ?? [], dto.activeSheetId, dto.selectedRange, dto.editPermission ?? false)) {
