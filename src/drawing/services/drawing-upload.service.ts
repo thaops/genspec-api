@@ -61,32 +61,10 @@ export class DrawingUploadService {
 
     const drawingId = (drawing as any)._id.toString();
 
-    // 4. Queue the job if Redis is available, otherwise use EventEmitter pipeline
-    const queue = this.getQueue();
-    if (queue) {
-      const job = await queue.add(
-        'process',
-        { drawingId, estimateId, fileType, storageUrl, tmpPath },
-        {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
-          removeOnComplete: { age: 86400 },
-          removeOnFail: { age: 7 * 86400 },
-        },
-      );
-      this.logger.log(`Drawing ${drawingId} queued as job ${job.id}`);
-      return { ...drawing.toObject(), id: drawingId, jobId: job.id };
-    }
+    // 4. Try BullMQ queue; fall back to EventEmitter if Redis unavailable
+    const jobId = await this.tryEnqueue(drawingId, estimateId, fileType, storageUrl, tmpPath);
 
-    // Fallback: emit domain event for synchronous event-driven pipeline
-    this.logger.log(`Drawing ${drawingId} → EventEmitter fallback (no Redis)`);
-    await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'parsing' });
-    this.events.emit(
-      DrawingUploadedEvent.EVENT,
-      new DrawingUploadedEvent(drawingId, estimateId, fileType, tmpPath, 'user'),
-    );
-
-    return { ...drawing.toObject(), id: drawingId };
+    return { ...drawing.toObject(), id: drawingId, ...(jobId ? { jobId } : {}) };
   }
 
   async list(estimateId: string): Promise<DrawingDocument[]> {
@@ -111,16 +89,57 @@ export class DrawingUploadService {
     return { ok: true };
   }
 
-  private _queue: InstanceType<typeof import('bullmq').Queue> | null | undefined = undefined;
+  /** Returns jobId if enqueued, null if falling back to EventEmitter. Never throws. */
+  private async tryEnqueue(
+    drawingId: string,
+    estimateId: string,
+    fileType: 'pdf' | 'dwg' | 'dxf' | 'image',
+    storageUrl: string,
+    tmpPath: string,
+  ): Promise<string | null> {
+    const queue = this.getQueue();
+    if (queue) {
+      try {
+        const job = await queue.add(
+          'process',
+          { drawingId, estimateId, fileType, storageUrl, tmpPath },
+          {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5000 },
+            removeOnComplete: { age: 86400 },
+            removeOnFail: { age: 7 * 86400 },
+          },
+        );
+        this.logger.log(`Drawing ${drawingId} queued as job ${job.id}`);
+        return job.id ?? null;
+      } catch (err: any) {
+        this.logger.warn(`Queue unavailable (${err.message}), falling back to EventEmitter`);
+        this._queue = null; // reset so next upload retries
+      }
+    }
 
-  private getQueue() {
+    // EventEmitter fallback — synchronous pipeline
+    this.logger.log(`Drawing ${drawingId} → EventEmitter fallback`);
+    await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'parsing' });
+    this.events.emit(
+      DrawingUploadedEvent.EVENT,
+      new DrawingUploadedEvent(drawingId, estimateId, fileType, tmpPath, 'user'),
+    );
+    return null;
+  }
+
+  private _queue: any = undefined;
+
+  private getQueue(): any {
     if (this._queue !== undefined) return this._queue;
     if (!process.env.REDIS_URL || !Queue) {
       this._queue = null;
       return null;
     }
     try {
-      this._queue = new Queue('drawing', { connection: { url: process.env.REDIS_URL } });
+      this._queue = new (Queue as any)('drawing', {
+        connection: { url: process.env.REDIS_URL },
+      });
     } catch {
       this._queue = null;
     }

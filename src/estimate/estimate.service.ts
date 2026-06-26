@@ -11,6 +11,7 @@ import { buildActivity, previewActions } from './transparency';
 import { buildTrace } from './trace';
 import { validate } from './validation';
 import { generatePatch, applyRollback } from './patch-history';
+import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
 
 function stateOf(doc: EstimateDocument): EstimateState {
   return {
@@ -49,7 +50,10 @@ export function toEstimateDto(doc: EstimateDocument) {
 
 @Injectable()
 export class EstimateService {
-  constructor(@InjectModel(Estimate.name) private readonly model: Model<EstimateDocument>) {}
+  constructor(
+    @InjectModel(Estimate.name) private readonly model: Model<EstimateDocument>,
+    @InjectModel(Drawing.name) private readonly drawingModel: Model<DrawingDocument>,
+  ) {}
 
   async getConversation(userId: string, id: string): Promise<any[]> {
     const doc = await this.getOwned(userId, id);
@@ -76,8 +80,26 @@ export class EstimateService {
 
   async list(userId: string) {
     const docs = await this.model.find({ userId }).sort({ updatedAt: -1 }).exec();
+    const ids = docs.map((d) => d._id.toString());
+
+    // Batch-fetch drawings: count + first thumbnail per estimate (2 queries total)
+    const drawings = await this.drawingModel
+      .find({ estimateId: { $in: ids } }, { estimateId: 1, thumbnail: 1, createdAt: 1 })
+      .sort({ estimateId: 1, createdAt: 1 })
+      .exec();
+
+    const drawingMap = new Map<string, { count: number; thumbnail?: string }>();
+    for (const drw of drawings) {
+      const eid = drw.estimateId;
+      if (!drawingMap.has(eid)) {
+        drawingMap.set(eid, { count: 0, thumbnail: drw.thumbnail ?? undefined });
+      }
+      drawingMap.get(eid)!.count++;
+    }
+
     return docs.map((d) => {
       const dto = toEstimateDto(d);
+      const drwInfo = drawingMap.get(dto.id);
       return {
         id: dto.id,
         name: dto.name,
@@ -85,6 +107,8 @@ export class EstimateService {
         costs: dto.costs,
         itemCount: dto.boq.length,
         takeoffCount: dto.takeoff.length,
+        drawingCount: drwInfo?.count ?? 0,
+        thumbnail: drwInfo?.thumbnail ?? null,
         createdAt: dto.createdAt,
         updatedAt: dto.updatedAt,
       };
