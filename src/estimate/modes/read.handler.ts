@@ -30,20 +30,37 @@ export class ReadModeHandler {
     }
 
     let webContext = '';
+    let webSearchFailed = false;
     if (WEB_INTENT.test(message)) {
       yield { event: 'step', data: { text: 'Tra cứu thông tin pháp lý / giá thị trường…' } };
       try {
         const result = await this.ai.research(message);
         if (result.text) {
           const sourceList = result.sources.slice(0, 5).map((s) => `- ${s.title ?? s.uri}: ${s.uri}`).join('\n');
-          webContext = `THÔNG TIN TRA CỨU TRÊN MẠNG:\n${result.text}${sourceList ? `\n\nNguồn:\n${sourceList}` : ''}`;
+          webContext = [
+            '=== KẾT QUẢ TRA CỨU THỰC TẾ TRÊN MẠNG (nguồn đáng tin cậy) ===',
+            result.text,
+            sourceList ? `\nNguồn đã tìm thấy:\n${sourceList}` : '',
+            '=== HẾT KẾT QUẢ TRA CỨU ===',
+            '',
+            'QUY TẮC BẮT BUỘC KHI TRẢ LỜI:',
+            '1. Chỉ được trích dẫn văn bản pháp lý (số thông tư, nghị định, quyết định) NẾU chúng xuất hiện trong kết quả tra cứu ở trên.',
+            '2. TUYỆT ĐỐI KHÔNG tự bịa hoặc suy đoán số văn bản, ngày ban hành, hay nội dung không có trong kết quả tra cứu.',
+            '3. Nếu thấy URL nguồn → trích dẫn cuối câu trả lời dưới dạng "Nguồn: [tên] (url)".',
+            '4. Nếu kết quả tra cứu không đủ để trả lời → nói thẳng "Tôi không tìm thấy thông tin xác thực, cậu nên kiểm tra trực tiếp tại cổng thông tin Bộ Xây dựng."',
+          ].filter(Boolean).join('\n');
+          if (result.sources.length > 0) {
+            yield { event: 'step', data: { text: `Tìm thấy ${result.sources.length} nguồn tham khảo` } };
+          }
+        } else {
+          webSearchFailed = true;
         }
       } catch {
-        // research failed, continue without web context
+        webSearchFailed = true;
       }
     }
 
-    const prompt = this.buildPrompt(context, message, searchContext, webContext, history);
+    const prompt = this.buildPrompt(context, message, searchContext, webContext, webSearchFailed, history);
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
@@ -78,12 +95,18 @@ export class ReadModeHandler {
     return words.slice(-2).join(' ');
   }
 
-  private buildPrompt(context: WorkbookContext, message: string, searchContext: string, webContext: string, history: string): string {
+  private buildPrompt(context: WorkbookContext, message: string, searchContext: string, webContext: string, webSearchFailed: boolean, history: string): string {
+    const searchFailedNote = webSearchFailed
+      ? 'CẢNH BÁO: Tra cứu mạng thất bại. TUYỆT ĐỐI KHÔNG tự bịa thông tin pháp lý. Nếu câu hỏi liên quan đến thông tư/nghị định → nói thẳng không tra cứu được, hướng dẫn người dùng vào moc.gov.vn hoặc vbpl.vn để kiểm tra.'
+      : '';
+
     return [
       'Bạn là Minh — QS senior 10 năm kinh nghiệm, thực chiến dự án dân dụng và công nghiệp tại Việt Nam.',
       'Nói chuyện trực tiếp như đồng nghiệp, không dùng tiêu đề hay bullet point trừ khi liệt kê số liệu.',
       'Không bắt đầu bằng "Theo workbook..." hay "Dựa vào dữ liệu...". Đi thẳng vào câu trả lời.',
-      'Nếu không chắc → nói thẳng, hỏi thêm ngắn gọn. Không đoán mò.',
+      'Nếu không chắc → nói thẳng. KHÔNG ĐƯỢC đoán số hiệu văn bản pháp lý.',
+      '',
+      searchFailedNote,
       '',
       history ? `LỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:\n${history}` : '',
       '',
