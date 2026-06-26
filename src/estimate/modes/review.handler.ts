@@ -93,9 +93,25 @@ export class ReviewModeHandler {
       yield { event: 'step', data: { text: 'Rule Engine không phát hiện lỗi cứng' } };
     }
 
-    yield { event: 'step', data: { text: 'AI soát xét logic nghiệp vụ chuyên sâu…' } };
+    // Tra cứu giá thị trường nếu có outlier hoặc missing prices
+    let webSources: { title?: string; uri?: string }[] = [];
+    let webContext = '';
+    const needsWebCheck = findings.some((f) => f.area === 'price' || f.area === 'missing');
+    if (needsWebCheck) {
+      yield { event: 'step', data: { text: 'Tra cứu giá thị trường để dẫn chứng…' } };
+      try {
+        const q = message || 'Bảng giá vật liệu xây dựng và định mức nhân công mới nhất Việt Nam';
+        const result = await this.ai.research(q);
+        if (result.text) {
+          webContext = result.text.slice(0, 2000);
+          webSources = result.sources.slice(0, 5);
+        }
+      } catch { /* skip if research fails */ }
+    }
 
-    const prompt = this.buildPrompt(context, message, findings, history);
+    yield { event: 'step', data: { text: 'AI soát xét logic nghiệp vụ…' } };
+
+    const prompt = this.buildPrompt(context, message, findings, history, webContext);
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
@@ -114,7 +130,7 @@ export class ReviewModeHandler {
         thinking: [`Rule Engine: ${findings.length} phát hiện`, 'AI phân tích logic nghiệp vụ và định mức'],
         message: reply,
         actions: [],
-        sources: [],
+        sources: webSources,
         preview: { counts: [], costBefore: 0, costAfter: 0, costDelta: 0, diffs: [] },
         validation: {
           status: hasErrors ? 'warning' : findings.length > 0 ? 'warning' : 'reasonable',
@@ -128,21 +144,20 @@ export class ReviewModeHandler {
     };
   }
 
-  private buildPrompt(context: WorkbookContext, message: string, findings: Finding[], history: string): string {
+  private buildPrompt(context: WorkbookContext, message: string, findings: Finding[], history: string, webContext: string): string {
     const byArea = (area: string) => findings.filter((f) => f.area === area);
     const fmt = (list: Finding[]) => list.length === 0 ? 'không có' : list.map((f) => `• ${f.message}${f.suggestion ? ` → ${f.suggestion}` : ''}`).join('\n');
     return [
       'Bạn là Minh — QS senior đang review dự toán này. Rule engine vừa chạy xong, kết quả bên dưới.',
-      'Đọc kết quả đó, kết hợp kinh nghiệm nghề, và nói thẳng những gì đáng lo nhất.',
-      'Đừng liệt kê lại từng dòng lỗi — phân tích ý nghĩa của chúng, ưu tiên cái nào cần sửa trước.',
-      'Trả lời như đang nói chuyện với đồng nghiệp, không viết báo cáo hành chính.',
+      'Phân tích thực chất, nói thẳng vấn đề quan trọng nhất. Không liệt kê lại từng dòng lỗi.',
+      webContext ? 'Nếu dẫn giá thị trường hoặc định mức, trích dẫn nguồn cụ thể (tên văn bản, ngày, link nếu có).' : '',
+      'Không viết báo cáo hành chính. Nói như đồng nghiệp.',
       '',
       history ? `LỊCH SỬ:\n${history}` : '',
       '',
-      'WORKBOOK:',
-      context.workbookSummary,
-      context.activeSheetSummary ? `\nSHEET ĐANG XEM:\n${context.activeSheetSummary}` : '',
-      context.focusedData ? `\nDỮ LIỆU ĐÃ CHỌN:\n${context.focusedData}` : '',
+      context.activeSheetSummary ? `SHEET ĐANG XEM (review tập trung vào đây trước):\n${context.activeSheetSummary}` : '',
+      context.focusedData ? `VÙNG ĐÃ CHỌN:\n${context.focusedData}` : '',
+      `TỔNG QUAN WORKBOOK:\n${context.workbookSummary}`,
       '',
       'KẾT QUẢ RULE ENGINE:',
       `Trùng mã:\n${fmt(byArea('duplicate'))}`,
@@ -150,8 +165,9 @@ export class ReviewModeHandler {
       `Thiếu giá:\n${fmt(byArea('missing'))}`,
       `Lỗi công thức:\n${fmt(byArea('formula'))}`,
       `Thiếu hạng mục:\n${fmt(byArea('logic'))}`,
+      webContext ? `\nGIÁ THỊ TRƯỜNG / ĐỊNH MỨC THAM CHIẾU:\n${webContext}` : '',
       '',
-      message ? `Người dùng hỏi: "${message}"` : 'Hãy tóm tắt những vấn đề đáng lo nhất.',
+      message ? `Người dùng: "${message}"` : 'Tóm tắt những vấn đề đáng lo nhất.',
     ]
       .filter(Boolean)
       .join('\n');
