@@ -6,6 +6,7 @@ import { searchWorkbook } from '../tools/tool-registry';
 import { Workbook } from '../estimate.types';
 
 const SEARCH_INTENT = /(tìm|tìm kiếm|ở đâu|nằm ở|xuất hiện|có bao nhiêu|đang ở)/i;
+const WEB_INTENT = /(thông tư|nghị định|quyết định|quy định|pháp lý|định mức|đơn giá|bảng giá|thị trường|mới nhất|hiện hành|tìm trên mạng|tra cứu|cập nhật)/i;
 
 @Injectable()
 export class ReadModeHandler {
@@ -28,7 +29,21 @@ export class ReadModeHandler {
       }
     }
 
-    const prompt = this.buildPrompt(context, message, searchContext);
+    let webContext = '';
+    if (WEB_INTENT.test(message)) {
+      yield { event: 'step', data: { text: 'Tra cứu thông tin pháp lý / giá thị trường…' } };
+      try {
+        const result = await this.ai.research(message);
+        if (result.text) {
+          const sourceList = result.sources.slice(0, 5).map((s) => `- ${s.title ?? s.uri}: ${s.uri}`).join('\n');
+          webContext = `THÔNG TIN TRA CỨU TRÊN MẠNG:\n${result.text}${sourceList ? `\n\nNguồn:\n${sourceList}` : ''}`;
+        }
+      } catch {
+        // research failed, continue without web context
+      }
+    }
+
+    const prompt = this.buildPrompt(context, message, searchContext, webContext);
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
@@ -63,22 +78,22 @@ export class ReadModeHandler {
     return words.slice(-2).join(' ');
   }
 
-  private buildPrompt(context: WorkbookContext, message: string, searchContext: string): string {
+  private buildPrompt(context: WorkbookContext, message: string, searchContext: string, webContext: string): string {
     return [
-      'Bạn là QS Workspace Agent — trợ lý chuyên nghiệp về dự toán xây dựng Việt Nam.',
-      'Nhiệm vụ: Đọc, giải thích và tra cứu thông tin trong Workbook dự toán.',
-      'Không sinh BOQ, không tạo dữ liệu mới. Chỉ đọc và trả lời.',
+      'Bạn là QS — trợ lý dự toán xây dựng Việt Nam, am hiểu pháp lý và thị trường.',
+      'Trả lời tự nhiên như một đồng nghiệp QS giàu kinh nghiệm, không cứng nhắc.',
       '',
       'CẤU TRÚC WORKBOOK:',
       context.workbookSummary,
       context.activeSheetSummary ? `\nSHEET ĐANG XEM:\n${context.activeSheetSummary}` : '',
       context.focusedData ? `\nDỮ LIỆU ĐÃ CHỌN:\n${context.focusedData}` : '',
       searchContext ? `\n${searchContext}` : '',
+      webContext ? `\n${webContext}` : '',
       '',
       'CÂU HỎI:',
       message,
       '',
-      'Trả lời trực tiếp bằng tiếng Việt. Nếu có kết quả tìm kiếm ở trên, hãy tổng hợp và giải thích rõ. Chỉ văn bản thường, không JSON.',
+      'Trả lời bằng tiếng Việt, tự nhiên và có ích. Kết hợp thông tin workbook và tra cứu nếu có. Không giải thích bạn làm gì, chỉ trả lời thẳng vào nội dung.',
     ]
       .filter(Boolean)
       .join('\n');
