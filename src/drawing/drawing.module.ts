@@ -1,30 +1,29 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { DrawingController } from './drawing.controller';
-// Upload
-import { DrawingUploadService } from './services/drawing-upload.service';
-// Parser
+// Pipeline
 import { DrawingParserService } from './services/drawing-parser.service';
+import { DrawingNormalizerService } from './services/drawing-normalizer.service';
+import { DrawingDetectorService } from './services/drawing-detector.service';
+import { DrawingIndexerService } from './services/drawing-indexer.service';
+// Parsers
 import { PdfParserService } from './parsers/pdf-parser.service';
 import { DxfParserService } from './parsers/dxf-parser.service';
 // Converter
 import { DwgConverterService } from './converters/dwg-converter.service';
-// Search
+// Core services
+import { DrawingUploadService } from './services/drawing-upload.service';
 import { DrawingSearchService } from './services/drawing-search.service';
-// Detect
 import { DrawingDetectService } from './services/drawing-detect.service';
-// Compare
 import { DrawingCompareService } from './services/drawing-compare.service';
-// Graph
 import { DrawingGraphService } from './services/drawing-graph.service';
-// Annotation
 import { DrawingAnnotationService } from './services/drawing-annotation.service';
-// Revision
 import { DrawingRevisionService } from './services/drawing-revision.service';
-// Thumbnail
 import { DrawingThumbnailService } from './services/drawing-thumbnail.service';
-// Cache
 import { DrawingCacheService } from './services/drawing-cache.service';
+// Engines
+import { ProposalEngineService } from './services/proposal-engine.service';
+import { WorkspaceGraphService } from './services/workspace-graph.service';
 // Schemas
 import { Drawing, DrawingSchema } from './schemas/drawing.schema';
 import { DrawingObject, DrawingObjectSchema } from './schemas/drawing-object.schema';
@@ -44,11 +43,18 @@ import { DrawingIndex, DrawingIndexSchema } from './schemas/drawing-index.schema
   ],
   controllers: [DrawingController],
   providers: [
-    DrawingUploadService,
+    // Pipeline (event-driven)
     DrawingParserService,
+    DrawingNormalizerService,
+    DrawingDetectorService,
+    DrawingIndexerService,
+    // Parsers
     PdfParserService,
     DxfParserService,
+    // Converter
     DwgConverterService,
+    // Core
+    DrawingUploadService,
     DrawingSearchService,
     DrawingDetectService,
     DrawingCompareService,
@@ -57,11 +63,16 @@ import { DrawingIndex, DrawingIndexSchema } from './schemas/drawing-index.schema
     DrawingRevisionService,
     DrawingThumbnailService,
     DrawingCacheService,
+    // Engines
+    ProposalEngineService,
+    WorkspaceGraphService,
   ],
   exports: [
     DrawingSearchService,
     DrawingDetectService,
     DrawingGraphService,
+    ProposalEngineService,
+    WorkspaceGraphService,
   ],
 })
 export class DrawingModule {}
