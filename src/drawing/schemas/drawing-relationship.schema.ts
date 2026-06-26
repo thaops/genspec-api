@@ -24,7 +24,7 @@ export class DrawingRelationship {
   @Prop({ required: true })
   toStableId: string;
 
-  @Prop({ required: true })
+  @Prop({ required: true, type: String })
   type: RelationshipType;
 
   @Prop({ min: 0, max: 1, default: 1 })
