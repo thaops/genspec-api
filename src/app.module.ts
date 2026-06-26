@@ -13,6 +13,7 @@ import { EstimateModule } from './estimate/estimate.module';
 import { StorageModule } from './storage/storage.module';
 import { UsersModule } from './users/users.module';
 import { DrawingModule } from './drawing/drawing.module';
+import { QueueModule } from './queue/queue.module';
 
 const isAdmin = process.env.DATAHUB_ADMIN === 'true';
 
@@ -36,6 +37,7 @@ const isAdmin = process.env.DATAHUB_ADMIN === 'true';
     isAdmin ? DataHubAdminModule : DataHubCoreModule,
     EstimateModule,
     DrawingModule,
+    QueueModule,
   ],
   controllers: [AppController, NotificationController],
   providers: [AppService],
