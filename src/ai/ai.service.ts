@@ -55,7 +55,11 @@ export class AiService {
       });
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const r = await model.generateContent(query);
+          // 20-second timeout — grounding can be slow but shouldn't block the whole response
+          const timeout = new Promise<never>((_, rej) =>
+            setTimeout(() => rej(new Error('research timeout')), 20000),
+          );
+          const r = await Promise.race([model.generateContent(query), timeout]);
           const text = r.response.text();
           const meta = (
             r.response.candidates?.[0] as {
@@ -65,10 +69,19 @@ export class AiService {
           const sources = (meta?.groundingChunks ?? [])
             .map((c) => ({ title: c.web?.title, uri: c.web?.uri }))
             .filter((s) => !!s.uri);
+          if (!text && sources.length === 0) {
+            this.logger.warn(`Gemini research (${modelName}): empty — grounding may be unavailable for this key tier`);
+            return null;
+          }
           return { text, sources };
         } catch (err) {
+          const msg = (err as Error).message ?? '';
+          if (msg === 'research timeout') {
+            this.logger.warn(`Gemini research (${modelName}) timed out after 20s`);
+            return null;
+          }
           if (!this.isTransient(err)) {
-            this.logger.warn(`Gemini research (${modelName}) failed: ${(err as Error).message}`);
+            this.logger.warn(`Gemini research (${modelName}) failed: ${msg}`);
             break;
           }
           await this.sleep(Math.min(1500 * attempt * attempt, 6000));
