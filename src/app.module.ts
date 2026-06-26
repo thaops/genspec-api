@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { BullModule } from '@nestjs/bullmq';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { NotificationController } from './notification/notification.controller';
@@ -16,6 +17,7 @@ import { DrawingModule } from './drawing/drawing.module';
 import { QueueModule } from './queue/queue.module';
 
 const isAdmin = process.env.DATAHUB_ADMIN === 'true';
+const redisUrl = process.env.REDIS_URL;
 
 @Module({
   imports: [
@@ -30,6 +32,10 @@ const isAdmin = process.env.DATAHUB_ADMIN === 'true';
       }),
     }),
     EventEmitterModule.forRoot(),
+    // BullMQ root — only when Redis is configured
+    ...(redisUrl
+      ? [BullModule.forRoot({ connection: { url: redisUrl } })]
+      : []),
     StorageModule,
     UsersModule,
     AuthModule,
@@ -37,7 +43,7 @@ const isAdmin = process.env.DATAHUB_ADMIN === 'true';
     isAdmin ? DataHubAdminModule : DataHubCoreModule,
     EstimateModule,
     DrawingModule,
-    QueueModule,
+    ...(redisUrl ? [QueueModule] : []),
   ],
   controllers: [AppController, NotificationController],
   providers: [AppService],

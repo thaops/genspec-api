@@ -1,7 +1,5 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { BullModule } from '@nestjs/bullmq';
-import { DRAWING_QUEUE } from '../queue/drawing.queue';
 import { DrawingController } from './drawing.controller';
 // Pipeline
 import { DrawingParserService } from './services/drawing-parser.service';
@@ -37,7 +35,6 @@ import { DrawingAnnotation, DrawingAnnotationSchema } from './schemas/drawing-an
 
 @Module({
   imports: [
-    BullModule.registerQueue({ name: DRAWING_QUEUE }),
     MongooseModule.forFeature([
       { name: Drawing.name,             schema: DrawingSchema },
       { name: DrawingObject.name,       schema: DrawingObjectSchema },

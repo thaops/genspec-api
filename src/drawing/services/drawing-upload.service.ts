@@ -1,14 +1,23 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Drawing, DrawingDocument } from '../schemas/drawing.schema';
 import { DrawingObject, DrawingObjectDocument } from '../schemas/drawing-object.schema';
 import { CloudinaryService } from '../../storage/cloudinary.service';
-import { DRAWING_QUEUE, DrawingJobData } from '../../queue/drawing.queue';
+import { DrawingUploadedEvent } from '../../events/domain-events';
+
+// Queue is optional — only injected when REDIS_URL is set
+let Queue: typeof import('bullmq').Queue | undefined;
+let InjectQueue: typeof import('@nestjs/bullmq').InjectQueue | undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  Queue = require('bullmq').Queue;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  InjectQueue = require('@nestjs/bullmq').InjectQueue;
+} catch {}
 
 @Injectable()
 export class DrawingUploadService {
@@ -17,18 +26,18 @@ export class DrawingUploadService {
   constructor(
     @InjectModel(Drawing.name) private drawingModel: Model<DrawingDocument>,
     @InjectModel(DrawingObject.name) private objectModel: Model<DrawingObjectDocument>,
-    @InjectQueue(DRAWING_QUEUE) private drawingQueue: Queue,
+    private readonly events: EventEmitter2,
     private readonly cloudinary: CloudinaryService,
   ) {}
 
   async upload(estimateId: string, file: Express.Multer.File) {
     const ext      = file.originalname.split('.').pop()?.toLowerCase() ?? '';
-    const fileType = (['pdf', 'dwg', 'dxf'].includes(ext) ? ext : 'image') as DrawingJobData['fileType'];
+    const fileType = (['pdf', 'dwg', 'dxf'].includes(ext) ? ext : 'image') as 'pdf' | 'dwg' | 'dxf' | 'image';
 
-    // 1. Save to tmp for fast queueing (worker may also use this path)
+    // 1. Save buffer to tmp (parser needs filesystem access)
     const tmpPath = this.saveTmp(estimateId, file);
 
-    // 2. Upload to Cloudinary for durable storage (worker downloads from here if tmp is gone)
+    // 2. Upload to Cloudinary for durable storage
     let storageUrl = tmpPath;
     try {
       const result = await this.cloudinary.uploadBuffer(file.buffer, {
@@ -36,12 +45,11 @@ export class DrawingUploadService {
         fileName: `${Date.now()}_${file.originalname}`,
       });
       storageUrl = result.url;
-      this.logger.log(`Uploaded to Cloudinary: ${storageUrl}`);
     } catch (err: any) {
       this.logger.warn(`Cloudinary unavailable, using tmp: ${err.message}`);
     }
 
-    // 3. Create drawing record immediately (status: queued)
+    // 3. Create drawing record
     const drawing = await this.drawingModel.create({
       estimateId,
       name: file.originalname,
@@ -53,28 +61,32 @@ export class DrawingUploadService {
 
     const drawingId = (drawing as any)._id.toString();
 
-    // 4. Add to BullMQ queue — return immediately, worker does the heavy lifting
-    const job = await this.drawingQueue.add(
-      'process',
-      {
-        drawingId,
-        estimateId,
-        fileType,
-        storageUrl,
-        tmpPath,
-      } satisfies DrawingJobData,
-      {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: { age: 86400 },  // keep 24h for status polling
-        removeOnFail: { age: 7 * 86400 },
-      },
+    // 4. Queue the job if Redis is available, otherwise use EventEmitter pipeline
+    const queue = this.getQueue();
+    if (queue) {
+      const job = await queue.add(
+        'process',
+        { drawingId, estimateId, fileType, storageUrl, tmpPath },
+        {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: { age: 86400 },
+          removeOnFail: { age: 7 * 86400 },
+        },
+      );
+      this.logger.log(`Drawing ${drawingId} queued as job ${job.id}`);
+      return { ...drawing.toObject(), id: drawingId, jobId: job.id };
+    }
+
+    // Fallback: emit domain event for synchronous event-driven pipeline
+    this.logger.log(`Drawing ${drawingId} → EventEmitter fallback (no Redis)`);
+    await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'parsing' });
+    this.events.emit(
+      DrawingUploadedEvent.EVENT,
+      new DrawingUploadedEvent(drawingId, estimateId, fileType, tmpPath, 'user'),
     );
 
-    this.logger.log(`Drawing ${drawingId} queued as job ${job.id}`);
-
-    // Return drawing + jobId so FE can track status
-    return { ...drawing.toObject(), id: drawingId, jobId: job.id };
+    return { ...drawing.toObject(), id: drawingId };
   }
 
   async list(estimateId: string): Promise<DrawingDocument[]> {
@@ -97,6 +109,22 @@ export class DrawingUploadService {
     if (result.deletedCount === 0) throw new NotFoundException('Drawing not found');
     await this.objectModel.deleteMany({ drawingId });
     return { ok: true };
+  }
+
+  private _queue: InstanceType<typeof import('bullmq').Queue> | null | undefined = undefined;
+
+  private getQueue() {
+    if (this._queue !== undefined) return this._queue;
+    if (!process.env.REDIS_URL || !Queue) {
+      this._queue = null;
+      return null;
+    }
+    try {
+      this._queue = new Queue('drawing', { connection: { url: process.env.REDIS_URL } });
+    } catch {
+      this._queue = null;
+    }
+    return this._queue;
   }
 
   private saveTmp(estimateId: string, file: Express.Multer.File): string {
