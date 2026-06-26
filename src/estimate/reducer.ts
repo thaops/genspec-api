@@ -163,7 +163,13 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
         const rKey = String(row);
         const cKey = String(col);
         const rowData = { ...cellData[rKey] };
-        rowData[cKey] = { ...rowData[cKey], v: isFinite(Number(a.newValue)) ? Number(a.newValue) : a.newValue };
+        const isFormula = typeof a.newValue === 'string' && String(a.newValue).startsWith('=');
+        if (isFormula) {
+          // Store formula in `f` field; Univer will compute `v` at render time
+          rowData[cKey] = { ...rowData[cKey], f: String(a.newValue).slice(1), v: null };
+        } else {
+          rowData[cKey] = { ...rowData[cKey], v: isFinite(Number(a.newValue)) ? Number(a.newValue) : a.newValue, f: undefined };
+        }
         cellData[rKey] = rowData;
         return {
           ...s,

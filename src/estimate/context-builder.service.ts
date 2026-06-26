@@ -109,7 +109,10 @@ export class ContextBuilderService {
       const cells: Record<string, string> = {};
       for (let c = startCol; c <= endCol; c++) {
         const cell = row[String(c)];
-        if (cell) cells[String(c)] = String(cell.v ?? cell.m ?? '');
+        if (cell) {
+          // Include formula if present so AI knows to use =ref syntax, not hardcoded values
+          cells[String(c)] = cell.f ? `=${cell.f}` : String(cell.v ?? cell.m ?? '');
+        }
       }
       if (Object.keys(cells).length > 0) rows.push({ rowKey: String(r), cells });
     }
