@@ -4,8 +4,7 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
 import { Drawing, DrawingDocument } from '../schemas/drawing.schema';
 import { DrawingObject, DrawingObjectDocument } from '../schemas/drawing-object.schema';
-import { PdfParserService } from '../parsers/pdf-parser.service';
-import { DxfParserService } from '../parsers/dxf-parser.service';
+import { DrawingParserFactory } from '../parsers/drawing-parser.factory';
 import { DrawingNormalizerService } from './drawing-normalizer.service';
 import { DrawingDetectorService } from './drawing-detector.service';
 import { DrawingIndexerService } from './drawing-indexer.service';
@@ -32,8 +31,7 @@ export class DrawingParserService {
   constructor(
     @InjectModel(Drawing.name) private drawingModel: Model<DrawingDocument>,
     @InjectModel(DrawingObject.name) private objectModel: Model<DrawingObjectDocument>,
-    private readonly pdf: PdfParserService,
-    private readonly dxf: DxfParserService,
+    private readonly parserFactory: DrawingParserFactory,
     private readonly normalizer: DrawingNormalizerService,
     private readonly detector: DrawingDetectorService,
     private readonly indexer: DrawingIndexerService,
@@ -46,65 +44,39 @@ export class DrawingParserService {
       { _id: event.drawingId },
       { convertedUrl: event.dxfPath, parseStatus: 'parsing' },
     );
-    await this.runDxfPipeline(event.drawingId, event.dxfPath);
+    await this.runPipeline(event.drawingId, event.dxfPath, 'dxf');
   }
 
   @OnEvent(DrawingUploadedEvent.EVENT)
   async onUploaded(event: DrawingUploadedEvent) {
     if (event.fileType === 'dwg') return; // waits for DrawingConvertedEvent
-    const path = this.resolveStoragePath(event.storagePath);
-    if (event.fileType === 'dxf') {
-      await this.runDxfPipeline(event.drawingId, path);
-    } else {
-      await this.runPdfPipeline(event.drawingId, path);
-    }
+    await this.runPipeline(
+      event.drawingId,
+      this.resolveStoragePath(event.storagePath),
+      event.fileType,
+    );
   }
 
-  private async runPdfPipeline(drawingId: string, filePath: string) {
-    this.logger.log(`PDF pipeline: ${drawingId}`);
+  private async runPipeline(drawingId: string, filePath: string, ext: string) {
+    this.logger.log(`Pipeline [${ext}]: ${drawingId}`);
     await this.setStatus(drawingId, 'parsing');
     try {
-      const { pages } = await this.pdf.parse(filePath);
+      const parser = this.parserFactory.resolve(ext);
+      const result = await parser.parse(filePath);
 
-      const rawObjects = pages.flatMap((page) =>
-        this.normalizer.fromPdfPage(
-          drawingId,
-          page,
-          this.pdf.extractLabels(page.text),
-          this.pdf.extractDimensions(page.text),
-        ),
-      );
+      const rawObjects = this.normalizer.fromPages(drawingId, result.pages);
+      const detected   = this.detector.detect(rawObjects);
 
-      const detected = this.detector.detect(rawObjects);
       await this.persistObjects(drawingId, detected);
-      await this.indexer.buildIndex(drawingId, detected, [], pages);
+      await this.indexer.buildIndex(drawingId, detected, result.layers, result.pages);
       await this.drawingModel.updateOne(
         { _id: drawingId },
-        { pageCount: pages.length, parseStatus: 'ready' },
+        { pageCount: result.pages.length, parseStatus: 'ready' },
       );
 
-      this.emitParsedAndDetected(drawingId, pages.length, 0, detected.length, '');
-    } catch (err: any) {
-      await this.setStatus(drawingId, 'failed', err.message);
-    }
-  }
-
-  private async runDxfPipeline(drawingId: string, filePath: string) {
-    this.logger.log(`DXF pipeline: ${drawingId}`);
-    await this.setStatus(drawingId, 'parsing');
-    try {
-      const { layers, entities } = this.dxf.parse(filePath);
-
-      const rawObjects = this.normalizer.fromDxfEntities(drawingId, entities);
-      const detected = this.detector.detect(rawObjects);
-      await this.persistObjects(drawingId, detected);
-      await this.indexer.buildIndex(drawingId, detected, layers);
-      await this.drawingModel.updateOne(
-        { _id: drawingId },
-        { pageCount: 1, parseStatus: 'ready' },
+      this.emitParsedAndDetected(
+        drawingId, result.pages.length, result.layers.length, detected.length, '',
       );
-
-      this.emitParsedAndDetected(drawingId, 1, layers.length, detected.length, '');
     } catch (err: any) {
       await this.setStatus(drawingId, 'failed', err.message);
     }

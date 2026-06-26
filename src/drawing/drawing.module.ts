@@ -7,6 +7,7 @@ import { DrawingNormalizerService } from './services/drawing-normalizer.service'
 import { DrawingDetectorService } from './services/drawing-detector.service';
 import { DrawingIndexerService } from './services/drawing-indexer.service';
 // Parsers
+import { DrawingParserFactory } from './parsers/drawing-parser.factory';
 import { PdfParserService } from './parsers/pdf-parser.service';
 import { DxfParserService } from './parsers/dxf-parser.service';
 // Converter
@@ -30,6 +31,7 @@ import { DrawingObject, DrawingObjectSchema } from './schemas/drawing-object.sch
 import { DrawingRelationship, DrawingRelationshipSchema } from './schemas/drawing-relationship.schema';
 import { DrawingRevision, DrawingRevisionSchema } from './schemas/drawing-revision.schema';
 import { DrawingIndex, DrawingIndexSchema } from './schemas/drawing-index.schema';
+import { DrawingAnnotation, DrawingAnnotationSchema } from './schemas/drawing-annotation.schema';
 
 @Module({
   imports: [
@@ -39,6 +41,7 @@ import { DrawingIndex, DrawingIndexSchema } from './schemas/drawing-index.schema
       { name: DrawingRelationship.name, schema: DrawingRelationshipSchema },
       { name: DrawingRevision.name,     schema: DrawingRevisionSchema },
       { name: DrawingIndex.name,        schema: DrawingIndexSchema },
+      { name: DrawingAnnotation.name,   schema: DrawingAnnotationSchema },
     ]),
   ],
   controllers: [DrawingController],
@@ -49,6 +52,7 @@ import { DrawingIndex, DrawingIndexSchema } from './schemas/drawing-index.schema
     DrawingDetectorService,
     DrawingIndexerService,
     // Parsers
+    DrawingParserFactory,
     PdfParserService,
     DxfParserService,
     // Converter

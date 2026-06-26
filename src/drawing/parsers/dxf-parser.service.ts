@@ -48,9 +48,9 @@ export class DxfParserService implements DrawingParserInterface {
       }
 
       if (inTables && code === '0' && value === 'LAYER') {
-        const g = this.readGroup(lines, i);
-        i += g._n;
-        layers.push({ name: g['2'] ?? '0', color: g['62'] ? parseInt(g['62'], 10) : undefined });
+        const { data, consumed } = this.readGroup(lines, i);
+        i += consumed;
+        layers.push({ name: data['2'] ?? '0', color: data['62'] ? parseInt(data['62'], 10) : undefined });
         continue;
       }
 
@@ -61,9 +61,9 @@ export class DxfParserService implements DrawingParserInterface {
           'INSERT','HATCH','VIEWPORT','SPLINE',
         ]);
         if (supported.has(value)) {
-          const g = this.readGroup(lines, i);
-          i += g._n;
-          entities.push(this.groupToEntity(value, g));
+          const { data, consumed } = this.readGroup(lines, i);
+          i += consumed;
+          entities.push(this.groupToEntity(value, data));
         }
       }
     }
@@ -87,17 +87,16 @@ export class DxfParserService implements DrawingParserInterface {
     };
   }
 
-  private readGroup(lines: string[], start: number): Record<string, string> & { _n: number } {
-    const g: Record<string, string> & { _n: number } = { _n: 0 };
+  private readGroup(lines: string[], start: number): { data: Record<string, string>; consumed: number } {
+    const data: Record<string, string> = {};
     let j = start;
     while (j < lines.length) {
       const c = lines[j]?.trim();
       if (c === '0') break;
-      if (c !== undefined) g[c] = lines[j + 1]?.trim() ?? '';
+      if (c !== undefined) data[c] = lines[j + 1]?.trim() ?? '';
       j += 2;
     }
-    g._n = j - start;
-    return g;
+    return { data, consumed: j - start };
   }
 
   private groupToEntity(type: string, g: Record<string, string>): RawEntity {

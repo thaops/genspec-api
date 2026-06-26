@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as pdfParse from 'pdf-parse';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const pdfParse = require('pdf-parse') as (buf: Buffer, opts?: any) => Promise<any>;
 import * as fs from 'fs';
 import type {
   DrawingParserInterface,

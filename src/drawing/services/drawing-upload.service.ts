@@ -16,7 +16,7 @@ export class DrawingUploadService {
 
   async upload(estimateId: string, file: Express.Multer.File): Promise<DrawingDocument> {
     const ext = file.originalname.split('.').pop()?.toLowerCase() ?? '';
-    const fileType = (['pdf', 'dwg', 'dxf'].includes(ext) ? ext : 'image') as Drawing['type'];
+    const fileType = (['pdf', 'dwg', 'dxf'].includes(ext) ? ext : 'image') as 'pdf' | 'dwg' | 'dxf' | 'image';
 
     // TODO: upload file to storage (S3 / Railway volumes) and get url
     const url = `/uploads/${estimateId}/${file.originalname}`;
