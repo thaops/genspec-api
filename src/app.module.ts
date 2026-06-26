@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { NotificationController } from './notification/notification.controller';
 import { AuthModule } from './auth/auth.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { DataHubCoreModule } from './data-hub/data-hub-core.module';
@@ -36,7 +37,7 @@ const isAdmin = process.env.DATAHUB_ADMIN === 'true';
     EstimateModule,
     DrawingModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, NotificationController],
   providers: [AppService],
 })
 export class AppModule {}
