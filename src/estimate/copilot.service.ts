@@ -44,7 +44,10 @@ function normalizeVi(s: string): string {
 
 // Regex run against BOTH original and normalized input
 const EDIT_INTENT = /(cap nhat|cap_nhat|sua|thay doi|them|xoa|doi|tang|giam|set|update|delete|insert|cap nhat|cập nhật|sửa|thay đổi|thêm|xóa|đổi|tăng|giảm)/i;
-const REVIEW_INTENT = /(kiem tra|soat loi|tim loi|quet loi|bat thuong|trung|audit|review|outlier|kiểm tra|soát lỗi|tìm lỗi|quét lỗi|bất thường|trùng)/i;
+// REVIEW only when user explicitly asks to audit the whole document
+const REVIEW_INTENT = /(soat loi|tim loi|quet loi|bat thuong|trung|audit|review|outlier|soát lỗi|tìm lỗi|quét lỗi|bất thường|trùng|kiem tra (toan bo|workbook|du toan|file)|kiểm tra (toàn bộ|workbook|dự toán|file))/i;
+// Web/legal intent overrides REVIEW — these are research questions, not document audits
+const WEB_LEGAL_INTENT = /(thong tu|nghi dinh|quyet dinh|quy dinh|phap ly|dinh muc|tren mang|cu chua|hien hanh|moi nhat|thông tư|nghị định|quyết định|quy định|pháp lý|định mức|trên mạng|cũ chưa|hiện hành|mới nhất)/i;
 const PRICE_INTENT = /(gia|don gia|vat lieu|vat tu|dinh muc|du toan|lap|boc|khoi luong|bao gia|thi truong|giá|đơn giá|vật liệu|vật tư|định mức|dự toán|lập|bóc|khối lượng|báo giá|thị trường|cập nhật)/i;
 
 @Injectable()
@@ -89,7 +92,7 @@ export class CopilotService {
       .map((m: any) => `${m.kind === 'user' ? 'User' : 'Minh'}: ${String(m.text ?? '').slice(0, 300)}`)
       .join('\n');
 
-    const rawMode = this.detectMode(message);
+    const rawMode = this.detectMode(message, !!selectedRange);
     // In safe mode (no editPermission) downgrade edit intent to read
     const mode: CopilotMode = !editPermission && rawMode === 'edit' ? 'read' : rawMode;
     this.logger.log(`Copilot mode: ${mode} (raw=${rawMode}, editPermission=${editPermission})`);
@@ -307,8 +310,12 @@ Trả về 6-8 kết quả chính xác nhất, mới nhất. trustScore từ 70-
     }
   }
 
-  private detectMode(message: string): CopilotMode {
+  private detectMode(message: string, hasSelection: boolean): CopilotMode {
     const norm = normalizeVi(message);
+    // Web/legal questions always go to read — even if message contains "kiểm tra"
+    if (WEB_LEGAL_INTENT.test(message) || WEB_LEGAL_INTENT.test(norm)) return 'read';
+    // If user has a cell selected, treat as focused read unless edit action is explicit
+    if (hasSelection && !EDIT_INTENT.test(message) && !EDIT_INTENT.test(norm)) return 'read';
     if (REVIEW_INTENT.test(message) || REVIEW_INTENT.test(norm)) return 'review';
     if (EDIT_INTENT.test(message) || EDIT_INTENT.test(norm)) return 'edit';
     return 'read';

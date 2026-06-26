@@ -22,75 +22,84 @@ export class ReviewModeHandler {
   constructor(private readonly ai: AiService) {}
 
   async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = ''): AsyncGenerator<StreamEvent> {
-    yield { event: 'step', data: { text: 'Chạy Rule Engine kiểm tra lỗi tự động…' } };
+    // If user has selected a specific range, skip full rule engine — just answer about that area
+    const hasFocus = !!context.focusedData;
 
-    const toolResult = runReviewTools(workbook);
-    const { duplicates, outliers, missingPrices, formulaErrors } = toolResult.data;
-    const flatDups = duplicates.flat();
+    let findings: Finding[] = [];
 
-    const findings: Finding[] = [
-      ...flatDups.map((d) => ({
-        severity: 'error' as const,
-        area: 'duplicate' as const,
-        code: d.code,
-        message: `Trùng mã hiệu: ${d.code} — ${d.name}`,
-        suggestion: 'Xóa dòng trùng hoặc đổi mã hiệu thành duy nhất',
-      })),
-      ...outliers.map((o) => ({
-        severity: 'warn' as const,
-        area: 'price' as const,
-        code: o.code,
-        message: `Giá bất thường: ${o.name} (${o.price.toLocaleString('vi-VN')} đ) — ${o.reason}`,
-        suggestion: 'Kiểm tra lại đơn giá so với thông báo giá địa phương',
-      })),
-      ...missingPrices.map((m) => ({
-        severity: 'warn' as const,
-        area: 'missing' as const,
-        sheetId: m.sheetId,
-        code: m.code,
-        message: `Thiếu giá: ${m.name} — ${m.reason}`,
-        suggestion: 'Cập nhật đơn giá từ thông báo giá hoặc báo giá nhà cung cấp',
-      })),
-      ...formulaErrors.map((f) => ({
-        severity: 'error' as const,
-        area: 'formula' as const,
-        sheetId: f.sheetId,
-        message: `Lỗi công thức tại ${f.cellAddress}: ${f.errorValue}`,
-        suggestion: 'Kiểm tra tham chiếu ô hoặc công thức tính toán',
-      })),
-    ];
+    if (!hasFocus) {
+      yield { event: 'step', data: { text: 'Kiểm tra lỗi tự động…' } };
 
-    // Checklist audit — extract tên từ BOQ/takeoff sheet
-    const takeoffSheet = (workbook.sheets ?? []).find((s) => {
-      const { sheetType } = detectSheetType(s);
-      return sheetType === 'takeoff' || sheetType === 'boq';
-    });
-    if (takeoffSheet?.data?.cellData) {
-      const names: string[] = [];
-      for (const row of Object.values(takeoffSheet.data.cellData) as Record<string, { v?: unknown }>[]) {
-        if (!row) continue;
-        for (const cell of Object.values(row) as { v?: unknown }[]) {
-          const v = String(cell?.v ?? '').trim();
-          if (v.length > 5) names.push(v);
+      const toolResult = runReviewTools(workbook);
+      const { duplicates, outliers, missingPrices, formulaErrors } = toolResult.data;
+      const flatDups = duplicates.flat();
+
+      findings = [
+        ...flatDups.map((d) => ({
+          severity: 'error' as const,
+          area: 'duplicate' as const,
+          code: d.code,
+          message: `Trùng mã hiệu: ${d.code} — ${d.name}`,
+          suggestion: 'Xóa dòng trùng hoặc đổi mã hiệu thành duy nhất',
+        })),
+        ...outliers.map((o) => ({
+          severity: 'warn' as const,
+          area: 'price' as const,
+          code: o.code,
+          message: `Giá bất thường: ${o.name} (${o.price.toLocaleString('vi-VN')} đ) — ${o.reason}`,
+          suggestion: 'Kiểm tra lại đơn giá so với thông báo giá địa phương',
+        })),
+        ...missingPrices.map((m) => ({
+          severity: 'warn' as const,
+          area: 'missing' as const,
+          sheetId: m.sheetId,
+          code: m.code,
+          message: `Thiếu giá: ${m.name} — ${m.reason}`,
+          suggestion: 'Cập nhật đơn giá từ thông báo giá hoặc báo giá nhà cung cấp',
+        })),
+        ...formulaErrors.map((f) => ({
+          severity: 'error' as const,
+          area: 'formula' as const,
+          sheetId: f.sheetId,
+          message: `Lỗi công thức tại ${f.cellAddress}: ${f.errorValue}`,
+          suggestion: 'Kiểm tra tham chiếu ô hoặc công thức tính toán',
+        })),
+      ];
+
+      // Checklist audit — extract tên từ BOQ/takeoff sheet
+      const takeoffSheet = (workbook.sheets ?? []).find((s) => {
+        const { sheetType } = detectSheetType(s);
+        return sheetType === 'takeoff' || sheetType === 'boq';
+      });
+      if (takeoffSheet?.data?.cellData) {
+        const names: string[] = [];
+        for (const row of Object.values(takeoffSheet.data.cellData) as Record<string, { v?: unknown }>[]) {
+          if (!row) continue;
+          for (const cell of Object.values(row) as { v?: unknown }[]) {
+            const v = String(cell?.v ?? '').trim();
+            if (v.length > 5) names.push(v);
+          }
+        }
+        const { missing } = auditAgainstChecklist(names);
+        for (const m of missing.slice(0, 10)) {
+          findings.push({
+            severity: 'warn',
+            area: 'logic',
+            message: `Có thể thiếu hạng mục: ${m.name} (${m.group})`,
+            suggestion: `Bổ sung: ${m.components.join(', ')}`,
+          });
         }
       }
-      const { missing } = auditAgainstChecklist(names);
-      for (const m of missing.slice(0, 10)) {
-        findings.push({
-          severity: 'warn',
-          area: 'logic',
-          message: `Có thể thiếu hạng mục: ${m.name} (${m.group})`,
-          suggestion: `Bổ sung: ${m.components.join(', ')}`,
-        });
-      }
-    }
 
-    if (findings.length > 0) {
-      const errCount = findings.filter((f) => f.severity === 'error').length;
-      const warnCount = findings.filter((f) => f.severity === 'warn').length;
-      yield { event: 'step', data: { text: `Phát hiện ${errCount} lỗi, ${warnCount} cảnh báo` } };
+      if (findings.length > 0) {
+        const errCount = findings.filter((f) => f.severity === 'error').length;
+        const warnCount = findings.filter((f) => f.severity === 'warn').length;
+        yield { event: 'step', data: { text: `Phát hiện ${errCount} lỗi, ${warnCount} cảnh báo` } };
+      } else {
+        yield { event: 'step', data: { text: 'Không phát hiện lỗi cứng' } };
+      }
     } else {
-      yield { event: 'step', data: { text: 'Rule Engine không phát hiện lỗi cứng' } };
+      yield { event: 'step', data: { text: `Tập trung vào ${context.selectionLabel ?? 'vùng đã chọn'}…` } };
     }
 
     // Tra cứu giá thị trường nếu có outlier hoặc missing prices
@@ -111,7 +120,7 @@ export class ReviewModeHandler {
 
     yield { event: 'step', data: { text: 'AI soát xét logic nghiệp vụ…' } };
 
-    const prompt = this.buildPrompt(context, message, findings, history, webContext);
+    const prompt = this.buildPrompt(context, message, findings, history, webContext, hasFocus);
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
@@ -144,30 +153,49 @@ export class ReviewModeHandler {
     };
   }
 
-  private buildPrompt(context: WorkbookContext, message: string, findings: Finding[], history: string, webContext: string): string {
+  private buildPrompt(context: WorkbookContext, message: string, findings: Finding[], history: string, webContext: string, hasFocus: boolean): string {
+    if (hasFocus) {
+      // Focused mode: user selected a cell/range — answer only about that
+      return [
+        'Bạn là Minh — QS senior. User đang chọn vùng cụ thể trong sheet, hãy trả lời thẳng về vùng đó.',
+        'Không nhắc đến workbook hay các sheet khác trừ khi cần thiết để giải thích.',
+        webContext ? 'Dẫn nguồn cụ thể (tên văn bản, ngày, link) nếu trích dẫn giá hoặc định mức.' : '',
+        'Nói như đồng nghiệp — không dùng header, không viết báo cáo.',
+        '',
+        history ? `LỊCH SỬ:\n${history}` : '',
+        '',
+        context.activeSheetSummary ? `SHEET ĐANG XEM:\n${context.activeSheetSummary}` : '',
+        `VÙNG ĐANG CHỌN (${context.selectionLabel ?? ''}):\n${context.focusedData}`,
+        webContext ? `\nTHÔNG TIN TRA CỨU:\n${webContext}` : '',
+        '',
+        `"${message}"`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+
     const byArea = (area: string) => findings.filter((f) => f.area === area);
     const fmt = (list: Finding[]) => list.length === 0 ? 'không có' : list.map((f) => `• ${f.message}${f.suggestion ? ` → ${f.suggestion}` : ''}`).join('\n');
     return [
-      'Bạn là Minh — QS senior đang review dự toán này. Rule engine vừa chạy xong, kết quả bên dưới.',
-      'Phân tích thực chất, nói thẳng vấn đề quan trọng nhất. Không liệt kê lại từng dòng lỗi.',
-      webContext ? 'Nếu dẫn giá thị trường hoặc định mức, trích dẫn nguồn cụ thể (tên văn bản, ngày, link nếu có).' : '',
-      'Không viết báo cáo hành chính. Nói như đồng nghiệp.',
+      'Bạn là Minh — QS senior đang review dự toán. Kết quả kiểm tra tự động bên dưới.',
+      'Nói thẳng vấn đề quan trọng nhất. Không liệt kê lại từng lỗi — tổng hợp thành nhận xét thực chất.',
+      webContext ? 'Dẫn nguồn cụ thể (tên văn bản, ngày, link) nếu trích dẫn giá hoặc định mức.' : '',
+      'Nói như đồng nghiệp — không dùng header, không viết báo cáo hành chính.',
       '',
       history ? `LỊCH SỬ:\n${history}` : '',
       '',
       context.activeSheetSummary ? `SHEET ĐANG XEM (review tập trung vào đây trước):\n${context.activeSheetSummary}` : '',
-      context.focusedData ? `VÙNG ĐANG CHỌN (${context.selectionLabel ?? ''}) — review ưu tiên vùng này:\n${context.focusedData}` : '',
       `TỔNG QUAN WORKBOOK:\n${context.workbookSummary}`,
       '',
-      'KẾT QUẢ RULE ENGINE:',
-      `Trùng mã:\n${fmt(byArea('duplicate'))}`,
-      `Giá bất thường:\n${fmt(byArea('price'))}`,
-      `Thiếu giá:\n${fmt(byArea('missing'))}`,
-      `Lỗi công thức:\n${fmt(byArea('formula'))}`,
-      `Thiếu hạng mục:\n${fmt(byArea('logic'))}`,
-      webContext ? `\nGIÁ THỊ TRƯỜNG / ĐỊNH MỨC THAM CHIẾU:\n${webContext}` : '',
+      findings.length > 0 ? 'KẾT QUẢ KIỂM TRA:' : '',
+      byArea('duplicate').length ? `Trùng mã:\n${fmt(byArea('duplicate'))}` : '',
+      byArea('price').length ? `Giá bất thường:\n${fmt(byArea('price'))}` : '',
+      byArea('missing').length ? `Thiếu giá:\n${fmt(byArea('missing'))}` : '',
+      byArea('formula').length ? `Lỗi công thức:\n${fmt(byArea('formula'))}` : '',
+      byArea('logic').length ? `Thiếu hạng mục:\n${fmt(byArea('logic'))}` : '',
+      webContext ? `\nGIÁ THỊ TRƯỜNG / ĐỊNH MỨC:\n${webContext}` : '',
       '',
-      message ? `Người dùng: "${message}"` : 'Tóm tắt những vấn đề đáng lo nhất.',
+      message ? `"${message}"` : 'Tóm tắt vấn đề đáng lo nhất.',
     ]
       .filter(Boolean)
       .join('\n');
