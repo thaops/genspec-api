@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as ExcelJS from 'exceljs';
 import { AiService, GeminiPart } from '../../ai/ai.service';
 import { CatalogService } from '../../catalog/catalog.service';
 import { WorkbookContext } from '../context-builder.service';
@@ -45,6 +44,7 @@ export class EditModeHandler {
     message: string,
     files: Express.Multer.File[],
     research: { text: string; sources: { title?: string; uri?: string }[] },
+    history = '',
   ): AsyncGenerator<StreamEvent> {
     const k = (n: number) => (n > 0 ? Math.round(n).toLocaleString('vi-VN') : '—');
     const catalogCodes = this.catalog
@@ -67,7 +67,7 @@ export class EditModeHandler {
 
     const streamParts: GeminiPart[] = [
       ...visualParts,
-      { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, true) },
+      { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, true, history) },
     ];
 
     let buf = '';
@@ -118,7 +118,7 @@ export class EditModeHandler {
       try {
         const fbParts: GeminiPart[] = [
           ...visualParts,
-          { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, false) },
+          { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, false, history) },
         ];
         reply = this.parse(await this.ai.generate(fbParts));
       } catch (err) {
@@ -174,7 +174,7 @@ export class EditModeHandler {
       event: 'proposal',
       data: {
         thinking: reply.thinking,
-        message: draftNote + (reply.message || 'Đã chuẩn bị đề xuất.'),
+        message: draftNote + (reply.message || `Đã xử lý ${reply.actions.length} thay đổi.`),
         confidence: reply.confidence,
         actions: reply.actions,
         sources: research.sources,
@@ -203,6 +203,7 @@ export class EditModeHandler {
     researchText: string,
     catalogCodes: string,
     streaming: boolean,
+    history = '',
   ): string {
     const stateSummary = {
       projectInfo: state.projectInfo,
@@ -235,14 +236,11 @@ export class EditModeHandler {
       .join('\n');
 
     return [
-      'Bạn là QS Workspace Agent — trợ lý dự toán xây dựng chuyên nghiệp.',
-      'Vai trò: Hỗ trợ QS Engineer chỉnh sửa, cập nhật và bổ sung dữ liệu dự toán.',
-      'Nguyên tắc:',
-      '- Chỉ thực hiện đúng yêu cầu của người dùng, không tự ý sinh thêm dữ liệu ngoài phạm vi.',
-      '- Khi người dùng yêu cầu sửa giá → chỉ sửa giá.',
-      '- Khi người dùng yêu cầu thêm hạng mục cụ thể → chỉ thêm hạng mục đó.',
-      '- Không tự sinh BOQ đầy đủ khi không được yêu cầu rõ ràng.',
-      '- Mọi đề xuất phải có nguồn truy vết (source).',
+      'Bạn là Minh — QS senior đang chỉnh sửa dự toán theo yêu cầu.',
+      'Làm đúng yêu cầu, không thêm không bớt. Nếu thiếu thông tin thực sự cần thiết → hỏi ngắn gọn 1 câu.',
+      'Mọi action phải có source trung thực (ai_estimate nếu tự suy luận).',
+      '',
+      history ? `LỊCH SỬ:\n${history}` : '',
       '',
       'MÔ HÌNH DỮ LIỆU (Resource-based, F1/G8):',
       '- materials: giá vật liệu | labor: giá nhân công | equipment: giá ca máy',
@@ -301,10 +299,11 @@ export class EditModeHandler {
       'Đánh giá confidence cho từng phần (0-100) với căn cứ rõ ràng (reasons[], missing[], uncertaintyPct).',
       streaming
         ? [
-            'ĐỊNH DẠNG ĐẦU RA:',
-            'Từng bước xử lý: một dòng bắt đầu bằng "STEP: " (tiếng Việt, ngắn).',
-            'Sau cùng ghi "JSON:" rồi object JSON hợp lệ trên dòng tiếp theo:',
+            'OUTPUT:',
+            'Trong khi xử lý, viết từng dòng suy nghĩ ngắn bắt đầu bằng "STEP: " (tiếng Việt, tự nhiên như đang làm thật).',
+            'Kết thúc bằng "JSON:" rồi object JSON hợp lệ trên dòng tiếp theo:',
             '{"thinking":string[],"message":string,"confidence":{boq,materials,labor,equipment,overall,reasons,missing,uncertaintyPct},"actions":Action[]}',
+            'message: viết như đang báo cáo với đồng nghiệp, tự nhiên, không dùng "Đã thực hiện..." hay "Đề xuất...".',
             'Không markdown. JSON phải hợp lệ.',
           ].join('\n')
         : 'Chỉ trả về JSON: {"thinking":string[],"message":string,"confidence":{...},"actions":Action[]}. Không markdown.',
@@ -503,6 +502,7 @@ export class EditModeHandler {
 
   private async excelToText(files: Express.Multer.File[]): Promise<string> {
     if (files.length === 0) return '';
+    const ExcelJS = await import('exceljs');
     const blocks: string[] = [];
     for (const file of files) {
       try {
@@ -527,7 +527,7 @@ export class EditModeHandler {
     return blocks.join('\n\n');
   }
 
-  private cellText(value: ExcelJS.CellValue): string {
+  private cellText(value: unknown): string {
     if (value == null) return '';
     if (typeof value === 'object') {
       const v = value as { richText?: { text: string }[]; text?: string; result?: unknown };

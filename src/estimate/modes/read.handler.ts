@@ -6,13 +6,13 @@ import { searchWorkbook } from '../tools/tool-registry';
 import { Workbook } from '../estimate.types';
 
 const SEARCH_INTENT = /(tìm|tìm kiếm|ở đâu|nằm ở|xuất hiện|có bao nhiêu|đang ở)/i;
-const WEB_INTENT = /(thông tư|nghị định|quyết định|quy định|pháp lý|định mức|đơn giá|bảng giá|thị trường|mới nhất|hiện hành|tìm trên mạng|tra cứu|cập nhật)/i;
+const WEB_INTENT = /(thông tư|nghị định|quyết định|quy định|pháp lý|định mức|đơn giá|bảng giá|thị trường|mới nhất|hiện hành|tìm trên mạng|tra cứu|cập nhật|thép|xi măng|bê tông|cát|đá|gạch|sơn|nhôm|kính|giá vật liệu|giá nhân công)/i;
 
 @Injectable()
 export class ReadModeHandler {
   constructor(private readonly ai: AiService) {}
 
-  async *handle(workbook: Workbook, context: WorkbookContext, message: string): AsyncGenerator<StreamEvent> {
+  async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = ''): AsyncGenerator<StreamEvent> {
     yield { event: 'step', data: { text: 'Đọc cấu trúc Workbook…' } };
 
     let searchContext = '';
@@ -43,7 +43,7 @@ export class ReadModeHandler {
       }
     }
 
-    const prompt = this.buildPrompt(context, message, searchContext, webContext);
+    const prompt = this.buildPrompt(context, message, searchContext, webContext, history);
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
@@ -78,22 +78,23 @@ export class ReadModeHandler {
     return words.slice(-2).join(' ');
   }
 
-  private buildPrompt(context: WorkbookContext, message: string, searchContext: string, webContext: string): string {
+  private buildPrompt(context: WorkbookContext, message: string, searchContext: string, webContext: string, history: string): string {
     return [
-      'Bạn là QS — trợ lý dự toán xây dựng Việt Nam, am hiểu pháp lý và thị trường.',
-      'Trả lời tự nhiên như một đồng nghiệp QS giàu kinh nghiệm, không cứng nhắc.',
+      'Bạn là Minh — QS senior 10 năm kinh nghiệm, thực chiến dự án dân dụng và công nghiệp tại Việt Nam.',
+      'Nói chuyện trực tiếp như đồng nghiệp, không dùng tiêu đề hay bullet point trừ khi liệt kê số liệu.',
+      'Không bắt đầu bằng "Theo workbook..." hay "Dựa vào dữ liệu...". Đi thẳng vào câu trả lời.',
+      'Nếu không chắc → nói thẳng, hỏi thêm ngắn gọn. Không đoán mò.',
       '',
-      'CẤU TRÚC WORKBOOK:',
+      history ? `LỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:\n${history}` : '',
+      '',
+      'WORKBOOK:',
       context.workbookSummary,
       context.activeSheetSummary ? `\nSHEET ĐANG XEM:\n${context.activeSheetSummary}` : '',
       context.focusedData ? `\nDỮ LIỆU ĐÃ CHỌN:\n${context.focusedData}` : '',
       searchContext ? `\n${searchContext}` : '',
       webContext ? `\n${webContext}` : '',
       '',
-      'CÂU HỎI:',
-      message,
-      '',
-      'Trả lời bằng tiếng Việt, tự nhiên và có ích. Kết hợp thông tin workbook và tra cứu nếu có. Không giải thích bạn làm gì, chỉ trả lời thẳng vào nội dung.',
+      `"${message}"`,
     ]
       .filter(Boolean)
       .join('\n');

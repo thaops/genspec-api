@@ -21,7 +21,7 @@ interface Finding {
 export class ReviewModeHandler {
   constructor(private readonly ai: AiService) {}
 
-  async *handle(workbook: Workbook, context: WorkbookContext, message: string): AsyncGenerator<StreamEvent> {
+  async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = ''): AsyncGenerator<StreamEvent> {
     yield { event: 'step', data: { text: 'Chạy Rule Engine kiểm tra lỗi tự động…' } };
 
     const toolResult = runReviewTools(workbook);
@@ -95,7 +95,7 @@ export class ReviewModeHandler {
 
     yield { event: 'step', data: { text: 'AI soát xét logic nghiệp vụ chuyên sâu…' } };
 
-    const prompt = this.buildPrompt(context, message, findings);
+    const prompt = this.buildPrompt(context, message, findings, history);
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
@@ -128,33 +128,30 @@ export class ReviewModeHandler {
     };
   }
 
-  private buildPrompt(context: WorkbookContext, message: string, findings: Finding[]): string {
+  private buildPrompt(context: WorkbookContext, message: string, findings: Finding[], history: string): string {
     const byArea = (area: string) => findings.filter((f) => f.area === area);
+    const fmt = (list: Finding[]) => list.length === 0 ? 'không có' : list.map((f) => `• ${f.message}${f.suggestion ? ` → ${f.suggestion}` : ''}`).join('\n');
     return [
-      'Bạn là QS Workspace Agent — chuyên gia kiểm soát chất lượng dự toán xây dựng Việt Nam.',
-      'Nhiệm vụ: Soát lỗi định mức, đơn giá, công thức. Không sửa dữ liệu — chỉ báo cáo.',
+      'Bạn là Minh — QS senior đang review dự toán này. Rule engine vừa chạy xong, kết quả bên dưới.',
+      'Đọc kết quả đó, kết hợp kinh nghiệm nghề, và nói thẳng những gì đáng lo nhất.',
+      'Đừng liệt kê lại từng dòng lỗi — phân tích ý nghĩa của chúng, ưu tiên cái nào cần sửa trước.',
+      'Trả lời như đang nói chuyện với đồng nghiệp, không viết báo cáo hành chính.',
       '',
-      'CẤU TRÚC WORKBOOK:',
+      history ? `LỊCH SỬ:\n${history}` : '',
+      '',
+      'WORKBOOK:',
       context.workbookSummary,
-      context.activeSheetSummary ? `\nSHEET HIỆN HÀNH:\n${context.activeSheetSummary}` : '',
+      context.activeSheetSummary ? `\nSHEET ĐANG XEM:\n${context.activeSheetSummary}` : '',
       context.focusedData ? `\nDỮ LIỆU ĐÃ CHỌN:\n${context.focusedData}` : '',
       '',
       'KẾT QUẢ RULE ENGINE:',
-      `Lỗi trùng mã (${byArea('duplicate').length}): ${JSON.stringify(byArea('duplicate'))}`,
-      `Giá bất thường (${byArea('price').length}): ${JSON.stringify(byArea('price'))}`,
-      `Thiếu giá (${byArea('missing').length}): ${JSON.stringify(byArea('missing'))}`,
-      `Lỗi công thức (${byArea('formula').length}): ${JSON.stringify(byArea('formula'))}`,
-      `Thiếu hạng mục (${byArea('logic').length}): ${JSON.stringify(byArea('logic'))}`,
+      `Trùng mã:\n${fmt(byArea('duplicate'))}`,
+      `Giá bất thường:\n${fmt(byArea('price'))}`,
+      `Thiếu giá:\n${fmt(byArea('missing'))}`,
+      `Lỗi công thức:\n${fmt(byArea('formula'))}`,
+      `Thiếu hạng mục:\n${fmt(byArea('logic'))}`,
       '',
-      'YÊU CẦU:',
-      message || 'Kiểm tra toàn bộ workbook',
-      '',
-      'Viết báo cáo soát lỗi bằng tiếng Việt. Phân tích thêm:',
-      '1. Các định mức bê tông có đủ VL (xi măng+cát+đá) + NC + Máy không?',
-      '2. Cốt thép có đủ thép + dây buộc + NC + máy cắt/uốn không?',
-      '3. Các hạng mục nào bị thiếu phân tích đơn giá?',
-      '4. Đơn giá nhân công có hợp lý theo định mức địa phương không?',
-      'Chỉ văn bản thường, không JSON.',
+      message ? `Người dùng hỏi: "${message}"` : 'Hãy tóm tắt những vấn đề đáng lo nhất.',
     ]
       .filter(Boolean)
       .join('\n');

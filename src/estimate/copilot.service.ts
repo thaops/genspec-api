@@ -78,8 +78,17 @@ export class CopilotService {
       return;
     }
 
-    const doc = await this.estimates.getOwned(userId, id);
+    const [doc, rawConvo] = await Promise.all([
+      this.estimates.getOwned(userId, id),
+      this.estimates.getConversation(userId, id).catch(() => [] as any[]),
+    ]);
     const context = this.contextBuilder.buildContext(doc as any, activeSheetId, selectedRange);
+    const history = (rawConvo as any[])
+      .slice(-6)
+      .filter((m: any) => m.kind === 'user' || m.kind === 'assistant')
+      .map((m: any) => `${m.kind === 'user' ? 'User' : 'Minh'}: ${String(m.text ?? '').slice(0, 300)}`)
+      .join('\n');
+
     const rawMode = this.detectMode(message);
     // In safe mode (no editPermission) downgrade edit intent to read
     const mode: CopilotMode = !editPermission && rawMode === 'edit' ? 'read' : rawMode;
@@ -90,12 +99,12 @@ export class CopilotService {
     }
 
     if (mode === 'read') {
-      yield* this.readHandler.handle(doc as any, context, message);
+      yield* this.readHandler.handle(doc as any, context, message, history);
       return;
     }
 
     if (mode === 'review') {
-      yield* this.reviewHandler.handle(doc as any, context, message);
+      yield* this.reviewHandler.handle(doc as any, context, message, history);
       return;
     }
 
@@ -111,7 +120,7 @@ export class CopilotService {
       yield { event: 'step', data: { text: `Tham chiếu ${research.sources.length} nguồn giá` } };
     }
 
-    yield* this.editHandler.handle(state, context, message, files, research);
+    yield* this.editHandler.handle(state, context, message, files, research, history);
   }
 
   async generateInsights(userId: string, id: string): Promise<InsightItem[]> {
