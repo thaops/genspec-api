@@ -13,6 +13,7 @@ export interface WorkbookContext {
   selectedRows?: CellRow[];
   neighborRows?: CellRow[];
   focusedData?: string;
+  selectionLabel?: string; // human-readable "B3:C5"
 }
 
 // Kept for backward compatibility with any code that still imports CompressedContext
@@ -48,14 +49,50 @@ export class ContextBuilderService {
           const afterRows = this.extractRows(cellData, selectedRange.endRow + 1, selectedRange.endRow + 2, selectedRange.startCol, selectedRange.endCol);
           neighborRows = [...beforeRows, ...afterRows];
 
+          const selStart = this.cellAddress(selectedRange.startRow, selectedRange.startCol);
+          const selEnd = this.cellAddress(selectedRange.endRow, selectedRange.endCol);
+          const label = selStart === selEnd ? selStart : `${selStart}:${selEnd}`;
+
+          const lines: string[] = [`Ô được chọn: ${label}`];
+          for (const row of selectedRows) {
+            const vals = Object.entries(row.cells).map(([col, val]) => `${this.colLetter(Number(col))}${Number(row.rowKey) + 1}="${val}"`).join(', ');
+            lines.push(`  Hàng ${Number(row.rowKey) + 1}: ${vals}`);
+          }
+          if (neighborRows.length > 0) {
+            lines.push('Ngữ cảnh lân cận:');
+            for (const row of neighborRows) {
+              const vals = Object.entries(row.cells).map(([col, val]) => `${this.colLetter(Number(col))}${Number(row.rowKey) + 1}="${val}"`).join(', ');
+              lines.push(`  Hàng ${Number(row.rowKey) + 1}: ${vals}`);
+            }
+          }
+          focusedData = lines.join('\n');
+
+          // For UI display
           const merged: Record<string, Record<string, string>> = {};
           [...neighborRows, ...selectedRows].forEach((r) => { merged[r.rowKey] = r.cells; });
-          focusedData = JSON.stringify(merged);
+
+          // selectionLabel for frontend/AI reference
+          const selectionLabel = label;
+          return { workbookSummary, activeSheetSummary, selectedRows, neighborRows, focusedData, selectionLabel };
         }
       }
     }
 
     return { workbookSummary, activeSheetSummary, selectedRows, neighborRows, focusedData };
+  }
+
+  private colLetter(col: number): string {
+    let letter = '';
+    let n = col;
+    do {
+      letter = String.fromCharCode(65 + (n % 26)) + letter;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return letter;
+  }
+
+  private cellAddress(row: number, col: number): string {
+    return `${this.colLetter(col)}${row + 1}`;
   }
 
   private extractRows(

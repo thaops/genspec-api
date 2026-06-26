@@ -156,7 +156,7 @@ export class ReviewModeHandler {
       history ? `LỊCH SỬ:\n${history}` : '',
       '',
       context.activeSheetSummary ? `SHEET ĐANG XEM (review tập trung vào đây trước):\n${context.activeSheetSummary}` : '',
-      context.focusedData ? `VÙNG ĐÃ CHỌN:\n${context.focusedData}` : '',
+      context.focusedData ? `VÙNG ĐANG CHỌN (${context.selectionLabel ?? ''}) — review ưu tiên vùng này:\n${context.focusedData}` : '',
       `TỔNG QUAN WORKBOOK:\n${context.workbookSummary}`,
       '',
       'KẾT QUẢ RULE ENGINE:',

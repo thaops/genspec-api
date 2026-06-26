@@ -268,7 +268,7 @@ export class EditModeHandler {
       '- KHÔNG điền số cứng khi giá trị là tích/thương của ô khác — phải dùng công thức.',
       '',
       context.activeSheetSummary ? `SHEET ĐANG XEM (chỉnh sửa ưu tiên ở đây):\n${context.activeSheetSummary}` : '',
-      context.focusedData ? `VÙNG ĐÃ CHỌN:\n${context.focusedData}` : '',
+      context.focusedData ? `VÙNG ĐANG CHỌN (${context.selectionLabel ?? ''}) — action phải nhắm vào vùng này trước:\n${context.focusedData}` : '',
       `WORKBOOK:\n${context.workbookSummary}`,
       '',
       researchText ? 'DỮ LIỆU WEB (giá/định mức mới nhất):' : '',

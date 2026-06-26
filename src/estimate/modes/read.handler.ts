@@ -88,7 +88,7 @@ export class ReadModeHandler {
       history ? `LỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:\n${history}` : '',
       '',
       context.activeSheetSummary ? `SHEET ĐANG XEM (ưu tiên cao nhất):\n${context.activeSheetSummary}` : '',
-      context.focusedData ? `VÙNG ĐÃ CHỌN:\n${context.focusedData}` : '',
+      context.focusedData ? `VÙNG ĐANG CHỌN (${context.selectionLabel ?? ''}) — đây là ngữ cảnh trực tiếp, ưu tiên cao nhất:\n${context.focusedData}` : '',
       `TỔNG QUAN WORKBOOK:\n${context.workbookSummary}`,
       searchContext ? `\n${searchContext}` : '',
       webContext ? `\n${webContext}` : '',
