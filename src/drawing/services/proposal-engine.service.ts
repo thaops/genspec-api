@@ -22,21 +22,28 @@ export type ProposalItemType =
 export interface ProposalItem {
   id: string;
   type: ProposalItemType;
-  // Human-readable change description for preview
   label: string;
   detail?: string;
-  // Before/after for diff display
   before?: Record<string, unknown>;
   after: Record<string, unknown>;
-  // Source context (which drawing object / sheet cell triggered this)
+  // Source context
   sourceDrawingId?: string;
-  sourceObjectId?: string;   // stableId
+  sourceObjectId?: string;    // stableId
   sourceSheetId?: string;
   sourceCellRef?: string;
-  // Confidence 0-1 (from AI or rule-based)
   confidence: number;
-  // Whether user must explicitly confirm this item
   requiresConfirmation: boolean;
+  /**
+   * Other item ids that must be applied before/alongside this one.
+   * Example: a beam takeoff item depends on its supporting column item.
+   * UI applies all dependencies automatically when user confirms this item.
+   */
+  dependencies?: string[];
+  /**
+   * Order hint — lower = applied first when resolving dependency chain.
+   * Set by ProposalEngineService.build() via topological sort.
+   */
+  applyOrder?: number;
 }
 
 export interface ProposalSet {
@@ -71,9 +78,12 @@ export class ProposalEngineService {
     costBefore?: number;
     costAfter?: number;
   }): ProposalSet {
-    const items = this.dedup(
-      params.rawItems.map((item, i) => ({ ...item, id: `item-${i}-${Date.now()}` }))
-    );
+    const itemsWithId = params.rawItems.map((item, i) => ({
+      ...item,
+      id: `item-${i}-${Date.now()}`,
+    }));
+    const deduped = this.dedup(itemsWithId);
+    const items = this.topoSort(deduped);
 
     return {
       id: `pset-${Date.now()}`,
@@ -109,6 +119,27 @@ export class ProposalEngineService {
 
   discard(set: ProposalSet): ProposalSet {
     return { ...set, status: 'discarded' };
+  }
+
+  /** Topological sort by dependencies — sets applyOrder */
+  private topoSort(items: ProposalItem[]): ProposalItem[] {
+    const byId = new Map(items.map((it) => [it.id, it]));
+    const order: string[] = [];
+    const visited = new Set<string>();
+
+    const visit = (id: string) => {
+      if (visited.has(id)) return;
+      visited.add(id);
+      const item = byId.get(id);
+      for (const depId of item?.dependencies ?? []) visit(depId);
+      order.push(id);
+    };
+    for (const item of items) visit(item.id);
+
+    return order.map((id, idx) => ({
+      ...byId.get(id)!,
+      applyOrder: idx,
+    }));
   }
 
   /** Remove duplicate items by (type + sourceObjectId + after-key fingerprint) */

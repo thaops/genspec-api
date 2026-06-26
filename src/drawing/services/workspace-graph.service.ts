@@ -88,6 +88,55 @@ export class WorkspaceGraphService {
     if (!exists) store.edges.push({ ...edge, updatedAt: new Date().toISOString() });
   }
 
+  // ---------- Query API ----------
+
+  findByStableId(estimateId: string, stableId: string): GraphNode | undefined {
+    return graphStore.get(estimateId)?.nodes.get(stableId);
+  }
+
+  findByType(estimateId: string, type: NodeType): GraphNode[] {
+    const store = graphStore.get(estimateId);
+    if (!store) return [];
+    return Array.from(store.nodes.values()).filter((n) => n.type === type);
+  }
+
+  findRelated(
+    estimateId: string,
+    nodeId: string,
+    edgeType?: EdgeType,
+  ): GraphNode[] {
+    const store = graphStore.get(estimateId);
+    if (!store) return [];
+
+    const edges = store.edges.filter(
+      (e) =>
+        (e.fromId === nodeId || e.toId === nodeId) &&
+        (!edgeType || e.type === edgeType),
+    );
+    const relatedIds = edges.map((e) => (e.fromId === nodeId ? e.toId : e.fromId));
+    return relatedIds
+      .map((id) => store.nodes.get(id))
+      .filter((n): n is GraphNode => n !== undefined);
+  }
+
+  /** Find all drawing objects linked to a BOQ row */
+  findObjectsByBoqRef(estimateId: string, boqRef: string): GraphNode[] {
+    return this.findByType(estimateId, 'drawing_object').filter(
+      (n) => n.properties?.['boqRef'] === boqRef,
+    );
+  }
+
+  /** Find all BOQ rows impacted by a drawing revision */
+  findBoqImpactedByRevision(estimateId: string, revisionId: string): GraphNode[] {
+    const revNode = this.findByStableId(estimateId, revisionId);
+    if (!revNode) return [];
+    // Traverse: revision → drawing_object → boq_row
+    const objects = this.findRelated(estimateId, revisionId, 'revised_from');
+    return objects.flatMap((obj) =>
+      this.findRelated(estimateId, obj.id, 'references_boq'),
+    );
+  }
+
   /** Find all nodes reachable from a starting node (BFS, max depth) */
   traverse(estimateId: string, fromId: string, maxDepth = 3): GraphNode[] {
     const store = graphStore.get(estimateId);

@@ -1,176 +1,120 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
+import type {
+  DrawingParserInterface,
+  DrawingParseResult,
+  ParsedPage,
+  RawEntity,
+} from './drawing-parser.interface';
 
-export type DxfEntityType =
-  | 'LINE' | 'LWPOLYLINE' | 'POLYLINE' | 'CIRCLE' | 'ARC' | 'ELLIPSE'
-  | 'TEXT' | 'MTEXT'
-  | 'DIMENSION' | 'LEADER' | 'MULTILEADER'
-  | 'INSERT' | 'BLOCK'
-  | 'HATCH' | 'SOLID'
-  | 'VIEWPORT' | 'SPLINE';
-
-export interface DxfEntity {
-  type: DxfEntityType;
-  layer: string;
-  handle?: string;
-  color?: number;
-  // Geometry (normalized to bounding box)
-  x: number;
-  y: number;
-  x2?: number;
-  y2?: number;
-  radius?: number;
-  // Content
-  text?: string;       // TEXT / MTEXT content
-  blockName?: string;  // INSERT block reference
-  // Raw key-value pairs for anything else
-  raw: Record<string, string>;
-}
-
-export interface DxfLayer {
-  name: string;
-  color: number;
-  lineType?: string;
-}
-
-export interface RawDxfResult {
-  layers: DxfLayer[];
-  entities: DxfEntity[];
-  extMin: { x: number; y: number };
-  extMax: { x: number; y: number };
-}
-
-/**
- * Zero-dependency DXF ASCII parser.
- * Supports the ENTITIES section of DXF R12–R2018.
- * Accuracy ~85% for structural drawings — adequate for object detection input.
- */
 @Injectable()
-export class DxfParserService {
+export class DxfParserService implements DrawingParserInterface {
+  readonly supportedExtensions = ['dxf'];
   private readonly logger = new Logger(DxfParserService.name);
 
-  parse(filePath: string): RawDxfResult {
+  async parse(filePath: string): Promise<DrawingParseResult> {
     const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split(/\r?\n/);
+    const lines   = content.split(/\r?\n/);
 
-    const layers: DxfLayer[] = [];
-    const entities: DxfEntity[] = [];
+    const layers: Array<{ name: string; color?: number }> = [];
+    const entities: RawEntity[] = [];
     let extMin = { x: 0, y: 0 };
     let extMax = { x: 1000, y: 1000 };
 
     let i = 0;
     let inEntities = false;
-    let inTables = false;
+    let inTables   = false;
 
     while (i < lines.length) {
-      const code = lines[i]?.trim();
+      const code  = lines[i]?.trim();
       const value = lines[i + 1]?.trim() ?? '';
       i += 2;
 
       if (code === '0' && value === 'SECTION') {
-        const nextCode = lines[i]?.trim();
-        const nextValue = lines[i + 1]?.trim() ?? '';
-        if (nextCode === '2') {
-          inEntities = nextValue === 'ENTITIES';
-          inTables = nextValue === 'TABLES';
-        }
+        const sectionName = lines[i + 1]?.trim() ?? '';
+        inEntities = sectionName === 'ENTITIES';
+        inTables   = sectionName === 'TABLES';
         continue;
       }
+      if (code === '0' && value === 'ENDSEC') { inEntities = false; inTables = false; continue; }
 
-      if (code === '0' && value === 'ENDSEC') {
-        inEntities = false;
-        inTables = false;
-        continue;
-      }
-
-      // Parse EXTMIN / EXTMAX for drawing bounds
       if (code === '9' && value === '$EXTMIN') {
-        const x = parseFloat(lines[i + 1]?.trim() ?? '0');
-        const y = parseFloat(lines[i + 3]?.trim() ?? '0');
-        extMin = { x, y };
-        i += 6;
-        continue;
+        extMin = { x: parseFloat(lines[i + 1]?.trim() ?? '0'), y: parseFloat(lines[i + 3]?.trim() ?? '0') };
+        i += 6; continue;
       }
       if (code === '9' && value === '$EXTMAX') {
-        const x = parseFloat(lines[i + 1]?.trim() ?? '1000');
-        const y = parseFloat(lines[i + 3]?.trim() ?? '1000');
-        extMax = { x, y };
-        i += 6;
-        continue;
+        extMax = { x: parseFloat(lines[i + 1]?.trim() ?? '1000'), y: parseFloat(lines[i + 3]?.trim() ?? '1000') };
+        i += 6; continue;
       }
 
-      // Parse LAYER table entries
       if (inTables && code === '0' && value === 'LAYER') {
-        const layer = this.parseSectionGroup(lines, i);
-        i += layer._consumed;
-        layers.push({
-          name: layer['2'] ?? '0',
-          color: parseInt(layer['62'] ?? '7', 10),
-          lineType: layer['6'],
-        });
+        const g = this.readGroup(lines, i);
+        i += g._n;
+        layers.push({ name: g['2'] ?? '0', color: g['62'] ? parseInt(g['62'], 10) : undefined });
         continue;
       }
 
-      // Parse ENTITIES
       if (inEntities && code === '0') {
-        const type = value as DxfEntityType;
-        const supported: DxfEntityType[] = [
-          'LINE', 'LWPOLYLINE', 'POLYLINE', 'CIRCLE', 'ARC',
-          'TEXT', 'MTEXT', 'DIMENSION', 'LEADER', 'MULTILEADER',
-          'INSERT', 'HATCH', 'VIEWPORT', 'SPLINE',
-        ];
-        if (supported.includes(type)) {
-          const group = this.parseSectionGroup(lines, i);
-          i += group._consumed;
-          const entity = this.groupToEntity(type, group);
-          entities.push(entity);
+        const supported = new Set([
+          'LINE','LWPOLYLINE','POLYLINE','CIRCLE','ARC',
+          'TEXT','MTEXT','DIMENSION','LEADER','MULTILEADER',
+          'INSERT','HATCH','VIEWPORT','SPLINE',
+        ]);
+        if (supported.has(value)) {
+          const g = this.readGroup(lines, i);
+          i += g._n;
+          entities.push(this.groupToEntity(value, g));
         }
       }
     }
 
-    this.logger.log(
-      `DXF parsed: ${layers.length} layers, ${entities.length} entities`
-    );
-    return { layers, entities, extMin, extMax };
+    const page: ParsedPage = {
+      pageNumber: 1,
+      width:  extMax.x - extMin.x,
+      height: extMax.y - extMin.y,
+      text: entities.filter((e) => e.text).map((e) => e.text).join(' '),
+      entities,
+    };
+
+    this.logger.log(`DXF parsed: ${layers.length} layers, ${entities.length} entities`);
+    return {
+      pages: [page],
+      layers,
+      extMin,
+      extMax,
+      metadata: {},
+      parserVersion: 'dxf-ascii@1',
+    };
   }
 
-  /** Read key-value pairs until next entity (group code 0) */
-  private parseSectionGroup(
-    lines: string[],
-    startIdx: number
-  ): Record<string, string> & { _consumed: number } {
-    const group: Record<string, string> & { _consumed: number } = {
-      _consumed: 0,
-    };
-    let j = startIdx;
+  private readGroup(lines: string[], start: number): Record<string, string> & { _n: number } {
+    const g: Record<string, string> & { _n: number } = { _n: 0 };
+    let j = start;
     while (j < lines.length) {
-      const code = lines[j]?.trim();
-      const val = lines[j + 1]?.trim() ?? '';
-      if (code === '0') break; // next entity starts
-      if (code !== undefined) group[code] = val;
+      const c = lines[j]?.trim();
+      if (c === '0') break;
+      if (c !== undefined) g[c] = lines[j + 1]?.trim() ?? '';
       j += 2;
     }
-    group._consumed = j - startIdx;
-    return group;
+    g._n = j - start;
+    return g;
   }
 
-  private groupToEntity(
-    type: DxfEntityType,
-    g: Record<string, string>
-  ): DxfEntity {
+  private groupToEntity(type: string, g: Record<string, string>): RawEntity {
     return {
       type,
-      layer: g['8'] ?? '0',
-      handle: g['5'],
-      color: g['62'] !== undefined ? parseInt(g['62'], 10) : undefined,
-      x: parseFloat(g['10'] ?? '0'),
-      y: parseFloat(g['20'] ?? '0'),
-      x2: g['11'] !== undefined ? parseFloat(g['11']) : undefined,
-      y2: g['21'] !== undefined ? parseFloat(g['21']) : undefined,
-      radius: g['40'] !== undefined ? parseFloat(g['40']) : undefined,
-      text: g['1'] ?? g['3'],      // TEXT uses code 1; MTEXT may use 3
-      blockName: g['2'],            // INSERT references block by name
-      raw: g,
+      layer:     g['8'] ?? '0',
+      x:         parseFloat(g['10'] ?? '0'),
+      y:         parseFloat(g['20'] ?? '0'),
+      x2:        g['11'] !== undefined ? parseFloat(g['11']) : undefined,
+      y2:        g['21'] !== undefined ? parseFloat(g['21']) : undefined,
+      radius:    g['40'] !== undefined ? parseFloat(g['40']) : undefined,
+      text:      g['1'] ?? g['3'],
+      blockName: g['2'],
+      properties: {
+        handle: g['5'] ?? '',
+        color:  g['62'] ?? '',
+      },
     };
   }
 }

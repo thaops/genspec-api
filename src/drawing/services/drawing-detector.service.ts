@@ -1,13 +1,39 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { NormalizedObject } from './drawing-normalizer.service';
+import type { RawEntity } from '../parsers/drawing-parser.interface';
 
-export interface DetectedObject extends NormalizedObject {
-  objectType: string;
-  confidence: number;
+export interface NormalizedObject {
+  stableId: string;
+  rawType: string;
+  layer: string;
+  boundingBox: { x: number; y: number; w: number; h: number; page?: number };
+  geometry: number[][];
+  text?: string;
+  properties: Record<string, string | number>;
   floor?: string;
 }
 
-// Layer name → object type (highest priority — explicit mapping)
+export type DetectionRule =
+  | 'layer_map'       // layer name matched LAYER_TYPE_MAP
+  | 'label_pattern'   // text label matched regex
+  | 'aspect_ratio'    // bounding box ratio heuristic
+  | 'entity_type'     // DXF entity type fallback
+  | 'none';           // unclassified
+
+export interface DetectionResult {
+  objectType: string;
+  confidence: number;
+  matchedRule: DetectionRule;
+  reason: string;     // human-readable explanation — used by Explain AI
+  fallback: boolean;  // true if result is a best-effort guess
+}
+
+export interface DetectedObject extends NormalizedObject {
+  detection: DetectionResult;
+  // Convenience aliases kept for pipeline compatibility
+  objectType: string;
+  confidence: number;
+}
+
 const LAYER_TYPE_MAP: Record<string, string> = {
   BEAM: 'beam', DAM: 'beam', 'KCC-DAM': 'beam',
   COLUMN: 'column', COT: 'column', 'KCC-COT': 'column',
@@ -22,18 +48,16 @@ const LAYER_TYPE_MAP: Record<string, string> = {
   DIM: 'dimension', DIMENSION: 'dimension', 'A-ANNO-DIMS': 'dimension',
 };
 
-// Label text pattern → object type
-const LABEL_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
-  { pattern: /^[Bb]\d/, type: 'beam' },        // B1, B12
-  { pattern: /^[Cc]\d/, type: 'column' },       // C1, C12
-  { pattern: /^[Ww]\d/, type: 'wall' },         // W1, W3
-  { pattern: /^[Ss][Ll]\d/i, type: 'slab' },   // SL1
-  { pattern: /^[Ff]\d/, type: 'footing' },      // F1
-  { pattern: /^[Pp][Cc]\d/i, type: 'pile' },   // PC1
-  { pattern: /^[Dd]\d/, type: 'door' },         // D1
+const LABEL_PATTERNS: Array<{ pattern: RegExp; type: string; hint: string }> = [
+  { pattern: /^[Bb]\d/, type: 'beam',    hint: 'Label matches beam pattern (B + digit)' },
+  { pattern: /^[Cc]\d/, type: 'column',  hint: 'Label matches column pattern (C + digit)' },
+  { pattern: /^[Ww]\d/, type: 'wall',    hint: 'Label matches wall pattern (W + digit)' },
+  { pattern: /^[Ss][Ll]\d/i, type: 'slab', hint: 'Label matches slab pattern (SL + digit)' },
+  { pattern: /^[Ff]\d/, type: 'footing', hint: 'Label matches footing pattern (F + digit)' },
+  { pattern: /^[Pp][Cc]\d/i, type: 'pile', hint: 'Label matches pile pattern (PC + digit)' },
+  { pattern: /^[Dd]\d/, type: 'door',    hint: 'Label matches door pattern (D + digit)' },
 ];
 
-// DXF entity type → base object type (lowest priority fallback)
 const ENTITY_TYPE_MAP: Record<string, string> = {
   TEXT: 'text', MTEXT: 'text',
   DIMENSION: 'dimension', LEADER: 'leader', MULTILEADER: 'leader',
@@ -41,64 +65,98 @@ const ENTITY_TYPE_MAP: Record<string, string> = {
   VIEWPORT: 'viewport',
 };
 
-/**
- * Classifies normalized objects into DrawingObjectType.
- *
- * Priority:
- *   1. Explicit layer name match (LAYER_TYPE_MAP) — confidence 0.95
- *   2. Label text pattern match (LABEL_PATTERNS) — confidence 0.85
- *   3. Aspect ratio heuristics (tall narrow = column, wide flat = beam) — 0.65
- *   4. DXF entity type fallback — 0.5
- *   5. unknown — 0.0
- */
 @Injectable()
 export class DrawingDetectorService {
   private readonly logger = new Logger(DrawingDetectorService.name);
 
   detect(objects: NormalizedObject[]): DetectedObject[] {
     return objects.map((obj) => {
-      const { type, confidence } = this.classify(obj);
+      const detection = this.classify(obj);
       const floor = this.inferFloor(obj);
-      return { ...obj, objectType: type, confidence, floor };
+      return {
+        ...obj,
+        floor: floor ?? obj.floor,
+        detection,
+        objectType: detection.objectType,
+        confidence: detection.confidence,
+      };
     });
   }
 
-  private classify(obj: NormalizedObject): { type: string; confidence: number } {
+  private classify(obj: NormalizedObject): DetectionResult {
     // 1. Layer name
     const layerUpper = obj.layer.toUpperCase();
     for (const [key, type] of Object.entries(LAYER_TYPE_MAP)) {
       if (layerUpper === key || layerUpper.startsWith(key + '-')) {
-        return { type, confidence: 0.95 };
+        return {
+          objectType: type,
+          confidence: 0.95,
+          matchedRule: 'layer_map',
+          reason: `Layer "${obj.layer}" matched rule "${key}" → ${type}`,
+          fallback: false,
+        };
       }
     }
 
-    // 2. Label patterns
+    // 2. Label text pattern
     if (obj.text) {
-      for (const { pattern, type } of LABEL_PATTERNS) {
+      for (const { pattern, type, hint } of LABEL_PATTERNS) {
         if (pattern.test(obj.text.trim())) {
-          return { type, confidence: 0.85 };
+          return {
+            objectType: type,
+            confidence: 0.85,
+            matchedRule: 'label_pattern',
+            reason: `${hint} (text: "${obj.text}")`,
+            fallback: false,
+          };
         }
       }
     }
 
-    // 3. Aspect ratio heuristics for structural elements
+    // 3. Aspect ratio heuristics
     const { w, h } = obj.boundingBox;
     if (w > 0 && h > 0) {
       const ratio = w / h;
-      if (ratio > 4 && w > 100) return { type: 'beam',   confidence: 0.65 };
-      if (ratio < 0.3 && h > 100) return { type: 'column', confidence: 0.65 };
-      if (ratio > 2 && w > 500) return { type: 'wall',   confidence: 0.60 };
+      if (ratio > 4 && w > 100) return {
+        objectType: 'beam', confidence: 0.65,
+        matchedRule: 'aspect_ratio',
+        reason: `Wide horizontal shape (ratio ${ratio.toFixed(1)}) suggests beam`,
+        fallback: true,
+      };
+      if (ratio < 0.3 && h > 100) return {
+        objectType: 'column', confidence: 0.65,
+        matchedRule: 'aspect_ratio',
+        reason: `Tall narrow shape (ratio ${ratio.toFixed(1)}) suggests column`,
+        fallback: true,
+      };
+      if (ratio > 2 && w > 500) return {
+        objectType: 'wall', confidence: 0.60,
+        matchedRule: 'aspect_ratio',
+        reason: `Long horizontal element (w=${Math.round(w)}) suggests wall`,
+        fallback: true,
+      };
     }
 
     // 4. DXF entity type fallback
-    const fallback = ENTITY_TYPE_MAP[obj.rawType];
-    if (fallback) return { type: fallback, confidence: 0.5 };
+    const fallbackType = ENTITY_TYPE_MAP[obj.rawType];
+    if (fallbackType) return {
+      objectType: fallbackType,
+      confidence: 0.5,
+      matchedRule: 'entity_type',
+      reason: `DXF entity type ${obj.rawType} → ${fallbackType}`,
+      fallback: true,
+    };
 
-    return { type: 'unknown', confidence: 0 };
+    return {
+      objectType: 'unknown',
+      confidence: 0,
+      matchedRule: 'none',
+      reason: 'No matching rule found',
+      fallback: true,
+    };
   }
 
   private inferFloor(obj: NormalizedObject): string | undefined {
-    // Infer from layer name: "T1-BEAM", "TANG1-COT"
     const match = obj.layer.match(/(?:T|TANG|FLOOR|FL)[-_]?(\d+|MONG|MAI|ROOF|BASE)/i);
     if (match) {
       const token = match[1].toUpperCase();
@@ -106,7 +164,6 @@ export class DrawingDetectorService {
       if (['MAI', 'ROOF'].includes(token)) return 'Mái';
       return `Tầng ${token}`;
     }
-    // PDF page → approximate floor (1 page = 1 floor for simple buildings)
     if (obj.boundingBox.page) return `Tầng ${obj.boundingBox.page}`;
     return undefined;
   }

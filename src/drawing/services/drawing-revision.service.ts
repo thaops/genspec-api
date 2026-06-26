@@ -6,12 +6,26 @@ import { DrawingObject, DrawingObjectDocument } from '../schemas/drawing-object.
 import { DrawingRevision, DrawingRevisionDocument } from '../schemas/drawing-revision.schema';
 import { DrawingRevisionUploadedEvent, DrawingComparedEvent } from '../../events/domain-events';
 
+export type RevisionStatus =
+  | 'added'     // exists in B, not in A
+  | 'removed'   // exists in A, not in B
+  | 'changed'   // same stableId, properties differ
+  | 'moved'     // same stableId, bounding box moved significantly
+  | 'renamed'   // same stableId, label/text changed
+  | 'split'     // one object in A became N objects in B (detected by proximity + type)
+  | 'merged'    // N objects in A became one in B
+  | 'unchanged';
+
 export interface RevisionMapping {
   stableId: string;
-  status: 'added' | 'removed' | 'changed' | 'unchanged';
+  status: RevisionStatus;
   oldProperties?: Record<string, unknown>;
   newProperties?: Record<string, unknown>;
   changedFields?: string[];
+  // For 'moved': distance moved
+  moveDistance?: number;
+  // For 'split'/'merged': related stableIds
+  relatedStableIds?: string[];
 }
 
 export interface RevisionDiff {
@@ -107,12 +121,33 @@ export class DrawingRevisionService {
       }
     }
 
-    // Objects in both → compare properties
+    // Objects in both → compare properties + position
     for (const [stableId, objA] of mapA) {
       const objB = mapB.get(stableId);
       if (!objB) continue;
+
       const changedFields = this.diffProperties(objA.properties, objB.properties);
-      if (changedFields.length > 0) {
+      const moveDistance  = this.computeMoveDistance(objA.boundingBox, objB.boundingBox);
+      const labelChanged  = objA.properties['label'] !== objB.properties['label'];
+
+      if (labelChanged && changedFields.length === 1 && changedFields[0] === 'label') {
+        mappings.push({
+          stableId,
+          status: 'renamed',
+          oldProperties: objA.properties,
+          newProperties: objB.properties,
+          changedFields,
+        });
+      } else if (moveDistance > 50 && changedFields.length === 0) {
+        // Significant position change with no property change → moved
+        mappings.push({
+          stableId,
+          status: 'moved',
+          oldProperties: objA.properties,
+          newProperties: objB.properties,
+          moveDistance,
+        });
+      } else if (changedFields.length > 0) {
         mappings.push({
           stableId,
           status: 'changed',
@@ -124,6 +159,9 @@ export class DrawingRevisionService {
         mappings.push({ stableId, status: 'unchanged' });
       }
     }
+
+    // Detect split: one A object → N B objects of same type nearby
+    this.detectSplitMerge(mappings, mapA, mapB);
 
     const added   = mappings.filter((m) => m.status === 'added').length;
     const removed = mappings.filter((m) => m.status === 'removed').length;
@@ -146,6 +184,41 @@ export class DrawingRevisionService {
       changedCount: changed,
       significantChanges,
     };
+  }
+
+  private computeMoveDistance(
+    a: { x: number; y: number; w: number; h: number },
+    b: { x: number; y: number; w: number; h: number },
+  ): number {
+    const aCx = a.x + a.w / 2, aCy = a.y + a.h / 2;
+    const bCx = b.x + b.w / 2, bCy = b.y + b.h / 2;
+    return Math.sqrt((aCx - bCx) ** 2 + (aCy - bCy) ** 2);
+  }
+
+  private detectSplitMerge(
+    mappings: RevisionMapping[],
+    mapA: Map<string, DrawingObjectDocument>,
+    mapB: Map<string, DrawingObjectDocument>,
+  ) {
+    const addedIds = mappings.filter((m) => m.status === 'added').map((m) => m.stableId);
+    const removedIds = mappings.filter((m) => m.status === 'removed').map((m) => m.stableId);
+
+    // Simple heuristic: if 2+ added objects of same type are near a removed object → split
+    for (const removedId of removedIds) {
+      const removed = mapA.get(removedId);
+      if (!removed) continue;
+      const nearbyAdded = addedIds.filter((id) => {
+        const added = mapB.get(id);
+        if (!added || added.type !== removed.type) return false;
+        return this.computeMoveDistance(removed.boundingBox, added.boundingBox) < 200;
+      });
+      if (nearbyAdded.length >= 2) {
+        const idx = mappings.findIndex((m) => m.stableId === removedId);
+        if (idx !== -1) {
+          mappings[idx] = { ...mappings[idx], status: 'split', relatedStableIds: nearbyAdded };
+        }
+      }
+    }
   }
 
   private diffProperties(
