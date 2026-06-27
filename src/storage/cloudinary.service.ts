@@ -22,24 +22,23 @@ export class CloudinaryService {
   }
 
   /**
-   * Download a Cloudinary raw file using a signed URL (bypasses account-level access restrictions).
+   * Download a Cloudinary raw file.
+   * Uses private_download_url (api.cloudinary.com) to bypass CDN-level ACL deny rules.
    */
   async downloadBuffer(cloudinaryUrl: string): Promise<Buffer> {
-    // Extract public_id from URL: /.../raw/upload/v123/public/id.ext
     const match = cloudinaryUrl.match(/\/raw\/upload\/(?:v\d+\/)?(.+?)(?:\?.*)?$/);
     if (!match || !this.configured) {
-      // Fallback: plain HTTP download
       return this.httpGet(cloudinaryUrl);
     }
     const publicId = decodeURIComponent(match[1]);
-    const signedUrl = cloudinary.url(publicId, {
+    const ext = publicId.split('.').pop()?.split('?')[0] ?? 'pdf';
+    // private_download_url goes through api.cloudinary.com (not CDN), bypasses ACL
+    const privateUrl = (cloudinary.utils as any).private_download_url(publicId, ext, {
       resource_type: 'raw',
       type: 'upload',
-      sign_url: true,
-      secure: true,
       expires_at: Math.floor(Date.now() / 1000) + 3600,
     });
-    return this.httpGet(signedUrl);
+    return this.httpGet(privateUrl);
   }
 
   private httpGet(url: string): Promise<Buffer> {
@@ -88,13 +87,11 @@ export class CloudinaryService {
     return { url: result.secure_url, publicId: result.public_id, bytes: result.bytes };
   }
 
-  /** Generate a short-lived signed URL for a raw asset (server → client download). */
-  signedUrl(publicId: string, expiresInSeconds = 3600): string {
-    return cloudinary.url(publicId, {
+  /** Generate a short-lived private download URL that bypasses CDN ACL rules. */
+  privateDownloadUrl(publicId: string, ext = 'pdf', expiresInSeconds = 3600): string {
+    return (cloudinary.utils as any).private_download_url(publicId, ext, {
       resource_type: 'raw',
       type: 'upload',
-      sign_url: true,
-      secure: true,
       expires_at: Math.floor(Date.now() / 1000) + expiresInSeconds,
     });
   }
