@@ -55,7 +55,7 @@ export class DrawingUploadService {
       name: file.originalname,
       type: fileType,
       url: storageUrl,
-      parseStatus: 'queued',
+      parseStatus: 'pending',
       uploadedBy: 'user',
     });
 
