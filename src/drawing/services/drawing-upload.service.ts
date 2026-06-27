@@ -67,19 +67,20 @@ export class DrawingUploadService {
     return { ...drawing.toObject(), id: drawingId, ...(jobId ? { jobId } : {}) };
   }
 
-  async list(estimateId: string): Promise<DrawingDocument[]> {
-    return this.drawingModel
+  async list(estimateId: string) {
+    const docs = await this.drawingModel
       .find({ estimateId })
       .sort({ createdAt: -1 })
       .lean()
-      .exec() as unknown as DrawingDocument[];
+      .exec();
+    return docs.map((d: any) => ({ ...d, id: d._id.toString() }));
   }
 
   async getWithObjects(estimateId: string, drawingId: string) {
     const drawing = await this.drawingModel.findOne({ _id: drawingId, estimateId }).lean();
     if (!drawing) throw new NotFoundException('Drawing not found');
     const objects = await this.objectModel.find({ drawingId }).lean();
-    return { ...drawing, id: (drawing as any)._id, objects };
+    return { ...drawing, id: (drawing as any)._id.toString(), objects };
   }
 
   async delete(estimateId: string, drawingId: string): Promise<{ ok: true }> {
@@ -120,6 +121,16 @@ export class DrawingUploadService {
 
     // EventEmitter fallback — synchronous pipeline
     this.logger.log(`Drawing ${drawingId} → EventEmitter fallback`);
+
+    // DWG requires ODA converter which only runs in the queue worker
+    if (fileType === 'dwg') {
+      await this.drawingModel.updateOne(
+        { _id: drawingId },
+        { parseStatus: 'failed', parseError: 'DWG converter chỉ hoạt động khi có Redis queue. Vui lòng upload file DXF hoặc PDF.' },
+      );
+      return null;
+    }
+
     await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'parsing' });
     this.events.emit(
       DrawingUploadedEvent.EVENT,
