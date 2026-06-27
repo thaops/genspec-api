@@ -1,8 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const _pdfMod = require('pdf-parse');
-const pdfParse: (buf: Buffer, opts?: any) => Promise<any> =
-  typeof _pdfMod === 'function' ? _pdfMod : (_pdfMod.default ?? _pdfMod);
+import { PDFParse } from 'pdf-parse';
 import * as fs from 'fs';
 import type {
   DrawingParserInterface,
@@ -17,65 +14,58 @@ export class PdfParserService implements DrawingParserInterface {
   private readonly logger = new Logger(PdfParserService.name);
 
   async parse(filePath: string): Promise<DrawingParseResult> {
-    const buffer = fs.readFileSync(filePath);
-    const pageTexts: string[] = [];
+    const isUrl = filePath.startsWith('http://') || filePath.startsWith('https://');
+    const parser = isUrl
+      ? new PDFParse({ url: filePath })
+      : new PDFParse({ data: fs.readFileSync(filePath) });
 
-    const data = await pdfParse(buffer, {
-      pagerender: (pageData: any) =>
-        pageData.getTextContent().then((tc: any) => {
-          const text = tc.items
-            .map((item: any) => item.str)
-            .join(' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          pageTexts.push(text);
-          return text;
-        }),
-    });
+    try {
+      const info = await parser.getInfo({ parsePageInfo: true });
+      const numPages = info.total ?? 1;
 
-    const pages: ParsedPage[] = Array.from({ length: data.numpages }, (_, i) => {
-      const text = pageTexts[i] ?? '';
-      const labels = this.extractLabels(text);
-      const dims   = this.extractDimensions(text);
+      const pageTexts: string[] = [];
+      for (let i = 1; i <= numPages; i++) {
+        try {
+          const res = await parser.getText({ partial: [i] });
+          pageTexts.push((res.text ?? '').replace(/\s+/g, ' ').trim());
+        } catch {
+          pageTexts.push('');
+        }
+      }
 
-      // Each label/dim becomes a RawEntity for the normalizer
-      const entities: RawEntity[] = [
-        ...labels.map((label) => ({
-          type: 'TEXT',
-          layer: 'PDF',
-          x: 0, y: 0,
-          text: label,
-          page: i + 1,
-          properties: { label },
-        })),
-        ...dims.map((dim) => ({
-          type: 'DIMENSION',
-          layer: 'PDF',
-          x: 0, y: 0,
-          text: dim,
-          page: i + 1,
-          properties: { dimension: dim },
-        })),
-      ];
+      const pages: ParsedPage[] = pageTexts.map((text, i) => {
+        const pageInfo = info.pages?.[i];
+        const width  = pageInfo?.width  ?? 841;
+        const height = pageInfo?.height ?? 594;
+        const labels = this.extractLabels(text);
+        const dims   = this.extractDimensions(text);
 
+        const entities: RawEntity[] = [
+          ...labels.map((label) => ({
+            type: 'TEXT', layer: 'PDF', x: 0, y: 0,
+            text: label, page: i + 1, properties: { label },
+          })),
+          ...dims.map((dim) => ({
+            type: 'DIMENSION', layer: 'PDF', x: 0, y: 0,
+            text: dim, page: i + 1, properties: { dimension: dim },
+          })),
+        ];
+
+        return { pageNumber: i + 1, width, height, text, entities };
+      });
+
+      this.logger.log(`PDF parsed: ${numPages} pages`);
       return {
-        pageNumber: i + 1,
-        width: 841,
-        height: 594,
-        text,
-        entities,
+        pages,
+        layers: [{ name: 'PDF', visible: true }],
+        extMin: { x: 0, y: 0 },
+        extMax: { x: 841, y: 594 },
+        metadata: info.info ?? {},
+        parserVersion: 'pdf-parse@2',
       };
-    });
-
-    this.logger.log(`PDF parsed: ${data.numpages} pages`);
-    return {
-      pages,
-      layers: [{ name: 'PDF', visible: true }],
-      extMin: { x: 0, y: 0 },
-      extMax: { x: 841, y: 594 },
-      metadata: data.info ?? {},
-      parserVersion: 'pdf-parse@1',
-    };
+    } finally {
+      await parser.destroy().catch(() => {});
+    }
   }
 
   extractDimensions(text: string): string[] {
