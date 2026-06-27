@@ -64,12 +64,13 @@ export class CloudinaryService {
   async uploadBuffer(
     buffer: Buffer,
     options: { folder: string; fileName: string },
-  ): Promise<{ url: string; bytes: number }> {
+  ): Promise<{ url: string; publicId: string; bytes: number }> {
     const result = await new Promise<UploadApiResponse>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         {
           resource_type: 'raw',
           type: 'upload',
+          access_mode: 'public',
           folder: options.folder,
           public_id: options.fileName,
           use_filename: true,
@@ -84,19 +85,17 @@ export class CloudinaryService {
       stream.end(buffer);
     });
 
-    // Force public access (overrides account-level raw restrictions)
-    if (this.configured) {
-      try {
-        await cloudinary.uploader.explicit(result.public_id, {
-          resource_type: 'raw',
-          type: 'upload',
-          access_mode: 'public',
-        });
-      } catch (e: any) {
-        this.logger.warn(`Could not set public access on ${result.public_id}: ${e.message}`);
-      }
-    }
+    return { url: result.secure_url, publicId: result.public_id, bytes: result.bytes };
+  }
 
-    return { url: result.secure_url, bytes: result.bytes };
+  /** Generate a short-lived signed URL for a raw asset (server → client download). */
+  signedUrl(publicId: string, expiresInSeconds = 3600): string {
+    return cloudinary.url(publicId, {
+      resource_type: 'raw',
+      type: 'upload',
+      sign_url: true,
+      secure: true,
+      expires_at: Math.floor(Date.now() / 1000) + expiresInSeconds,
+    });
   }
 }

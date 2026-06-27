@@ -14,6 +14,10 @@ import {
   DrawingParsedEvent,
   DrawingDetectedEvent,
 } from '../../events/domain-events';
+import { CloudinaryService } from '../../storage/cloudinary.service';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 /**
  * Object Detection Pipeline orchestrator.
@@ -36,6 +40,7 @@ export class DrawingParserService {
     private readonly detector: DrawingDetectorService,
     private readonly indexer: DrawingIndexerService,
     private readonly events: EventEmitter2,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   @OnEvent(DrawingConvertedEvent.EVENT)
@@ -50,11 +55,8 @@ export class DrawingParserService {
   @OnEvent(DrawingUploadedEvent.EVENT)
   async onUploaded(event: DrawingUploadedEvent) {
     if (event.fileType === 'dwg') return; // waits for DrawingConvertedEvent
-    await this.runPipeline(
-      event.drawingId,
-      this.resolveStoragePath(event.storagePath),
-      event.fileType,
-    );
+    const filePath = await this.resolveStoragePath(event.storagePath);
+    await this.runPipeline(event.drawingId, filePath, event.fileType);
   }
 
   private async runPipeline(drawingId: string, filePath: string, ext: string) {
@@ -123,8 +125,13 @@ export class DrawingParserService {
     );
   }
 
-  private resolveStoragePath(storagePath: string): string {
-    // TODO: download from object storage (Cloudinary/S3) to local tmp when needed
-    return storagePath;
+  private async resolveStoragePath(storagePath: string): Promise<string> {
+    if (!storagePath.startsWith('http')) return storagePath;
+    // Download remote file to a tmp path so the parser can read it from disk
+    const buffer = await this.cloudinary.downloadBuffer(storagePath);
+    const ext = storagePath.split('.').pop()?.split('?')[0] ?? 'bin';
+    const tmpPath = path.join(os.tmpdir(), `drawing-${Date.now()}.${ext}`);
+    fs.writeFileSync(tmpPath, buffer);
+    return tmpPath;
   }
 }

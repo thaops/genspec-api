@@ -39,12 +39,14 @@ export class DrawingUploadService {
 
     // 2. Upload to Cloudinary for durable storage
     let storageUrl = tmpPath;
+    let cloudinaryPublicId: string | undefined;
     try {
       const result = await this.cloudinary.uploadBuffer(file.buffer, {
         folder: `genspec/drawings/${estimateId}`,
         fileName: `${Date.now()}_${file.originalname}`,
       });
       storageUrl = result.url;
+      cloudinaryPublicId = result.publicId;
     } catch (err: any) {
       this.logger.warn(`Cloudinary unavailable, using tmp: ${err.message}`);
     }
@@ -55,6 +57,7 @@ export class DrawingUploadService {
       name: file.originalname,
       type: fileType,
       url: storageUrl,
+      cloudinaryPublicId,
       parseStatus: 'pending',
       uploadedBy: 'user',
     });
@@ -88,6 +91,29 @@ export class DrawingUploadService {
     if (result.deletedCount === 0) throw new NotFoundException('Drawing not found');
     await this.objectModel.deleteMany({ drawingId });
     return { ok: true };
+  }
+
+  /** Stream the raw file to client — uses signed Cloudinary URL or local tmp fallback. */
+  async downloadFile(estimateId: string, drawingId: string): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+    const drawing = await this.drawingModel.findOne({ _id: drawingId, estimateId }).lean() as any;
+    if (!drawing) throw new NotFoundException('Drawing not found');
+
+    let buffer: Buffer;
+    if (drawing.cloudinaryPublicId) {
+      buffer = await this.cloudinary.downloadBuffer(drawing.url);
+    } else if (drawing.url.startsWith('/') || drawing.url.startsWith('C:')) {
+      // local tmp path
+      buffer = fs.readFileSync(drawing.url);
+    } else {
+      buffer = await this.cloudinary.downloadBuffer(drawing.url);
+    }
+
+    const ext = drawing.name.split('.').pop()?.toLowerCase() ?? 'pdf';
+    const mimeType = ext === 'pdf' ? 'application/pdf'
+      : ext === 'dxf' || ext === 'dwg' ? 'application/octet-stream'
+      : 'application/octet-stream';
+
+    return { buffer, mimeType, filename: drawing.name };
   }
 
   /** Returns jobId if enqueued, null if falling back to EventEmitter. Never throws. */

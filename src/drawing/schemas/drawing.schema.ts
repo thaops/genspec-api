@@ -15,10 +15,13 @@ export class Drawing {
   type: string;
 
   @Prop({ required: true })
-  url: string;            // original file URL
+  url: string;
 
   @Prop()
-  convertedUrl?: string;  // DXF URL after DWG conversion
+  cloudinaryPublicId?: string;
+
+  @Prop()
+  convertedUrl?: string;
 
   @Prop()
   thumbnail?: string;

@@ -1,7 +1,8 @@
 import {
   Controller, Get, Post, Delete, Param, UploadedFile,
-  UseInterceptors, Body, Query,
+  UseInterceptors, Body, Query, Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DrawingUploadService } from './services/drawing-upload.service';
 import { DrawingSearchService } from './services/drawing-search.service';
@@ -43,6 +44,21 @@ export class DrawingController {
     @Param('drawingId') drawingId: string,
   ) {
     return this.upload.getWithObjects(estimateId, drawingId);
+  }
+
+  @Get(':drawingId/file')
+  async downloadFile(
+    @Param('estimateId') estimateId: string,
+    @Param('drawingId') drawingId: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, mimeType, filename } = await this.upload.downloadFile(estimateId, drawingId);
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(filename)}"`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
   }
 
   @Delete(':drawingId')
