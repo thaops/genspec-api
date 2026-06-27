@@ -30,6 +30,8 @@ export class CloudinaryService {
       const stream = cloudinary.uploader.upload_stream(
         {
           resource_type: 'raw',
+          type: 'upload',
+          access_mode: 'public',
           folder: options.folder,
           public_id: options.fileName,
           use_filename: true,

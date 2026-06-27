@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PDFParse } from 'pdf-parse';
 import * as fs from 'fs';
 import type {
   DrawingParserInterface,
@@ -8,64 +7,63 @@ import type {
   RawEntity,
 } from './drawing-parser.interface';
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const pdfParse = require('pdf-parse') as (buf: Buffer, opts?: any) => Promise<{
+  numpages: number;
+  text: string;
+  info: Record<string, any>;
+}>;
+
 @Injectable()
 export class PdfParserService implements DrawingParserInterface {
   readonly supportedExtensions = ['pdf', 'image', 'png', 'jpg', 'jpeg'];
   private readonly logger = new Logger(PdfParserService.name);
 
   async parse(filePath: string): Promise<DrawingParseResult> {
-    const isUrl = filePath.startsWith('http://') || filePath.startsWith('https://');
-    const parser = isUrl
-      ? new PDFParse({ url: filePath })
-      : new PDFParse({ data: fs.readFileSync(filePath) });
+    const buffer = fs.readFileSync(filePath);
+    const pageTexts: string[] = [];
 
-    try {
-      const info = await parser.getInfo({ parsePageInfo: true });
-      const numPages = info.total ?? 1;
+    const data = await pdfParse(buffer, {
+      pagerender: (pageData: any) =>
+        pageData.getTextContent().then((tc: any) => {
+          const text = tc.items
+            .map((item: any) => item.str)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          pageTexts.push(text);
+          return text;
+        }),
+    });
 
-      const pageTexts: string[] = [];
-      for (let i = 1; i <= numPages; i++) {
-        try {
-          const res = await parser.getText({ partial: [i] });
-          pageTexts.push((res.text ?? '').replace(/\s+/g, ' ').trim());
-        } catch {
-          pageTexts.push('');
-        }
-      }
+    const pages: ParsedPage[] = Array.from({ length: data.numpages }, (_, i) => {
+      const text    = pageTexts[i] ?? '';
+      const labels  = this.extractLabels(text);
+      const dims    = this.extractDimensions(text);
 
-      const pages: ParsedPage[] = pageTexts.map((text, i) => {
-        const pageInfo = info.pages?.[i];
-        const width  = pageInfo?.width  ?? 841;
-        const height = pageInfo?.height ?? 594;
-        const labels = this.extractLabels(text);
-        const dims   = this.extractDimensions(text);
+      const entities: RawEntity[] = [
+        ...labels.map((label) => ({
+          type: 'TEXT', layer: 'PDF', x: 0, y: 0,
+          text: label, page: i + 1, properties: { label },
+        })),
+        ...dims.map((dim) => ({
+          type: 'DIMENSION', layer: 'PDF', x: 0, y: 0,
+          text: dim, page: i + 1, properties: { dimension: dim },
+        })),
+      ];
 
-        const entities: RawEntity[] = [
-          ...labels.map((label) => ({
-            type: 'TEXT', layer: 'PDF', x: 0, y: 0,
-            text: label, page: i + 1, properties: { label },
-          })),
-          ...dims.map((dim) => ({
-            type: 'DIMENSION', layer: 'PDF', x: 0, y: 0,
-            text: dim, page: i + 1, properties: { dimension: dim },
-          })),
-        ];
+      return { pageNumber: i + 1, width: 841, height: 594, text, entities };
+    });
 
-        return { pageNumber: i + 1, width, height, text, entities };
-      });
-
-      this.logger.log(`PDF parsed: ${numPages} pages`);
-      return {
-        pages,
-        layers: [{ name: 'PDF', visible: true }],
-        extMin: { x: 0, y: 0 },
-        extMax: { x: 841, y: 594 },
-        metadata: info.info ?? {},
-        parserVersion: 'pdf-parse@2',
-      };
-    } finally {
-      await parser.destroy().catch(() => {});
-    }
+    this.logger.log(`PDF parsed: ${data.numpages} pages`);
+    return {
+      pages,
+      layers: [{ name: 'PDF', visible: true }],
+      extMin: { x: 0, y: 0 },
+      extMax: { x: 841, y: 594 },
+      metadata: data.info ?? {},
+      parserVersion: 'pdf-parse@1',
+    };
   }
 
   extractDimensions(text: string): string[] {

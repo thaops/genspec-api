@@ -151,8 +151,14 @@ export class DrawingJobProcessor extends WorkerHost {
       const client = url.startsWith('https') ? https : http;
       const file = fs.createWriteStream(dest);
       client.get(url, (res) => {
+        if (res.statusCode !== 200) {
+          file.close();
+          fs.unlink(dest, () => {});
+          return reject(new Error(`Download failed: HTTP ${res.statusCode} for ${url}`));
+        }
         res.pipe(file);
         file.on('finish', () => { file.close(); resolve(); });
+        file.on('error', reject);
       }).on('error', reject);
     });
 
