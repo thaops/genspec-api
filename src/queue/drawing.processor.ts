@@ -5,8 +5,6 @@ import { Job } from 'bullmq';
 import { Model } from 'mongoose';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as https from 'https';
-import * as http from 'http';
 import { DRAWING_QUEUE, DrawingJobData, DrawingJobProgress } from './drawing.queue';
 import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
 import { DrawingObject, DrawingObjectDocument } from '../drawing/schemas/drawing-object.schema';
@@ -17,6 +15,7 @@ import { DrawingIndexerService } from '../drawing/services/drawing-indexer.servi
 import { DrawingGraphService } from '../drawing/services/drawing-graph.service';
 import { DrawingParserFactory } from '../drawing/parsers/drawing-parser.factory';
 import { DwgConverterService } from '../drawing/converters/dwg-converter.service';
+import { CloudinaryService } from '../storage/cloudinary.service';
 
 @Processor(DRAWING_QUEUE, { concurrency: 2 })
 export class DrawingJobProcessor extends WorkerHost {
@@ -32,6 +31,7 @@ export class DrawingJobProcessor extends WorkerHost {
     private readonly indexer: DrawingIndexerService,
     private readonly graph: DrawingGraphService,
     private readonly dwgConverter: DwgConverterService,
+    private readonly cloudinary: CloudinaryService,
   ) {
     super();
   }
@@ -133,7 +133,7 @@ export class DrawingJobProcessor extends WorkerHost {
     );
   }
 
-  /** Ensure the file is on local disk. Downloads from URL if tmp was lost. */
+  /** Ensure the file is on local disk. Uses signed Cloudinary download if tmp is gone. */
   private async ensureLocalFile(
     drawingId: string,
     url: string,
@@ -141,27 +141,15 @@ export class DrawingJobProcessor extends WorkerHost {
   ): Promise<string> {
     if (tmpPath && fs.existsSync(tmpPath)) return tmpPath;
 
-    // Download from Cloudinary / any https URL
     const ext  = url.split('?')[0].split('.').pop() ?? 'bin';
     const dir  = path.join('/tmp', 'uploads', drawingId);
     const dest = path.join(dir, `file.${ext}`);
     fs.mkdirSync(dir, { recursive: true });
 
-    await new Promise<void>((resolve, reject) => {
-      const client = url.startsWith('https') ? https : http;
-      const file = fs.createWriteStream(dest);
-      client.get(url, (res) => {
-        if (res.statusCode !== 200) {
-          file.close();
-          fs.unlink(dest, () => {});
-          return reject(new Error(`Download failed: HTTP ${res.statusCode} for ${url}`));
-        }
-        res.pipe(file);
-        file.on('finish', () => { file.close(); resolve(); });
-        file.on('error', reject);
-      }).on('error', reject);
-    });
-
+    // Use CloudinaryService for authenticated download (handles signed URLs)
+    const buffer = await this.cloudinary.downloadBuffer(url);
+    if (buffer.length === 0) throw new Error(`Downloaded empty file from ${url}`);
+    fs.writeFileSync(dest, buffer);
     return dest;
   }
 }
