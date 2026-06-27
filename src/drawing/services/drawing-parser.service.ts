@@ -56,7 +56,11 @@ export class DrawingParserService {
   async onUploaded(event: DrawingUploadedEvent) {
     if (event.fileType === 'dwg') return; // waits for DrawingConvertedEvent
     const filePath = await this.resolveStoragePath(event.storagePath);
-    await this.runPipeline(event.drawingId, filePath, event.fileType);
+    try {
+      await this.runPipeline(event.drawingId, filePath, event.fileType);
+    } finally {
+      this.cleanupTmp(filePath);
+    }
   }
 
   private async runPipeline(drawingId: string, filePath: string, ext: string) {
@@ -133,5 +137,13 @@ export class DrawingParserService {
     const tmpPath = path.join(os.tmpdir(), `drawing-${Date.now()}.${ext}`);
     fs.writeFileSync(tmpPath, buffer);
     return tmpPath;
+  }
+
+  private cleanupTmp(filePath: string) {
+    const tmp = os.tmpdir().replace(/\\/g, '/');
+    const normalized = filePath.replace(/\\/g, '/');
+    if (normalized.startsWith(tmp) || normalized.startsWith('/tmp/')) {
+      try { fs.unlinkSync(filePath); } catch {}
+    }
   }
 }

@@ -101,8 +101,8 @@ export class DrawingUploadService {
     let buffer: Buffer;
     if (drawing.cloudinaryPublicId) {
       buffer = await this.cloudinary.downloadBuffer(drawing.url);
-    } else if (drawing.url.startsWith('/') || drawing.url.startsWith('C:')) {
-      // local tmp path
+    } else if (!drawing.url.startsWith('http')) {
+      // local tmp path (/tmp/... on Linux, C:\... on Windows)
       buffer = fs.readFileSync(drawing.url);
     } else {
       buffer = await this.cloudinary.downloadBuffer(drawing.url);

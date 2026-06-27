@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Delete, Param, UploadedFile,
-  UseInterceptors, Body, Query, Res,
+  UseInterceptors, Body, Query, Res, InternalServerErrorException, NotFoundException,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -52,13 +52,18 @@ export class DrawingController {
     @Param('drawingId') drawingId: string,
     @Res() res: Response,
   ) {
-    const { buffer, mimeType, filename } = await this.upload.downloadFile(estimateId, drawingId);
-    res.set({
-      'Content-Type': mimeType,
-      'Content-Disposition': `inline; filename="${encodeURIComponent(filename)}"`,
-      'Content-Length': buffer.length,
-    });
-    res.end(buffer);
+    try {
+      const { buffer, mimeType, filename } = await this.upload.downloadFile(estimateId, drawingId);
+      res.set({
+        'Content-Type': mimeType,
+        'Content-Disposition': `inline; filename="${encodeURIComponent(filename)}"`,
+        'Content-Length': buffer.length,
+      });
+      res.end(buffer);
+    } catch (err: any) {
+      if (err instanceof NotFoundException) throw err;
+      throw new InternalServerErrorException(`Không thể tải file: ${err.message}`);
+    }
   }
 
   @Delete(':drawingId')
