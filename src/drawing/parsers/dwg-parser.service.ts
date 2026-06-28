@@ -139,27 +139,38 @@ export class DwgParserService implements DrawingParserInterface {
           properties: { ...base.properties, startAngle: e.startAngle ?? 0, endAngle: e.endAngle ?? 0 } };
 
       case 'TEXT': {
-        const textStr = e.text ?? e.textValue ?? e.textString ?? '';
         return { ...base, type: 'TEXT',
-          x: e.startPoint?.x ?? e.insertionPoint?.x ?? 0,
-          y: e.startPoint?.y ?? e.insertionPoint?.y ?? 0,
-          text: textStr,
+          x: e.startPoint?.x ?? 0, y: e.startPoint?.y ?? 0,
+          text: e.text ?? '',
           properties: { ...base.properties,
-            textHeight: e.height ?? e.textHeight ?? 0,
+            textHeight: e.textHeight ?? 0,
+            rotation:   e.rotation ?? 0,
+            halign:     e.halign ?? 0,
+            valign:     e.valign ?? 0,
+          },
+        };
+      }
+
+      case 'ATTRIB': {
+        return { ...base, type: 'TEXT',
+          x: e.insertionPoint?.x ?? e.startPoint?.x ?? 0,
+          y: e.insertionPoint?.y ?? e.startPoint?.y ?? 0,
+          text: e.text ?? '',
+          properties: { ...base.properties,
+            textHeight: e.textHeight ?? 0,
             rotation:   e.rotation ?? 0,
           },
         };
       }
 
       case 'MTEXT': {
-        const rawText = e.text ?? e.textValue ?? e.textString ?? '';
-        // Strip MText RTF-style codes: \P (paragraph), \f{...} (font), etc.
+        const rawText = e.text ?? '';
         const cleanText = rawText.replace(/\\[A-Za-z][^;]*;|[{}]/g, '').trim();
         return { ...base, type: 'MTEXT',
           x: e.insertionPoint?.x ?? 0, y: e.insertionPoint?.y ?? 0,
           text: cleanText,
           properties: { ...base.properties,
-            textHeight: e.charHeight ?? e.height ?? 0,
+            textHeight: e.charHeight ?? e.textHeight ?? 0,
             rotation:   e.rotation ?? 0,
           },
         };
@@ -181,46 +192,42 @@ export class DwgParserService implements DrawingParserInterface {
       }
 
       case 'HATCH': {
-        // Extract boundary loops as vertices for outline rendering
-        const loops: any[] = e.loops ?? e.boundaryPaths ?? e.paths ?? [];
+        // boundaryPaths[].vertices[] is the correct field (confirmed from raw entity log)
+        const paths: any[] = e.boundaryPaths ?? [];
         const allPts: number[][] = [];
-        for (const loop of loops) {
-          const segs: any[] = loop.segs ?? loop.segments ?? loop.edges ?? [];
-          for (const seg of segs) {
-            if (seg.type === 1 || seg.type === 'LINE') {
-              if (seg.start) allPts.push([seg.start.x, seg.start.y]);
-              if (seg.end) allPts.push([seg.end.x, seg.end.y]);
-            } else if (seg.pts || seg.polylinePts) {
-              const verts: any[] = seg.pts ?? seg.polylinePts ?? [];
-              for (const v of verts) allPts.push([v.x ?? v[0] ?? 0, v.y ?? v[1] ?? 0]);
-            }
-          }
+        for (const path of paths) {
+          const verts: any[] = path.vertices ?? [];
+          for (const v of verts) allPts.push([v.x ?? 0, v.y ?? 0]);
+          // Close each path loop
+          if (verts.length > 1) allPts.push([verts[0].x ?? 0, verts[0].y ?? 0]);
         }
         const seed = e.seedPoints?.[0];
         return { ...base, type: 'HATCH',
           x: seed?.x ?? (allPts[0]?.[0] ?? 0),
           y: seed?.y ?? (allPts[0]?.[1] ?? 0),
           vertices: allPts.length > 1 ? allPts : undefined,
-          properties: { ...base.properties, patternName: e.name ?? e.patternName ?? '' },
+          properties: { ...base.properties, patternName: e.patternName ?? '', solidFill: e.solidFill ?? 0 },
         };
       }
 
       case 'DIMENSION': {
-        // Extract dimension line endpoints for rendering
+        // Use confirmed field names from raw entity log
+        const p1  = e.subDefinitionPoint1;
+        const p2  = e.subDefinitionPoint2;
+        const pD  = e.definitionPoint;
+        const pTx = e.textPoint;
         const dimPts: number[][] = [];
-        if (e.defPoint)    dimPts.push([e.defPoint.x, e.defPoint.y]);
-        if (e.defPoint2)   dimPts.push([e.defPoint2.x, e.defPoint2.y]);
-        if (e.dimLinePoint) dimPts.push([e.dimLinePoint.x, e.dimLinePoint.y]);
-        if (e.clonePoint)  dimPts.push([e.clonePoint.x, e.clonePoint.y]);
-        const txtPt = e.textMidPt ?? e.textPosition;
+        if (p1) dimPts.push([p1.x, p1.y]);
+        if (p2) dimPts.push([p2.x, p2.y]);
+        if (pD && pD.x !== 0) dimPts.push([pD.x, pD.y]);
+        const measurement = e.measurement ?? 0;
+        const text = e.text || (measurement > 0 ? String(Math.round(measurement)) : '');
         return { ...base, type: 'DIMENSION',
-          x: txtPt?.x ?? (dimPts[0]?.[0] ?? 0),
-          y: txtPt?.y ?? (dimPts[0]?.[1] ?? 0),
+          x: pTx?.x ?? (p1?.x ?? 0),
+          y: pTx?.y ?? (p1?.y ?? 0),
           vertices: dimPts.length >= 2 ? dimPts : undefined,
-          text: e.text ?? e.textValue ?? '',
-          properties: { ...base.properties,
-            textHeight: e.textHeight ?? e.height ?? 0,
-          },
+          text,
+          properties: { ...base.properties, measurement, textHeight: e.textHeight ?? 0 },
         };
       }
 
