@@ -134,10 +134,13 @@ export class DwgParserService implements DrawingParserInterface {
           blockName: e.name };
 
       case 'LWPOLYLINE': {
-        const v0 = e.vertices?.[0];
+        const verts: any[] = e.vertices ?? [];
+        const v0 = verts[0];
+        const pts = verts.map((v: any) => [v.x ?? 0, v.y ?? 0]);
         return { ...base, type: 'LWPOLYLINE',
           x: v0?.x ?? 0, y: v0?.y ?? 0,
-          properties: { ...base.properties, vertexCount: e.vertices?.length ?? 0 } };
+          vertices: pts.length > 0 ? pts : undefined,
+          properties: { ...base.properties, vertexCount: verts.length } };
       }
 
       case 'HATCH':
@@ -150,9 +153,12 @@ export class DwgParserService implements DrawingParserInterface {
           text: e.text };
 
       case 'SPLINE': {
-        const cp0 = e.controlPoints?.[0];
+        const cps: any[] = e.controlPoints ?? e.fitPoints ?? [];
+        const cp0 = cps[0];
+        const pts = cps.map((p: any) => [p.x ?? 0, p.y ?? 0]);
         return { ...base, type: 'SPLINE',
           x: cp0?.x ?? 0, y: cp0?.y ?? 0,
+          vertices: pts.length > 1 ? pts : undefined,
           properties: { ...base.properties, degree: e.degree ?? 3 } };
       }
 

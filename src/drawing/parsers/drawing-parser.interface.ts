@@ -18,6 +18,7 @@ export interface RawEntity {
   text?: string;
   blockName?: string;
   page?: number;
+  vertices?: number[][];  // multi-vertex entities (LWPOLYLINE, SPLINE, POLYLINE)
   properties: Record<string, string | number>;
 }
 

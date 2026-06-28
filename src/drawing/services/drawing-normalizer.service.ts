@@ -39,9 +39,19 @@ export class DrawingNormalizerService {
   }
 
   private boundingBox(e: RawEntity, page: number) {
+    const r = e.radius ?? 0;
+    if (e.vertices && e.vertices.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const [vx, vy] of e.vertices) {
+        minX = Math.min(minX, vx); maxX = Math.max(maxX, vx);
+        minY = Math.min(minY, vy); maxY = Math.max(maxY, vy);
+      }
+      const w = maxX - minX || 1;
+      const h = maxY - minY || 1;
+      return { x: minX, y: minY, w, h, page };
+    }
     const x1 = e.x, y1 = e.y;
     const x2 = e.x2 ?? e.x, y2 = e.y2 ?? e.y;
-    const r = e.radius ?? 0;
     return {
       x: Math.min(x1, x2) - r,
       y: Math.min(y1, y2) - r,
@@ -52,6 +62,7 @@ export class DrawingNormalizerService {
   }
 
   private geometry(e: RawEntity): number[][] {
+    if (e.vertices && e.vertices.length > 0) return e.vertices;
     if (e.x2 !== undefined && e.y2 !== undefined) return [[e.x, e.y], [e.x2, e.y2]];
     return [[e.x, e.y]];
   }
