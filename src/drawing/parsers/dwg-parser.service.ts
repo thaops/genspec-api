@@ -13,18 +13,16 @@ export class DwgParserService implements DrawingParserInterface {
   readonly supportedExtensions = ['dwg'];
   private readonly logger = new Logger(DwgParserService.name);
 
-  // LibreDwg WASM module — loaded once, cached
-  private _libredwg: any = null;
+  // LibreDwg WASM module + types — loaded once, cached
+  private _cache: { lib: any; Dwg_File_Type: any } | null = null;
 
   async parse(filePath: string): Promise<DrawingParseResult> {
     this.logger.log(`[DwgParser] Parsing: ${filePath}`);
 
-    const lib = await this.getLib();
+    const { lib, Dwg_File_Type } = await this.getLib();
     const buffer = fs.readFileSync(filePath);
     const uint8 = new Uint8Array(buffer);
 
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { Dwg_File_Type } = require('@mlightcad/libredwg-web');
     const rawDwg = lib.dwg_read_data(uint8, Dwg_File_Type.DWG);
     if (rawDwg.error !== 0) {
       throw new Error(`libredwg error code ${rawDwg.error} reading ${filePath}`);
@@ -185,15 +183,17 @@ export class DwgParserService implements DrawingParserInterface {
     };
   }
 
-  private async getLib(): Promise<any> {
-    if (this._libredwg) return this._libredwg;
+  private async getLib(): Promise<{ lib: any; Dwg_File_Type: any }> {
+    if (this._cache) return this._cache;
 
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { LibreDwg } = require('@mlightcad/libredwg-web');
+    // Dynamic import required — package is ESM (uses import.meta.url in wasm glue)
+    // require() returns undefined for createModule in CJS context
+    const { LibreDwg, Dwg_File_Type } = await import('@mlightcad/libredwg-web');
     const wasmDir = path.join(process.cwd(), 'node_modules/@mlightcad/libredwg-web/wasm/');
     this.logger.log(`[DwgParser] Loading WASM from: ${wasmDir}`);
-    this._libredwg = await LibreDwg.create(wasmDir);
+    const lib = await LibreDwg.create(wasmDir);
     this.logger.log(`[DwgParser] WASM loaded`);
-    return this._libredwg;
+    this._cache = { lib, Dwg_File_Type };
+    return this._cache;
   }
 }
