@@ -47,6 +47,18 @@ export class DwgParserService implements DrawingParserInterface {
 
     // 4. Extract
     const layers = this.extractLayers(db);
+
+    // Debug raw structure from libredwg
+    const rawAll: any[] = db?.entities ?? [];
+    const rawTypeCounts: Record<string, number> = {};
+    for (const e of rawAll) rawTypeCounts[e.type ?? 'null'] = (rawTypeCounts[e.type ?? 'null'] ?? 0) + 1;
+    this.logger.log(`[DwgParser] raw type counts: ${JSON.stringify(rawTypeCounts)}`);
+    this.logger.log(`[DwgParser] raw sample (first 5): ${JSON.stringify(rawAll.slice(0, 5))}`);
+    // Log available top-level keys of db to see if blocks exist
+    this.logger.log(`[DwgParser] db keys: ${Object.keys(db ?? {}).join(', ')}`);
+    const blockKeys = Object.keys(db?.blocks ?? {});
+    this.logger.log(`[DwgParser] blocks: ${blockKeys.length} defs — ${blockKeys.slice(0, 10).join(', ')}`);
+
     const entities = this.extractEntities(db);
     const { extMin, extMax } = this.extractExtents(db, entities);
     this.logger.log(`[DwgParser] extracted: layers=${layers.length}, entities=${entities.length}, extents=(${extMin.x.toFixed(1)},${extMin.y.toFixed(1)})→(${extMax.x.toFixed(1)},${extMax.y.toFixed(1)})`);
