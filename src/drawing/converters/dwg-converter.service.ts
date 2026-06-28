@@ -38,9 +38,8 @@ export class DwgConverterService {
 
     if (!backend) {
       throw new Error(
-        `No DWG converter found. Options:\n` +
-        `  1. Alpine: apk add libredwg (provides dwg2dxf)\n` +
-        `  2. ODA: install ODAFileConverter and set ODA_CONVERTER_BIN env var`,
+        `DWG format không được hỗ trợ trực tiếp. ` +
+        `Vui lòng mở file trong AutoCAD → File → Save As → DXF, sau đó upload file .dxf.`,
       );
     }
 

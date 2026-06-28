@@ -7,8 +7,6 @@ RUN npm run build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
-# libredwg provides dwg2dxf for DWG → DXF conversion without ODA
-RUN apk add --no-cache libredwg
 COPY package*.json ./
 RUN npm install --omit=dev
 COPY --from=builder /app/dist ./dist
