@@ -19,15 +19,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/**
- * Object Detection Pipeline orchestrator.
- *
- * Event-driven flow:
- *   DrawingUploadedEvent  → parse PDF/DXF → normalize → detect → index
- *   DrawingConvertedEvent → parse converted DXF → normalize → detect → index
- *   DrawingDetectedEvent  → (GraphService listens) → build relationships
- *   DrawingGraphBuiltEvent → (KnowledgeGraphService listens) → update workspace graph
- */
 @Injectable()
 export class DrawingParserService {
   private readonly logger = new Logger(DrawingParserService.name);
@@ -45,7 +36,7 @@ export class DrawingParserService {
 
   @OnEvent(DrawingConvertedEvent.EVENT)
   async onConverted(event: DrawingConvertedEvent) {
-    this.logger.log(`[DrawingParser] onConverted: drawingId=${event.drawingId}, dxfPath=${event.dxfPath}`);
+    await this.log(event.drawingId, `[converted] DWG → DXF: ${event.dxfPath}`);
     await this.drawingModel.updateOne(
       { _id: event.drawingId },
       { convertedUrl: event.dxfPath, parseStatus: 'parsing' },
@@ -55,38 +46,67 @@ export class DrawingParserService {
 
   @OnEvent(DrawingUploadedEvent.EVENT)
   async onUploaded(event: DrawingUploadedEvent) {
-    this.logger.log(`[DrawingParser] onUploaded: drawingId=${event.drawingId}, type=${event.fileType}, path=${event.storagePath}`);
-    const filePath = await this.resolveStoragePath(event.storagePath);
-    this.logger.log(`[DrawingParser] Resolved file path: ${filePath}`);
+    await this.log(event.drawingId, `[upload] type=${event.fileType}, storagePath=${event.storagePath}`);
+    let filePath = event.storagePath;
     try {
+      filePath = await this.resolveStoragePath(event.storagePath);
+      await this.log(event.drawingId, `[storage] resolved to ${filePath}`);
       await this.runPipeline(event.drawingId, filePath, event.fileType);
+    } catch (err: any) {
+      await this.log(event.drawingId, `[error] onUploaded: ${err.message}`);
+      await this.setStatus(event.drawingId, 'failed', err.message);
     } finally {
       this.cleanupTmp(filePath);
     }
   }
 
   private async runPipeline(drawingId: string, filePath: string, ext: string) {
-    this.logger.log(`Pipeline [${ext}]: ${drawingId}`);
+    await this.log(drawingId, `[pipeline] start ext=${ext}, file=${path.basename(filePath)}`);
     await this.setStatus(drawingId, 'parsing');
+
     try {
+      // 1. Parse
       const parser = this.parserFactory.resolve(ext);
+      await this.log(drawingId, `[parse] using parser: ${parser.constructor.name}`);
+      const t0 = Date.now();
       const result = await parser.parse(filePath);
+      const parseMs = Date.now() - t0;
+      await this.log(drawingId, `[parse] done in ${parseMs}ms — pages=${result.pages.length}, layers=${result.layers.length}, entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}, parserVersion=${result.parserVersion}`);
 
+      // 2. Normalize
+      const t1 = Date.now();
       const rawObjects = this.normalizer.fromPages(drawingId, result.pages);
-      const detected   = this.detector.detect(rawObjects);
+      await this.log(drawingId, `[normalize] ${rawObjects.length} raw objects in ${Date.now() - t1}ms`);
 
+      // 3. Detect
+      const t2 = Date.now();
+      const detected = this.detector.detect(rawObjects);
+      await this.log(drawingId, `[detect] ${detected.length} detected objects in ${Date.now() - t2}ms`);
+
+      // 4. Persist
+      const t3 = Date.now();
       await this.persistObjects(drawingId, detected);
+      await this.log(drawingId, `[persist] saved ${detected.length} objects in ${Date.now() - t3}ms`);
+
+      // 5. Index
+      const t4 = Date.now();
       await this.indexer.buildIndex(drawingId, detected, result.layers, result.pages);
+      await this.log(drawingId, `[index] built in ${Date.now() - t4}ms`);
+
+      // 6. Done
       await this.drawingModel.updateOne(
         { _id: drawingId },
         { pageCount: result.pages.length, parseStatus: 'ready' },
       );
+      const total = Date.now() - t0;
+      await this.log(drawingId, `[done] total=${total}ms — status=ready`);
 
-      this.emitParsedAndDetected(
-        drawingId, result.pages.length, result.layers.length, detected.length, '',
-      );
+      this.emitParsedAndDetected(drawingId, result.pages.length, result.layers.length, detected.length, '');
     } catch (err: any) {
-      await this.setStatus(drawingId, 'failed', err.message);
+      const msg = err?.message ?? String(err);
+      this.logger.error(`[Pipeline] drawingId=${drawingId} failed: ${msg}`);
+      await this.log(drawingId, `[failed] ${msg}`);
+      await this.setStatus(drawingId, 'failed', msg);
     }
   }
 
@@ -114,14 +134,8 @@ export class DrawingParserService {
     objectCount: number,
     estimateId: string,
   ) {
-    this.events.emit(
-      DrawingParsedEvent.EVENT,
-      new DrawingParsedEvent(drawingId, pageCount, layerCount, objectCount),
-    );
-    this.events.emit(
-      DrawingDetectedEvent.EVENT,
-      new DrawingDetectedEvent(drawingId, estimateId, objectCount),
-    );
+    this.events.emit(DrawingParsedEvent.EVENT, new DrawingParsedEvent(drawingId, pageCount, layerCount, objectCount));
+    this.events.emit(DrawingDetectedEvent.EVENT, new DrawingDetectedEvent(drawingId, estimateId, objectCount));
   }
 
   private async setStatus(drawingId: string, status: string, error?: string) {
@@ -131,9 +145,18 @@ export class DrawingParserService {
     );
   }
 
+  /** Append a timestamped log line to drawing.parseLogs (capped at 100 entries). */
+  private async log(drawingId: string, message: string) {
+    const line = `${new Date().toISOString()} ${message}`;
+    this.logger.log(`[DrawingPipeline:${drawingId}] ${message}`);
+    await this.drawingModel.updateOne(
+      { _id: drawingId },
+      { $push: { parseLogs: { $each: [line], $slice: -100 } } },
+    );
+  }
+
   private async resolveStoragePath(storagePath: string): Promise<string> {
     if (!storagePath.startsWith('http')) return storagePath;
-    // Download remote file to a tmp path so the parser can read it from disk
     const buffer = await this.cloudinary.downloadBuffer(storagePath);
     const ext = storagePath.split('.').pop()?.split('?')[0] ?? 'bin';
     const tmpPath = path.join(os.tmpdir(), `drawing-${Date.now()}.${ext}`);

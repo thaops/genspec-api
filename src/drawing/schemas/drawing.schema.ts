@@ -38,6 +38,9 @@ export class Drawing {
   @Prop()
   parseError?: string;
 
+  @Prop({ type: [String], default: [] })
+  parseLogs: string[];
+
   @Prop()
   uploadedBy: string;
 }

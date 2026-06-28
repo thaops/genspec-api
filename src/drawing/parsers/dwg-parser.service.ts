@@ -17,26 +17,39 @@ export class DwgParserService implements DrawingParserInterface {
   private _cache: { lib: any; Dwg_File_Type: any } | null = null;
 
   async parse(filePath: string): Promise<DrawingParseResult> {
-    this.logger.log(`[DwgParser] Parsing: ${filePath}`);
+    const fileSize = fs.statSync(filePath).size;
+    this.logger.log(`[DwgParser] start file=${path.basename(filePath)} size=${(fileSize / 1024).toFixed(1)}KB`);
 
+    // 1. Load WASM (cached after first call)
+    const wasmLoaded = this._cache !== null;
     const { lib, Dwg_File_Type } = await this.getLib();
+    if (!wasmLoaded) this.logger.log(`[DwgParser] WASM initialized`);
+
+    // 2. Read file into WASM memory
+    const t0 = Date.now();
     const buffer = fs.readFileSync(filePath);
     const uint8 = new Uint8Array(buffer);
+    this.logger.log(`[DwgParser] calling dwg_read_data (${uint8.length} bytes)`);
 
-    // dwg_read_data returns a Dwg_Data pointer (number) on success, undefined on failure.
-    // Non-fatal parse errors are console.warn'd internally; only OUTOFMEM throws.
+    // dwg_read_data returns Dwg_Data pointer (number) on success, undefined on failure.
+    // Non-fatal parse warnings are console.warn'd internally; only OUTOFMEM throws.
     const dwgPtr = lib.dwg_read_data(uint8, Dwg_File_Type.DWG);
     if (dwgPtr === undefined || dwgPtr === null) {
-      throw new Error(`libredwg could not read DWG — unsupported version or corrupt file: ${filePath}`);
+      throw new Error(`libredwg: cannot read DWG — unsupported version or corrupt file (${path.basename(filePath)})`);
     }
-    this.logger.log(`[DwgParser] dwg_read_data OK, ptr=${dwgPtr}`);
+    this.logger.log(`[DwgParser] dwg_read_data OK in ${Date.now() - t0}ms, ptr=${dwgPtr}`);
 
+    // 3. Convert WASM struct → JS database
+    const t1 = Date.now();
     const db = lib.convert(dwgPtr);
     lib.dwg_free(dwgPtr);
+    this.logger.log(`[DwgParser] convert OK in ${Date.now() - t1}ms, version=${(db.header as any)?.version ?? '?'}`);
 
+    // 4. Extract
     const layers = this.extractLayers(db);
     const entities = this.extractEntities(db);
     const { extMin, extMax } = this.extractExtents(db, entities);
+    this.logger.log(`[DwgParser] extracted: layers=${layers.length}, entities=${entities.length}, extents=(${extMin.x.toFixed(1)},${extMin.y.toFixed(1)})→(${extMax.x.toFixed(1)},${extMax.y.toFixed(1)})`);
 
     const page: ParsedPage = {
       pageNumber: 1,
@@ -46,14 +59,14 @@ export class DwgParserService implements DrawingParserInterface {
       entities,
     };
 
-    this.logger.log(`[DwgParser] Done: ${layers.length} layers, ${entities.length} entities`);
+    this.logger.log(`[DwgParser] done total=${Date.now() - t0}ms`);
 
     return {
       pages: [page],
       layers,
       extMin,
       extMax,
-      metadata: { version: (db.header as any)?.version ?? 'unknown' },
+      metadata: { version: (db.header as any)?.version ?? 'unknown', fileSize },
       parserVersion: 'libredwg-web@wasm',
     };
   }
