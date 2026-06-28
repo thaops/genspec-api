@@ -22,11 +22,17 @@ export class DrawingObject {
   @Prop({ required: true })
   type: string;
 
+  @Prop()
+  rawType?: string;
+
   @Prop({ type: [[Number]], default: [] })
   geometry: number[][];
 
   @Prop({ required: true, min: 0, max: 1 })
   confidence: number;
+
+  @Prop()
+  detectionReason?: string;
 
   @Prop({ required: true })
   layer: string;

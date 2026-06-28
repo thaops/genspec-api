@@ -82,7 +82,8 @@ export class DrawingJobProcessor extends WorkerHost {
             drawingId, stableId: o.stableId, rawType: o.rawType,
             type: o.objectType, layer: o.layer,
             boundingBox: o.boundingBox, geometry: o.geometry,
-            confidence: o.confidence, properties: o.properties, floor: o.floor,
+            confidence: o.confidence, detectionReason: o.detection?.reason,
+            properties: o.properties, floor: o.floor,
           })),
           { ordered: false },
         );
