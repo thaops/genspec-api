@@ -259,28 +259,35 @@ export class DwgParserService implements DrawingParserInterface {
     db: any,
     entities: RawEntity[],
   ): { extMin: { x: number; y: number }; extMax: { x: number; y: number } } {
-    // Try header EXTMIN/EXTMAX first
+    // Try header EXTMIN/EXTMAX first (most accurate — set by AutoCAD on save)
     const h = db?.header as any;
-    if (h?.extMin && h?.extMax) {
+    if (h?.extMin && h?.extMax &&
+        isFinite(h.extMin.x) && isFinite(h.extMax.x) &&
+        Math.abs(h.extMax.x - h.extMin.x) < 1e8) {
       return { extMin: { x: h.extMin.x, y: h.extMin.y }, extMax: { x: h.extMax.x, y: h.extMax.y } };
     }
 
-    // Compute from entities
     if (entities.length === 0) {
       return { extMin: { x: 0, y: 0 }, extMax: { x: 1000, y: 1000 } };
     }
 
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    // Collect coordinates and use 1%-99% percentile to drop outliers
+    const xs: number[] = [], ys: number[] = [];
     for (const e of entities) {
-      minX = Math.min(minX, e.x); maxX = Math.max(maxX, e.x);
-      minY = Math.min(minY, e.y); maxY = Math.max(maxY, e.y);
-      if (e.x2 !== undefined) { minX = Math.min(minX, e.x2); maxX = Math.max(maxX, e.x2); }
-      if (e.y2 !== undefined) { minY = Math.min(minY, e.y2); maxY = Math.max(maxY, e.y2); }
+      if (isFinite(e.x)) xs.push(e.x);
+      if (isFinite(e.y)) ys.push(e.y);
+      if (e.x2 !== undefined && isFinite(e.x2)) xs.push(e.x2);
+      if (e.y2 !== undefined && isFinite(e.y2)) ys.push(e.y2);
     }
+    if (!xs.length) return { extMin: { x: 0, y: 0 }, extMax: { x: 1000, y: 1000 } };
 
+    xs.sort((a, b) => a - b);
+    ys.sort((a, b) => a - b);
+
+    const p = (arr: number[], pct: number) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(arr.length * pct)))];
     return {
-      extMin: { x: minX, y: minY },
-      extMax: { x: maxX, y: maxY },
+      extMin: { x: p(xs, 0.01), y: p(ys, 0.01) },
+      extMax: { x: p(xs, 0.99), y: p(ys, 0.99) },
     };
   }
 
