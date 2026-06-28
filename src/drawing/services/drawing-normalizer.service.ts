@@ -30,12 +30,13 @@ export class DrawingNormalizerService {
     // Include handle (unique per entity in DWG/DXF) to prevent hash collision
     // when multiple entities share the same layer, type, and snapped position.
     const handle = String(e.properties?.handle ?? '');
-    const stableId = this.makeStableId(drawingId, e.layer, e.type, bb, `${handle}|${e.text ?? ''}`);
+    const textStr = e.text != null ? String(e.text) : undefined;
+    const stableId = this.makeStableId(drawingId, e.layer, e.type, bb, `${handle}|${textStr ?? ''}`);
     const properties: Record<string, string | number> = { ...e.properties };
-    if (e.text) properties.text = e.text;
+    if (textStr) properties.text = textStr;
     if (e.blockName) properties.blockName = e.blockName;
     if (e.radius != null) properties.radius = e.radius;
-    return { stableId, rawType: e.type, layer: e.layer, boundingBox: bb, geometry: this.geometry(e), text: e.text, properties };
+    return { stableId, rawType: e.type, layer: e.layer, boundingBox: bb, geometry: this.geometry(e), text: textStr, properties };
   }
 
   private boundingBox(e: RawEntity, page: number) {

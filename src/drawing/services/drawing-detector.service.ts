@@ -121,7 +121,7 @@ export class DrawingDetectorService {
     }
 
     // 2. Label text pattern
-    if (obj.text) {
+    if (obj.text && typeof obj.text === 'string') {
       for (const { pattern, type, hint } of LABEL_PATTERNS) {
         if (pattern.test(obj.text.trim())) {
           return {
