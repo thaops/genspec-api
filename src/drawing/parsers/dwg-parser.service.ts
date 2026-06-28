@@ -186,9 +186,10 @@ export class DwgParserService implements DrawingParserInterface {
   private async getLib(): Promise<{ lib: any; Dwg_File_Type: any }> {
     if (this._cache) return this._cache;
 
-    // Dynamic import required — package is ESM (uses import.meta.url in wasm glue)
-    // require() returns undefined for createModule in CJS context
-    const { LibreDwg, Dwg_File_Type } = await import('@mlightcad/libredwg-web');
+    // Must use new Function() to prevent SWC from compiling to require().
+    // @mlightcad/libredwg-web is ESM-only (wasm glue uses import.meta.url),
+    // which cannot be loaded via require() in Node.js CJS context.
+    const { LibreDwg, Dwg_File_Type } = await (new Function('u', 'return import(u)'))('@mlightcad/libredwg-web');
     const wasmDir = path.join(process.cwd(), 'node_modules/@mlightcad/libredwg-web/wasm/');
     this.logger.log(`[DwgParser] Loading WASM from: ${wasmDir}`);
     const lib = await LibreDwg.create(wasmDir);
