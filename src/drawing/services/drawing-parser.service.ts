@@ -88,6 +88,16 @@ export class DrawingParserService {
       await this.persistObjects(drawingId, detected);
       await this.log(drawingId, `[persist] saved ${detected.length} objects in ${Date.now() - t3}ms`);
 
+      // Sample log — type distribution + first 3 objects full structure
+      const typeCounts: Record<string, number> = {};
+      for (const d of detected) typeCounts[d.objectType] = (typeCounts[d.objectType] ?? 0) + 1;
+      await this.log(drawingId, `[sample] type distribution: ${JSON.stringify(typeCounts)}`);
+      const sample = detected.slice(0, 3).map(d => ({
+        type: d.objectType, layer: d.layer, stableId: d.stableId,
+        geometry: d.geometry, boundingBox: d.boundingBox, properties: d.properties,
+      }));
+      await this.log(drawingId, `[sample] first 3 objects: ${JSON.stringify(sample)}`);
+
       // 5. Index
       const t4 = Date.now();
       await this.indexer.buildIndex(drawingId, detected, result.layers, result.pages);
