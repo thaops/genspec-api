@@ -13,7 +13,12 @@ export class DxfParserService implements DrawingParserInterface {
   private readonly logger = new Logger(DxfParserService.name);
 
   async parse(filePath: string): Promise<DrawingParseResult> {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const raw = fs.readFileSync(filePath);
+    // Detect binary DWG mistakenly routed to DXF parser
+    if (raw.length >= 4 && raw.toString('ascii', 0, 4) === 'AC10') {
+      throw new Error(`File is a binary DWG (${raw.toString('ascii', 0, 6)}), not DXF. Upload as .dwg or re-export as ASCII DXF from AutoCAD.`);
+    }
+    const content = raw.toString('utf-8');
     const lines   = content.split(/\r?\n/);
 
     const layers: Array<{ name: string; color?: number }> = [];

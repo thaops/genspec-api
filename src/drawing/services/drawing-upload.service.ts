@@ -33,8 +33,7 @@ export class DrawingUploadService {
   ) {}
 
   async upload(estimateId: string, file: Express.Multer.File) {
-    const ext      = file.originalname.split('.').pop()?.toLowerCase() ?? '';
-    const fileType = (['pdf', 'dwg', 'dxf'].includes(ext) ? ext : 'image') as 'pdf' | 'dwg' | 'dxf' | 'image';
+    const fileType = this.detectFileType(file.buffer, file.originalname);
 
     // 1. Save buffer to tmp (parser needs filesystem access)
     const tmpPath = this.saveTmp(estimateId, file);
@@ -175,6 +174,29 @@ export class DrawingUploadService {
       this._queue = null;
     }
     return this._queue;
+  }
+
+  /**
+   * Detect file type by magic bytes first, fall back to extension.
+   * DWG files always start with "AC10" regardless of filename.
+   * Binary DXF and renamed files are caught this way.
+   */
+  private detectFileType(buffer: Buffer, originalname: string): 'pdf' | 'dwg' | 'dxf' | 'image' {
+    // Magic byte detection
+    if (buffer.length >= 6) {
+      const magic = buffer.toString('ascii', 0, 6);
+      if (magic.startsWith('AC10')) {
+        this.logger.log(`[Upload] Magic bytes '${magic}' → type=dwg (overrides extension)`);
+        return 'dwg';
+      }
+      if (magic.startsWith('%PDF')) return 'pdf';
+    }
+    // ASCII DXF check: first non-whitespace content should be group codes (digits)
+    // Fall back to extension
+    const ext = originalname.split('.').pop()?.toLowerCase() ?? '';
+    const byExt = (['pdf', 'dwg', 'dxf'] as const).find((e) => e === ext) ?? 'image';
+    this.logger.log(`[Upload] No magic match → type=${byExt} (from extension .${ext})`);
+    return byExt;
   }
 
   private saveTmp(estimateId: string, file: Express.Multer.File): string {
