@@ -56,10 +56,6 @@ export class DrawingParserService {
   @OnEvent(DrawingUploadedEvent.EVENT)
   async onUploaded(event: DrawingUploadedEvent) {
     this.logger.log(`[DrawingParser] onUploaded: drawingId=${event.drawingId}, type=${event.fileType}, path=${event.storagePath}`);
-    if (event.fileType === 'dwg') {
-      this.logger.log(`[DrawingParser] DWG → skipping, waiting for DrawingConvertedEvent`);
-      return;
-    }
     const filePath = await this.resolveStoragePath(event.storagePath);
     this.logger.log(`[DrawingParser] Resolved file path: ${filePath}`);
     try {

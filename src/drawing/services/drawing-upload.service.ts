@@ -7,7 +7,7 @@ import * as path from 'path';
 import { Drawing, DrawingDocument } from '../schemas/drawing.schema';
 import { DrawingObject, DrawingObjectDocument } from '../schemas/drawing-object.schema';
 import { CloudinaryService } from '../../storage/cloudinary.service';
-import { DrawingUploadedEvent, DrawingConvertedEvent } from '../../events/domain-events';
+import { DrawingUploadedEvent } from '../../events/domain-events';
 import { DwgConverterService } from '../converters/dwg-converter.service';
 
 // Queue is optional — only injected when REDIS_URL is set
@@ -149,28 +149,6 @@ export class DrawingUploadService {
 
     // EventEmitter fallback — synchronous pipeline (no Redis)
     this.logger.log(`[DrawingUpload] No Redis queue — EventEmitter fallback for drawing ${drawingId} (type=${fileType})`);
-
-    if (fileType === 'dwg') {
-      // Convert DWG → DXF inline, then emit DrawingConvertedEvent
-      this.logger.log(`[DrawingUpload] DWG detected — attempting inline ODA conversion for ${tmpPath}`);
-      await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'converting' });
-      try {
-        const dxfPath = await this.dwgConverter.convert(tmpPath);
-        this.logger.log(`[DrawingUpload] ODA conversion success → ${dxfPath}`);
-        await this.drawingModel.updateOne({ _id: drawingId }, { convertedUrl: dxfPath, parseStatus: 'parsing' });
-        this.events.emit(
-          DrawingConvertedEvent.EVENT,
-          new DrawingConvertedEvent(drawingId, dxfPath),
-        );
-      } catch (err: any) {
-        this.logger.error(`[DrawingUpload] DWG conversion failed for drawing ${drawingId}: ${err.message}`);
-        await this.drawingModel.updateOne(
-          { _id: drawingId },
-          { parseStatus: 'failed', parseError: `DWG conversion failed: ${err.message}` },
-        );
-      }
-      return null;
-    }
 
     await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'parsing' });
     this.logger.log(`[DrawingUpload] Emitting DrawingUploadedEvent for drawing ${drawingId} (type=${fileType})`);

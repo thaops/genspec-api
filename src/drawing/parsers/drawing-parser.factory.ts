@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { DrawingParserInterface } from './drawing-parser.interface';
 import { PdfParserService } from './pdf-parser.service';
 import { DxfParserService } from './dxf-parser.service';
+import { DwgParserService } from './dwg-parser.service';
 
 @Injectable()
 export class DrawingParserFactory {
@@ -10,9 +11,10 @@ export class DrawingParserFactory {
   constructor(
     private readonly pdf: PdfParserService,
     private readonly dxf: DxfParserService,
+    private readonly dwg: DwgParserService,
   ) {
     // Registration order = priority (first match wins)
-    this.parsers = [this.dxf, this.pdf];
+    this.parsers = [this.dwg, this.dxf, this.pdf];
   }
 
   /** Resolve parser for a file extension. Throws if unsupported. */

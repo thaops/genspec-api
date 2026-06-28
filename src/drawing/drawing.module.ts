@@ -10,6 +10,7 @@ import { DrawingIndexerService } from './services/drawing-indexer.service';
 import { DrawingParserFactory } from './parsers/drawing-parser.factory';
 import { PdfParserService } from './parsers/pdf-parser.service';
 import { DxfParserService } from './parsers/dxf-parser.service';
+import { DwgParserService } from './parsers/dwg-parser.service';
 // Converter
 import { DwgConverterService } from './converters/dwg-converter.service';
 // Core services
@@ -55,7 +56,8 @@ import { DrawingAnnotation, DrawingAnnotationSchema } from './schemas/drawing-an
     DrawingParserFactory,
     PdfParserService,
     DxfParserService,
-    // Converter
+    DwgParserService,
+    // Converter (kept for queue-based ODA path if REDIS_URL + ODA_CONVERTER_BIN set)
     DwgConverterService,
     // Core
     DrawingUploadService,
