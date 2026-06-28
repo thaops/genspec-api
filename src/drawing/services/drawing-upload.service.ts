@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -7,7 +7,8 @@ import * as path from 'path';
 import { Drawing, DrawingDocument } from '../schemas/drawing.schema';
 import { DrawingObject, DrawingObjectDocument } from '../schemas/drawing-object.schema';
 import { CloudinaryService } from '../../storage/cloudinary.service';
-import { DrawingUploadedEvent } from '../../events/domain-events';
+import { DrawingUploadedEvent, DrawingConvertedEvent } from '../../events/domain-events';
+import { DwgConverterService } from '../converters/dwg-converter.service';
 
 // Queue is optional — only injected when REDIS_URL is set
 let Queue: typeof import('bullmq').Queue | undefined;
@@ -28,6 +29,7 @@ export class DrawingUploadService {
     @InjectModel(DrawingObject.name) private objectModel: Model<DrawingObjectDocument>,
     private readonly events: EventEmitter2,
     private readonly cloudinary: CloudinaryService,
+    private readonly dwgConverter: DwgConverterService,
   ) {}
 
   async upload(estimateId: string, file: Express.Multer.File) {
@@ -145,19 +147,33 @@ export class DrawingUploadService {
       }
     }
 
-    // EventEmitter fallback — synchronous pipeline
-    this.logger.log(`Drawing ${drawingId} → EventEmitter fallback`);
+    // EventEmitter fallback — synchronous pipeline (no Redis)
+    this.logger.log(`[DrawingUpload] No Redis queue — EventEmitter fallback for drawing ${drawingId} (type=${fileType})`);
 
-    // DWG requires ODA converter which only runs in the queue worker
     if (fileType === 'dwg') {
-      await this.drawingModel.updateOne(
-        { _id: drawingId },
-        { parseStatus: 'failed', parseError: 'DWG converter chỉ hoạt động khi có Redis queue. Vui lòng upload file DXF hoặc PDF.' },
-      );
+      // Convert DWG → DXF inline, then emit DrawingConvertedEvent
+      this.logger.log(`[DrawingUpload] DWG detected — attempting inline ODA conversion for ${tmpPath}`);
+      await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'converting' });
+      try {
+        const dxfPath = await this.dwgConverter.convert(tmpPath);
+        this.logger.log(`[DrawingUpload] ODA conversion success → ${dxfPath}`);
+        await this.drawingModel.updateOne({ _id: drawingId }, { convertedUrl: dxfPath, parseStatus: 'parsing' });
+        this.events.emit(
+          DrawingConvertedEvent.EVENT,
+          new DrawingConvertedEvent(drawingId, dxfPath),
+        );
+      } catch (err: any) {
+        this.logger.error(`[DrawingUpload] DWG conversion failed for drawing ${drawingId}: ${err.message}`);
+        await this.drawingModel.updateOne(
+          { _id: drawingId },
+          { parseStatus: 'failed', parseError: `DWG conversion failed: ${err.message}` },
+        );
+      }
       return null;
     }
 
     await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'parsing' });
+    this.logger.log(`[DrawingUpload] Emitting DrawingUploadedEvent for drawing ${drawingId} (type=${fileType})`);
     this.events.emit(
       DrawingUploadedEvent.EVENT,
       new DrawingUploadedEvent(drawingId, estimateId, fileType, tmpPath, 'user'),

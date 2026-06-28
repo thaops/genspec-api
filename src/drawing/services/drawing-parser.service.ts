@@ -45,6 +45,7 @@ export class DrawingParserService {
 
   @OnEvent(DrawingConvertedEvent.EVENT)
   async onConverted(event: DrawingConvertedEvent) {
+    this.logger.log(`[DrawingParser] onConverted: drawingId=${event.drawingId}, dxfPath=${event.dxfPath}`);
     await this.drawingModel.updateOne(
       { _id: event.drawingId },
       { convertedUrl: event.dxfPath, parseStatus: 'parsing' },
@@ -54,8 +55,13 @@ export class DrawingParserService {
 
   @OnEvent(DrawingUploadedEvent.EVENT)
   async onUploaded(event: DrawingUploadedEvent) {
-    if (event.fileType === 'dwg') return; // waits for DrawingConvertedEvent
+    this.logger.log(`[DrawingParser] onUploaded: drawingId=${event.drawingId}, type=${event.fileType}, path=${event.storagePath}`);
+    if (event.fileType === 'dwg') {
+      this.logger.log(`[DrawingParser] DWG → skipping, waiting for DrawingConvertedEvent`);
+      return;
+    }
     const filePath = await this.resolveStoragePath(event.storagePath);
+    this.logger.log(`[DrawingParser] Resolved file path: ${filePath}`);
     try {
       await this.runPipeline(event.drawingId, filePath, event.fileType);
     } finally {

@@ -29,32 +29,48 @@ export class DwgConverterService {
     const baseName = path.basename(dwgPath, path.extname(dwgPath));
     const dxfPath = path.join(outDir, `${baseName}.dxf`);
 
-    // Check if ODA binary exists
+    this.logger.log(`[DwgConverter] Converting: ${dwgPath}`);
+    this.logger.log(`[DwgConverter] ODA binary: ${this.bin}`);
+    this.logger.log(`[DwgConverter] Output dir: ${outDir}`);
+    this.logger.log(`[DwgConverter] Expected DXF: ${dxfPath}`);
+
     const binExists = await this.binaryExists();
+    this.logger.log(`[DwgConverter] Binary exists: ${binExists}`);
+
     if (!binExists) {
       throw new Error(
-        `ODA File Converter không tìm thấy (${this.bin}). ` +
-        `Cài đặt từ https://www.opendesign.com/guestfiles/oda_file_converter hoặc set ODA_CONVERTER_BIN.`,
+        `ODA File Converter not found (${this.bin}). ` +
+        `Install from https://www.opendesign.com/guestfiles/oda_file_converter or set ODA_CONVERTER_BIN env var.`,
       );
     }
 
     // ODAFileConverter <input_dir> <output_dir> <output_version> <output_type> <recurse> <audit>
     const inputDir = path.dirname(dwgPath);
     const cmd = `"${this.bin}" "${inputDir}" "${outDir}" "ACAD2018" "DXF" "0" "1"`;
-    this.logger.log(`ODA convert: ${cmd}`);
+    this.logger.log(`[DwgConverter] Running: ${cmd}`);
 
-    await execAsync(cmd, { timeout: 120_000 });
+    try {
+      const { stdout, stderr } = await execAsync(cmd, { timeout: 120_000 });
+      if (stdout) this.logger.log(`[DwgConverter] stdout: ${stdout}`);
+      if (stderr) this.logger.warn(`[DwgConverter] stderr: ${stderr}`);
+    } catch (err: any) {
+      this.logger.error(`[DwgConverter] exec error: ${err.message}`);
+      throw err;
+    }
 
     if (!fs.existsSync(dxfPath)) {
       throw new Error(`ODA conversion failed — DXF output not found at ${dxfPath}`);
     }
 
+    this.logger.log(`[DwgConverter] Success: ${dxfPath}`);
     return dxfPath;
   }
 
   private async binaryExists(): Promise<boolean> {
     try {
-      await execAsync(`which "${this.bin}" || where "${this.bin}"`);
+      const isWin = process.platform === 'win32';
+      const checkCmd = isWin ? `where "${this.bin}"` : `which "${this.bin}"`;
+      await execAsync(checkCmd);
       return true;
     } catch {
       return false;
