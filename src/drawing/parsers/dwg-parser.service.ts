@@ -60,6 +60,16 @@ export class DwgParserService implements DrawingParserInterface {
     if (firstText)  this.logger.log(`[DwgParser] raw TEXT keys: ${JSON.stringify(Object.keys(firstText))} | sample: ${JSON.stringify(firstText)}`);
     if (firstHatch) this.logger.log(`[DwgParser] raw HATCH keys: ${JSON.stringify(Object.keys(firstHatch))} | sample: ${JSON.stringify(firstHatch)}`);
     if (firstDim)   this.logger.log(`[DwgParser] raw DIM keys: ${JSON.stringify(Object.keys(firstDim))} | sample: ${JSON.stringify(firstDim)}`);
+    // Log space distribution to see Paper Space vs Model Space
+    const spaceCounts: Record<string, number> = {};
+    for (const e of rawAll) {
+      const sp = String(e.inPaperSpace ?? e.space ?? 'model');
+      spaceCounts[sp] = (spaceCounts[sp] ?? 0) + 1;
+    }
+    this.logger.log(`[DwgParser] space distribution: ${JSON.stringify(spaceCounts)}`);
+    // Log first INSERT to see its fields
+    const firstInsert = rawAll.find(e => e.type === 'INSERT');
+    if (firstInsert) this.logger.log(`[DwgParser] raw INSERT sample: ${JSON.stringify(firstInsert)}`);
     // Log available top-level keys of db to see if blocks/layouts exist
     this.logger.log(`[DwgParser] db keys: ${Object.keys(db ?? {}).join(', ')}`);
     const blockKeys = Object.keys(db?.blocks ?? {});
@@ -102,13 +112,44 @@ export class DwgParserService implements DrawingParserInterface {
   private extractEntities(db: any): RawEntity[] {
     const raw: any[] = db?.entities ?? [];
     const result: RawEntity[] = [];
+    let skippedPaperSpace = 0;
 
     for (const e of raw) {
+      // Skip Paper Space entities — they belong to title blocks / viewports,
+      // not model geometry. inPaperSpace=1 or space=1 flags this.
+      if (e.inPaperSpace || e.space === 1 || e.space === 'paper') {
+        skippedPaperSpace++;
+        continue;
+      }
       const mapped = this.mapEntity(e);
       if (mapped) result.push(mapped);
     }
 
+    if (skippedPaperSpace > 0) {
+      this.logger.log(`[DwgParser] skipped ${skippedPaperSpace} Paper Space entities`);
+    }
+
+    // Log top-10 outliers (entities with coordinates far from median)
+    this.logOutliers(result);
+
     return result;
+  }
+
+  private logOutliers(entities: RawEntity[]): void {
+    if (!entities.length) return;
+    const xs = entities.map(e => e.x).filter(isFinite).sort((a, b) => a - b);
+    const ys = entities.map(e => e.y).filter(isFinite).sort((a, b) => a - b);
+    if (!xs.length) return;
+    const medX = xs[Math.floor(xs.length / 2)];
+    const medY = ys[Math.floor(ys.length / 2)];
+    const outliers = entities
+      .map(e => ({ e, d: Math.hypot(e.x - medX, e.y - medY) }))
+      .sort((a, b) => b.d - a.d)
+      .slice(0, 10);
+    const table = outliers
+      .map(({ e, d }) => `  ${e.type} layer=${e.layer} handle=${e.properties?.handle ?? '?'} x=${Math.round(e.x)} y=${Math.round(e.y)} d=${Math.round(d)}`)
+      .join('\n');
+    this.logger.log(`[DwgParser] median center=(${Math.round(medX)},${Math.round(medY)}) top-10 outliers:\n${table}`);
   }
 
   private mapEntity(e: any): RawEntity | null {
