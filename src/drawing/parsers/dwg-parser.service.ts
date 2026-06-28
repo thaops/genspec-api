@@ -53,11 +53,18 @@ export class DwgParserService implements DrawingParserInterface {
     const rawTypeCounts: Record<string, number> = {};
     for (const e of rawAll) rawTypeCounts[e.type ?? 'null'] = (rawTypeCounts[e.type ?? 'null'] ?? 0) + 1;
     this.logger.log(`[DwgParser] raw type counts: ${JSON.stringify(rawTypeCounts)}`);
-    this.logger.log(`[DwgParser] raw sample (first 5): ${JSON.stringify(rawAll.slice(0, 5))}`);
-    // Log available top-level keys of db to see if blocks exist
+    // Log raw structure of first TEXT, HATCH, DIMENSION entity for field discovery
+    const firstText  = rawAll.find(e => e.type === 'TEXT');
+    const firstHatch = rawAll.find(e => e.type === 'HATCH');
+    const firstDim   = rawAll.find(e => e.type === 'DIMENSION');
+    if (firstText)  this.logger.log(`[DwgParser] raw TEXT keys: ${JSON.stringify(Object.keys(firstText))} | sample: ${JSON.stringify(firstText)}`);
+    if (firstHatch) this.logger.log(`[DwgParser] raw HATCH keys: ${JSON.stringify(Object.keys(firstHatch))} | sample: ${JSON.stringify(firstHatch)}`);
+    if (firstDim)   this.logger.log(`[DwgParser] raw DIM keys: ${JSON.stringify(Object.keys(firstDim))} | sample: ${JSON.stringify(firstDim)}`);
+    // Log available top-level keys of db to see if blocks/layouts exist
     this.logger.log(`[DwgParser] db keys: ${Object.keys(db ?? {}).join(', ')}`);
     const blockKeys = Object.keys(db?.blocks ?? {});
     this.logger.log(`[DwgParser] blocks: ${blockKeys.length} defs — ${blockKeys.slice(0, 10).join(', ')}`);
+    if (db?.layouts) this.logger.log(`[DwgParser] layouts: ${JSON.stringify(Object.keys(db.layouts))}`);
 
     const entities = this.extractEntities(db);
     const { extMin, extMax } = this.extractExtents(db, entities);
@@ -108,8 +115,9 @@ export class DwgParserService implements DrawingParserInterface {
     const base = {
       layer: e.layer ?? '0',
       properties: {
-        handle:     e.handle    ?? '',
-        colorIndex: e.colorIndex ?? '',
+        handle:     e.handle     ?? '',
+        colorIndex: e.colorIndex ?? 256,  // 256 = ByLayer
+        lineweight: e.lineweight ?? e.lineWeight ?? -1, // -1 = ByLayer
       },
     };
 
@@ -130,15 +138,32 @@ export class DwgParserService implements DrawingParserInterface {
           radius: e.radius,
           properties: { ...base.properties, startAngle: e.startAngle ?? 0, endAngle: e.endAngle ?? 0 } };
 
-      case 'TEXT':
+      case 'TEXT': {
+        const textStr = e.text ?? e.textValue ?? e.textString ?? '';
         return { ...base, type: 'TEXT',
-          x: e.startPoint?.x ?? 0, y: e.startPoint?.y ?? 0,
-          text: e.text };
+          x: e.startPoint?.x ?? e.insertionPoint?.x ?? 0,
+          y: e.startPoint?.y ?? e.insertionPoint?.y ?? 0,
+          text: textStr,
+          properties: { ...base.properties,
+            textHeight: e.height ?? e.textHeight ?? 0,
+            rotation:   e.rotation ?? 0,
+          },
+        };
+      }
 
-      case 'MTEXT':
+      case 'MTEXT': {
+        const rawText = e.text ?? e.textValue ?? e.textString ?? '';
+        // Strip MText RTF-style codes: \P (paragraph), \f{...} (font), etc.
+        const cleanText = rawText.replace(/\\[A-Za-z][^;]*;|[{}]/g, '').trim();
         return { ...base, type: 'MTEXT',
           x: e.insertionPoint?.x ?? 0, y: e.insertionPoint?.y ?? 0,
-          text: e.text };
+          text: cleanText,
+          properties: { ...base.properties,
+            textHeight: e.charHeight ?? e.height ?? 0,
+            rotation:   e.rotation ?? 0,
+          },
+        };
+      }
 
       case 'INSERT':
         return { ...base, type: 'INSERT',
@@ -155,14 +180,49 @@ export class DwgParserService implements DrawingParserInterface {
           properties: { ...base.properties, vertexCount: verts.length } };
       }
 
-      case 'HATCH':
+      case 'HATCH': {
+        // Extract boundary loops as vertices for outline rendering
+        const loops: any[] = e.loops ?? e.boundaryPaths ?? e.paths ?? [];
+        const allPts: number[][] = [];
+        for (const loop of loops) {
+          const segs: any[] = loop.segs ?? loop.segments ?? loop.edges ?? [];
+          for (const seg of segs) {
+            if (seg.type === 1 || seg.type === 'LINE') {
+              if (seg.start) allPts.push([seg.start.x, seg.start.y]);
+              if (seg.end) allPts.push([seg.end.x, seg.end.y]);
+            } else if (seg.pts || seg.polylinePts) {
+              const verts: any[] = seg.pts ?? seg.polylinePts ?? [];
+              for (const v of verts) allPts.push([v.x ?? v[0] ?? 0, v.y ?? v[1] ?? 0]);
+            }
+          }
+        }
+        const seed = e.seedPoints?.[0];
         return { ...base, type: 'HATCH',
-          x: e.seedPoints?.[0]?.x ?? 0, y: e.seedPoints?.[0]?.y ?? 0 };
+          x: seed?.x ?? (allPts[0]?.[0] ?? 0),
+          y: seed?.y ?? (allPts[0]?.[1] ?? 0),
+          vertices: allPts.length > 1 ? allPts : undefined,
+          properties: { ...base.properties, patternName: e.name ?? e.patternName ?? '' },
+        };
+      }
 
-      case 'DIMENSION':
+      case 'DIMENSION': {
+        // Extract dimension line endpoints for rendering
+        const dimPts: number[][] = [];
+        if (e.defPoint)    dimPts.push([e.defPoint.x, e.defPoint.y]);
+        if (e.defPoint2)   dimPts.push([e.defPoint2.x, e.defPoint2.y]);
+        if (e.dimLinePoint) dimPts.push([e.dimLinePoint.x, e.dimLinePoint.y]);
+        if (e.clonePoint)  dimPts.push([e.clonePoint.x, e.clonePoint.y]);
+        const txtPt = e.textMidPt ?? e.textPosition;
         return { ...base, type: 'DIMENSION',
-          x: e.textMidPt?.x ?? 0, y: e.textMidPt?.y ?? 0,
-          text: e.text };
+          x: txtPt?.x ?? (dimPts[0]?.[0] ?? 0),
+          y: txtPt?.y ?? (dimPts[0]?.[1] ?? 0),
+          vertices: dimPts.length >= 2 ? dimPts : undefined,
+          text: e.text ?? e.textValue ?? '',
+          properties: { ...base.properties,
+            textHeight: e.textHeight ?? e.height ?? 0,
+          },
+        };
+      }
 
       case 'SPLINE': {
         const cps: any[] = e.controlPoints ?? e.fitPoints ?? [];
