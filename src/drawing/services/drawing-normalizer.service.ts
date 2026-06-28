@@ -27,7 +27,10 @@ export class DrawingNormalizerService {
     pageNumber: number,
   ): NormalizedObject {
     const bb = this.boundingBox(e, pageNumber);
-    const stableId = this.makeStableId(drawingId, e.layer, e.type, bb, e.text ?? '');
+    // Include handle (unique per entity in DWG/DXF) to prevent hash collision
+    // when multiple entities share the same layer, type, and snapped position.
+    const handle = String(e.properties?.handle ?? '');
+    const stableId = this.makeStableId(drawingId, e.layer, e.type, bb, `${handle}|${e.text ?? ''}`);
     const properties: Record<string, string | number> = { ...e.properties };
     if (e.text) properties.text = e.text;
     if (e.blockName) properties.blockName = e.blockName;

@@ -111,20 +111,31 @@ export class DrawingParserService {
   }
 
   private async persistObjects(drawingId: string, detected: ReturnType<DrawingDetectorService['detect']>) {
-    const docs = detected.map((obj) => ({
-      drawingId,
-      stableId:    obj.stableId,
-      type:        obj.objectType,
-      layer:       obj.layer,
-      boundingBox: obj.boundingBox,
-      geometry:    obj.geometry,
-      confidence:  obj.confidence,
-      properties:  obj.properties,
-      floor:       obj.floor,
-    }));
     await this.objectModel.deleteMany({ drawingId });
-    if (docs.length > 0) await this.objectModel.insertMany(docs, { ordered: false });
-    return docs.length;
+    if (detected.length === 0) return 0;
+
+    const ops = detected.map((obj) => ({
+      updateOne: {
+        filter: { drawingId, stableId: obj.stableId },
+        update: {
+          $set: {
+            drawingId,
+            stableId:    obj.stableId,
+            type:        obj.objectType,
+            layer:       obj.layer,
+            boundingBox: obj.boundingBox,
+            geometry:    obj.geometry,
+            confidence:  obj.confidence,
+            properties:  obj.properties,
+            floor:       obj.floor,
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    await this.objectModel.bulkWrite(ops, { ordered: false });
+    return detected.length;
   }
 
   private emitParsedAndDetected(
