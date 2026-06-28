@@ -72,8 +72,25 @@ export class DwgParserService implements DrawingParserInterface {
     if (firstInsert) this.logger.log(`[DwgParser] raw INSERT sample: ${JSON.stringify(firstInsert)}`);
     // Log available top-level keys of db to see if blocks/layouts exist
     this.logger.log(`[DwgParser] db keys: ${Object.keys(db ?? {}).join(', ')}`);
-    const blockKeys = Object.keys(db?.blocks ?? {});
-    this.logger.log(`[DwgParser] blocks: ${blockKeys.length} defs — ${blockKeys.slice(0, 10).join(', ')}`);
+    // Check block definitions in multiple possible locations
+    const blockObj = db?.blocks ?? db?.blockDefs ?? db?.blockRecords ?? {};
+    const blockKeys = Array.isArray(blockObj) ? blockObj.map((b: any) => b.name ?? b.blockName ?? '?') : Object.keys(blockObj);
+    this.logger.log(`[DwgParser] blocks (defs): ${blockKeys.length} — first 10: ${blockKeys.slice(0, 10).join(', ')}`);
+    // If blocks is array, log first non-asterisk block's entity count
+    if (Array.isArray(blockObj)) {
+      const firstUserBlock = blockObj.find((b: any) => !(b.name ?? '').startsWith('*'));
+      if (firstUserBlock) {
+        const ents = firstUserBlock.entities ?? firstUserBlock.items ?? [];
+        this.logger.log(`[DwgParser] sample block "${firstUserBlock.name}": ${ents.length} entities inside`);
+      }
+    } else if (typeof blockObj === 'object') {
+      const firstKey = blockKeys.find(k => !k.startsWith('*'));
+      if (firstKey) {
+        const blk = blockObj[firstKey];
+        const ents = blk?.entities ?? blk?.items ?? [];
+        this.logger.log(`[DwgParser] sample block "${firstKey}": ${ents.length} entities inside`);
+      }
+    }
     if (db?.layouts) this.logger.log(`[DwgParser] layouts: ${JSON.stringify(Object.keys(db.layouts))}`);
 
     const entities = this.extractEntities(db);
@@ -113,20 +130,27 @@ export class DwgParserService implements DrawingParserInterface {
     const raw: any[] = db?.entities ?? [];
     const result: RawEntity[] = [];
     let skippedPaperSpace = 0;
+    const unhandled: Record<string, number> = {};
 
     for (const e of raw) {
-      // Skip Paper Space entities — they belong to title blocks / viewports,
-      // not model geometry. inPaperSpace=1 or space=1 flags this.
+      // Skip Paper Space entities — title blocks / viewports, not model geometry
       if (e.inPaperSpace || e.space === 1 || e.space === 'paper') {
         skippedPaperSpace++;
         continue;
       }
       const mapped = this.mapEntity(e);
-      if (mapped) result.push(mapped);
+      if (mapped) {
+        result.push(mapped);
+      } else {
+        unhandled[e.type ?? 'null'] = (unhandled[e.type ?? 'null'] ?? 0) + 1;
+      }
     }
 
     if (skippedPaperSpace > 0) {
       this.logger.log(`[DwgParser] skipped ${skippedPaperSpace} Paper Space entities`);
+    }
+    if (Object.keys(unhandled).length) {
+      this.logger.log(`[DwgParser] UNHANDLED types (dropped): ${JSON.stringify(unhandled)}`);
     }
 
     // Log top-10 outliers (entities with coordinates far from median)
@@ -217,10 +241,20 @@ export class DwgParserService implements DrawingParserInterface {
         };
       }
 
-      case 'INSERT':
+      case 'INSERT': {
+        const ix = e.insertionPoint?.x ?? 0, iy = e.insertionPoint?.y ?? 0;
+        // Log first INSERT fully to understand structure (only once)
         return { ...base, type: 'INSERT',
-          x: e.insertionPoint?.x ?? 0, y: e.insertionPoint?.y ?? 0,
-          blockName: e.name };
+          x: ix, y: iy,
+          blockName: e.name ?? e.blockName,
+          properties: { ...base.properties,
+            blockName: e.name ?? e.blockName ?? '',
+            scaleX: e.scaleFactors?.x ?? e.xScale ?? 1,
+            scaleY: e.scaleFactors?.y ?? e.yScale ?? 1,
+            rotation: e.rotation ?? 0,
+          },
+        };
+      }
 
       case 'LWPOLYLINE': {
         const verts: any[] = e.vertices ?? [];
@@ -290,6 +324,85 @@ export class DwgParserService implements DrawingParserInterface {
       case 'POINT':
         return { ...base, type: 'POINT',
           x: e.position?.x ?? 0, y: e.position?.y ?? 0 };
+
+      // Old-style 3D polylines — vertices stored as VERTEX entities in sequence.
+      // libredwg-web may inline them as `e.vertices[]` or expose as child entities.
+      case 'POLYLINE':
+      case '2DPOLYLINE':
+      case '3DPOLYLINE': {
+        // Try inline vertices first (libredwg-web may flatten them)
+        let verts: any[] = e.vertices ?? e.points ?? [];
+        if (!verts.length && Array.isArray(e.entities)) {
+          verts = (e.entities as any[]).filter(v => v.type === 'VERTEX' || v.type === '2DVERTEX' || v.type === '3DVERTEX');
+        }
+        const pts = verts.map((v: any) => [v.x ?? v.position?.x ?? 0, v.y ?? v.position?.y ?? 0]);
+        const v0 = pts[0];
+        return { ...base, type: 'LWPOLYLINE',
+          x: v0?.[0] ?? 0, y: v0?.[1] ?? 0,
+          vertices: pts.length > 1 ? pts : undefined,
+          properties: { ...base.properties, vertexCount: pts.length } };
+      }
+
+      // SOLID / TRACE — filled quadrilateral (4-corner shape)
+      case 'SOLID':
+      case 'TRACE': {
+        const pts: number[][] = [];
+        if (e.corner1) pts.push([e.corner1.x, e.corner1.y]);
+        if (e.corner2) pts.push([e.corner2.x, e.corner2.y]);
+        if (e.corner3) pts.push([e.corner3.x, e.corner3.y]);
+        if (e.corner4) pts.push([e.corner4.x, e.corner4.y]);
+        if (pts.length > 0) pts.push(pts[0]); // close
+        return pts.length > 1
+          ? { ...base, type: 'LWPOLYLINE', x: pts[0][0], y: pts[0][1], vertices: pts, properties: base.properties }
+          : null;
+      }
+
+      // LEADER / MULTILEADER — annotation leader lines
+      case 'LEADER': {
+        const verts: any[] = e.vertices ?? e.points ?? [];
+        const pts = verts.map((v: any) => [v.x ?? 0, v.y ?? 0]);
+        return pts.length >= 2
+          ? { ...base, type: 'LINE', x: pts[0][0], y: pts[0][1], vertices: pts, properties: base.properties }
+          : null;
+      }
+      case 'MULTILEADER':
+      case 'MLEADER': {
+        // Try to get leader line points
+        const ctx = e.leaderLineContextData ?? e.context ?? {};
+        const lines: any[] = ctx.leaderLines ?? ctx.lines ?? e.leaderLines ?? [];
+        const allPts: number[][] = [];
+        for (const line of lines) {
+          const pts: any[] = line.points ?? line.vertices ?? [];
+          for (const p of pts) allPts.push([p.x ?? 0, p.y ?? 0]);
+        }
+        if (!allPts.length && e.contentPoint) {
+          allPts.push([e.contentPoint.x, e.contentPoint.y]);
+        }
+        return allPts.length >= 2
+          ? { ...base, type: 'LINE', x: allPts[0][0], y: allPts[0][1], vertices: allPts, properties: base.properties }
+          : null;
+      }
+
+      // WIPEOUT — rectangular mask (treat as polyline outline)
+      case 'WIPEOUT':
+      case 'IMAGE': {
+        const bb = e.boundary ?? e.clippingBoundary ?? {};
+        const pts: number[][] = [];
+        if (bb.vertices) for (const v of bb.vertices) pts.push([v.x, v.y]);
+        else if (e.insertionPoint && e.width && e.height) {
+          const px = e.insertionPoint.x, py = e.insertionPoint.y;
+          const w = e.width ?? 0, h = e.height ?? 0;
+          pts.push([px, py], [px + w, py], [px + w, py + h], [px, py + h], [px, py]);
+        }
+        return pts.length >= 2
+          ? { ...base, type: 'LWPOLYLINE', x: pts[0][0], y: pts[0][1], vertices: pts, properties: base.properties }
+          : null;
+      }
+
+      // RAY / XLINE — construction lines (ignore — extend to infinity)
+      case 'RAY':
+      case 'XLINE':
+        return null;
 
       default:
         return null;
