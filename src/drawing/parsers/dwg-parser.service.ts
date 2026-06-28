@@ -23,13 +23,16 @@ export class DwgParserService implements DrawingParserInterface {
     const buffer = fs.readFileSync(filePath);
     const uint8 = new Uint8Array(buffer);
 
-    const rawDwg = lib.dwg_read_data(uint8, Dwg_File_Type.DWG);
-    if (rawDwg.error !== 0) {
-      throw new Error(`libredwg error code ${rawDwg.error} reading ${filePath}`);
+    // dwg_read_data returns a Dwg_Data pointer (number) on success, undefined on failure.
+    // Non-fatal parse errors are console.warn'd internally; only OUTOFMEM throws.
+    const dwgPtr = lib.dwg_read_data(uint8, Dwg_File_Type.DWG);
+    if (dwgPtr === undefined || dwgPtr === null) {
+      throw new Error(`libredwg could not read DWG — unsupported version or corrupt file: ${filePath}`);
     }
+    this.logger.log(`[DwgParser] dwg_read_data OK, ptr=${dwgPtr}`);
 
-    const db = lib.convert(rawDwg);
-    lib.dwg_free(rawDwg);
+    const db = lib.convert(dwgPtr);
+    lib.dwg_free(dwgPtr);
 
     const layers = this.extractLayers(db);
     const entities = this.extractEntities(db);
