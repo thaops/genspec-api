@@ -35,17 +35,38 @@ export interface DetectedObject extends NormalizedObject {
 }
 
 const LAYER_TYPE_MAP: Record<string, string> = {
-  BEAM: 'beam', DAM: 'beam', 'KCC-DAM': 'beam',
-  COLUMN: 'column', COT: 'column', 'KCC-COT': 'column',
-  WALL: 'wall', TUONG: 'wall', 'KCC-TUONG': 'wall',
-  SLAB: 'slab', SAN: 'slab', 'KCC-SAN': 'slab',
-  STAIR: 'stair', THANG: 'stair',
-  ROOF: 'roof', MAI: 'roof',
-  FOOTING: 'footing', MONG: 'footing', 'KCC-MONG': 'footing',
-  PILE: 'pile', COC: 'pile',
-  DOOR: 'door', CUA: 'door',
-  WINDOW: 'window', 'CUA-SO': 'window',
+  // Structural — beam
+  BEAM: 'beam', DAM: 'beam', 'KCC-DAM': 'beam', 'S-BEAM': 'beam', 'KC-DAM': 'beam',
+  // Structural — column
+  COLUMN: 'column', COT: 'column', 'KCC-COT': 'column', 'S-COL': 'column', 'KC-COT': 'column',
+  // Wall
+  WALL: 'wall', TUONG: 'wall', 'KCC-TUONG': 'wall', 'A-WALL': 'wall', 'S-WALL': 'wall',
+  'TUONG-GACH': 'wall', 'TUONG-BT': 'wall',
+  // Slab / floor
+  SLAB: 'slab', SAN: 'slab', 'KCC-SAN': 'slab', 'S-SLAB': 'slab', 'KC-SAN': 'slab',
+  // Stair
+  STAIR: 'stair', THANG: 'stair', 'A-STAIR': 'stair',
+  // Roof
+  ROOF: 'roof', MAI: 'roof', 'A-ROOF': 'roof',
+  // Foundation
+  FOOTING: 'footing', MONG: 'footing', 'KCC-MONG': 'footing', 'S-FNDTN': 'footing', 'KC-MONG': 'footing',
+  // Pile
+  PILE: 'pile', COC: 'pile', 'S-PILE': 'pile',
+  // Door
+  DOOR: 'door', CUA: 'door', 'A-DOOR': 'door', 'CUAN': 'door',
+  // Window
+  WINDOW: 'window', 'CUA-SO': 'window', 'A-WIND': 'window', 'CUASO': 'window',
+  // Axis / grid lines — visual only, not structural
+  TRUC: 'axis', TRUCL: 'axis', 'TIM-TRUC': 'axis', GRID: 'axis', 'A-GRID': 'axis',
+  'TRUC-CHINH': 'axis', 'TRUC-PHU': 'axis',
+  // Dimension / annotation
   DIM: 'dimension', DIMENSION: 'dimension', 'A-ANNO-DIMS': 'dimension',
+  'Layer-DIM': 'dimension', 'KICH-THUOC': 'dimension', 'KT': 'dimension',
+  ANNO: 'dimension', TEXT: 'text', 'A-TEXT': 'text', 'A-ANNO-TEXT': 'text',
+  // Hatch / fill
+  HATCH: 'hatch', 'A-HATCH': 'hatch', 'CAT': 'hatch',
+  // Symbols
+  SYMBOL: 'symbol', 'A-SYMB': 'symbol', 'KY-HIEU': 'symbol',
 };
 
 const LABEL_PATTERNS: Array<{ pattern: RegExp; type: string; hint: string }> = [
@@ -84,10 +105,11 @@ export class DrawingDetectorService {
   }
 
   private classify(obj: NormalizedObject): DetectionResult {
-    // 1. Layer name
+    // 1. Layer name — exact, prefix, or suffix match (case-insensitive)
     const layerUpper = obj.layer.toUpperCase();
     for (const [key, type] of Object.entries(LAYER_TYPE_MAP)) {
-      if (layerUpper === key || layerUpper.startsWith(key + '-')) {
+      const k = key.toUpperCase();
+      if (layerUpper === k || layerUpper.startsWith(k + '-') || layerUpper.endsWith('-' + k) || layerUpper.includes('-' + k + '-')) {
         return {
           objectType: type,
           confidence: 0.95,
