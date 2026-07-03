@@ -145,6 +145,17 @@ export class DrawingController {
     return this.compare.compare(estimateId, body.drawingIdA, body.drawingIdB);
   }
 
+  // V2: full-object diff of current drawing vs another drawing in the estimate.
+  // Matching: stableId exact, fallback type + bbox IoU > 0.7.
+  @Post(':drawingId/compare')
+  compareDrawingV2(
+    @Param('estimateId') estimateId: string,
+    @Param('drawingId') drawingId: string,
+    @Body() body: { againstDrawingId: string },
+  ) {
+    return this.compare.compareV2(estimateId, drawingId, body.againstDrawingId);
+  }
+
   // --- Annotations ---
   @Get(':drawingId/annotations')
   listAnnotations(@Param('drawingId') drawingId: string) {
