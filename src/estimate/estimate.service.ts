@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as ExcelJS from 'exceljs';
@@ -205,10 +205,38 @@ export class EstimateService {
 
   async importExcel(userId: string, id: string, buffer: Buffer) {
     const doc = await this.getOwned(userId, id);
+
+    // Legacy .xls (OLE compound file, magic D0 CF 11 E0): ExcelJS only reads
+    // .xlsx — convert via SheetJS first (values/formulas/merges survive;
+    // styles are limited in the legacy format).
+    let xlsxBuffer = buffer;
+    const isLegacyXls =
+      buffer.length > 4 && buffer[0] === 0xd0 && buffer[1] === 0xcf && buffer[2] === 0x11 && buffer[3] === 0xe0;
+    if (isLegacyXls) {
+      try {
+        const XLSX = await import('xlsx');
+        const legacy = XLSX.read(buffer, { type: 'buffer', cellStyles: true, cellDates: true });
+        xlsxBuffer = XLSX.write(legacy, { type: 'buffer', bookType: 'xlsx', cellStyles: true }) as Buffer;
+      } catch {
+        throw new BadRequestException(
+          'File .xls (định dạng Excel cũ) không đọc được. Vui lòng mở bằng Excel → Save As → .xlsx rồi import lại.',
+        );
+      }
+    }
+
     const excelWb = new ExcelJS.Workbook();
-    await excelWb.xlsx.load(buffer);
+    try {
+      await excelWb.xlsx.load(xlsxBuffer as unknown as ArrayBuffer);
+    } catch {
+      throw new BadRequestException('File không phải định dạng Excel hợp lệ (.xlsx). Kiểm tra lại file rồi import lại.');
+    }
 
     const { sheets, styles } = excelToUniverSheets(excelWb);
+    if (sheets.length === 0 || sheets.every((s) => Object.keys((s.data as any)?.cellData ?? {}).length === 0)) {
+      throw new BadRequestException(
+        'Không đọc được dữ liệu nào từ file. Nếu là file .xls cũ, hãy mở bằng Excel → Save As → .xlsx rồi thử lại.',
+      );
+    }
 
     // Attach workbook-level style registry to first sheet so WorkbookEditor can restore it
     if (sheets.length > 0 && Object.keys(styles).length > 0) {
