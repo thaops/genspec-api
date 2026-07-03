@@ -53,7 +53,8 @@ export class EditModeHandler {
       .join('\n');
 
     // Định mức/đơn giá chính thống đã import (norm_items + price_sets) khớp message + tỉnh dự án.
-    const normRef = await this.catalog.referenceBlock(message, state.projectInfo.location);
+    const normRefResult = await this.catalog.referenceBlock(message, state.projectInfo.location);
+    const normRef = normRefResult.text;
 
     const visualFiles = files.filter((f) => !this.isExcel(f.originalname));
     const excelFiles = files.filter((f) => this.isExcel(f.originalname));
@@ -185,7 +186,8 @@ export class EditModeHandler {
         message: draftNote + (reply.message || `Đã xử lý ${reply.actions.length} thay đổi.`),
         confidence: reply.confidence,
         actions: reply.actions,
-        sources: research.sources,
+        // Cưỡng chế nguồn chính thống: giá tỉnh khớp từ referenceBlock luôn xuất hiện với type government
+        sources: [...research.sources, ...normRefResult.priceSources],
         preview,
         validation,
         trace,

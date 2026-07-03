@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { NormItem, PriceItem, PriceSet } from './catalog-db.schemas';
@@ -15,6 +15,16 @@ export interface ImportSummary {
   updated: number;
   skipped: number;
   errors: string[];
+}
+
+/** Body 409 khi price_set (province, effectiveDate) đã tồn tại và chưa truyền overwrite=true. */
+export interface ImportPriceConflict {
+  conflict: true;
+  existing: {
+    sourceDoc: string;
+    importedAt: string | null; // ISO
+    itemCount: number;
+  };
 }
 
 export interface ImportPreview<T> {
@@ -82,6 +92,7 @@ export class CatalogImportService {
     buffer: Buffer,
     meta: { province: string; effectiveDate: string; sourceDoc?: string },
     dryRun: boolean,
+    overwrite = false,
   ): Promise<ImportSummary | ImportPreview<ParsedPriceItem>> {
     if (!meta.province?.trim()) throw new BadRequestException('Thiếu field "province"');
     const effectiveDate = new Date(meta.effectiveDate);
@@ -102,6 +113,24 @@ export class CatalogImportService {
     }
 
     const province = meta.province.trim();
+
+    // Không ghi đè im lặng: đã có price_set cùng (province, effectiveDate) → 409, trừ khi overwrite=true
+    if (!overwrite) {
+      const existingSet = await this.priceSets.findOne({ province, effectiveDate }).lean<PriceSet>();
+      if (existingSet) {
+        const itemCount = await this.priceItems.countDocuments({ priceSetId: existingSet._id });
+        const conflict: ImportPriceConflict = {
+          conflict: true,
+          existing: {
+            sourceDoc: existingSet.sourceDoc || '',
+            importedAt: existingSet.importedAt ? new Date(existingSet.importedAt).toISOString() : null,
+            itemCount,
+          },
+        };
+        throw new ConflictException(conflict);
+      }
+    }
+
     const set = await this.priceSets.findOneAndUpdate(
       { province, effectiveDate },
       { $set: { sourceDoc: meta.sourceDoc ?? '', importedAt: new Date() } },

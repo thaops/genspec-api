@@ -11,7 +11,8 @@ export type StreamEvent =
         message: string;
         confidence?: Confidence;
         actions: Action[];
-        sources: { title?: string; uri?: string }[];
+        // type: 'government' | 'supplier' | ... — FE dùng để render badge nguồn chính thống
+        sources: { title?: string; uri?: string; type?: string }[];
         preview: ProposalPreview;
         validation: ValidationReport;
         trace: TraceItem[];

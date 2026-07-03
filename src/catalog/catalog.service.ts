@@ -4,6 +4,13 @@ import { Model, Types } from 'mongoose';
 import { NormComponent, NormItem, PriceItem, PriceSet } from './catalog-db.schemas';
 import { CATALOG } from './catalog.seed';
 import { CatalogItem, CatalogSearchResult } from './catalog.types';
+import { extractProvinceFromText } from './province-aliases';
+
+export interface ReferenceBlockResult {
+  text: string;
+  /** Nguồn giá tỉnh chính thống đã khớp — để cưỡng chế vào proposal sources (type: government). */
+  priceSources: { title: string; type: 'government' }[];
+}
 
 @Injectable()
 export class CatalogService {
@@ -62,7 +69,8 @@ export class CatalogService {
    * Khối tham chiếu định mức + đơn giá tỉnh cho prompt agent.
    * Trả '' nếu chưa có dữ liệu import khớp.
    */
-  async referenceBlock(message: string, location?: string, max = 10): Promise<string> {
+  async referenceBlock(message: string, location?: string, max = 10): Promise<ReferenceBlockResult> {
+    const empty: ReferenceBlockResult = { text: '', priceSources: [] };
     try {
       const codes = Array.from(new Set(message.match(/[A-Za-z]{2,3}[.\-]?\d{4,}/g) ?? []));
       const byCode = codes.length
@@ -79,9 +87,10 @@ export class CatalogService {
               .lean<NormItem[]>()
           : [];
       const hits = [...byCode, ...byText];
-      if (hits.length === 0) return '';
+      if (hits.length === 0) return empty;
 
-      const province = await this.matchProvince(location);
+      // Ưu tiên: tỉnh trong message > projectInfo.location > không match
+      const province = await this.matchProvince(message, location);
       const priceCtx = await this.loadPriceContext(province ?? undefined);
 
       const lines = hits.map((n) => {
@@ -97,10 +106,13 @@ export class CatalogService {
       const head = priceCtx
         ? `(Đơn giá tỉnh ${priceCtx.set.province}, hiệu lực ${priceCtx.set.effectiveDate.toISOString().slice(0, 10)}, nguồn ${priceCtx.set.sourceDoc || 'import'})`
         : '(Chưa có công bố giá tỉnh khớp — chỉ có định mức hao phí)';
-      return [head, ...lines].join('\n');
+      const priceSources: ReferenceBlockResult['priceSources'] = priceCtx
+        ? [{ title: `${priceCtx.set.sourceDoc || 'Công bố giá'} — ${priceCtx.set.province}`, type: 'government' }]
+        : [];
+      return { text: [head, ...lines].join('\n'), priceSources };
     } catch (err) {
       this.logger.warn(`referenceBlock skipped: ${(err as Error).message}`);
-      return '';
+      return empty;
     }
   }
 
@@ -180,12 +192,30 @@ export class CatalogService {
     };
   }
 
-  private async matchProvince(location?: string): Promise<string | null> {
-    if (!location?.trim()) return null;
+  /**
+   * Tìm tỉnh có price_sets trong DB. Ưu tiên tỉnh nhắc trong message,
+   * rồi tới projectInfo.location; chỉ trả tỉnh THẬT SỰ có dữ liệu (distinct).
+   */
+  private async matchProvince(message?: string, location?: string): Promise<string | null> {
+    if (!message?.trim() && !location?.trim()) return null;
     try {
-      const provinces = await this.priceSets.distinct('province');
-      const loc = this.normalize(location);
-      return (provinces as string[]).find((p) => loc.includes(this.normalize(p))) ?? null;
+      const provinces = (await this.priceSets.distinct('province')) as string[];
+      if (!provinces.length) return null;
+
+      const canonical = extractProvinceFromText(message) ?? extractProvinceFromText(location);
+      if (canonical) {
+        const hit = provinces.find(
+          (p) => extractProvinceFromText(p) === canonical || this.normalize(p) === this.normalize(canonical),
+        );
+        if (hit) return hit;
+      }
+
+      // Fallback: match thô theo location (hành vi cũ)
+      if (location?.trim()) {
+        const loc = this.normalize(location);
+        return provinces.find((p) => loc.includes(this.normalize(p))) ?? null;
+      }
+      return null;
     } catch {
       return null;
     }

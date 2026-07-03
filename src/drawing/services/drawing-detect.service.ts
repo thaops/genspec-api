@@ -18,17 +18,24 @@ export class DrawingDetectService {
     if (!existing.length) return { drawingId, objectCount: 0, objects: [], message: 'No objects to re-detect' };
 
     // Re-run detection on existing normalized objects
-    const normalized = existing.map((o) => ({
-      stableId: o.stableId,
-      rawType: o.type,
-      layer: o.layer,
-      boundingBox: o.boundingBox,
-      geometry: o.geometry ?? [],
-      properties: o.properties ?? {},
-      floor: o.floor,
-    }));
+    // Tái dựng đủ shape NormalizedObject: rawType gốc (o.type là objectType đã detect),
+    // text nằm trong properties.text (normalizer lưu ở đó) — thiếu là rule label_pattern chết.
+    const normalized = existing.map((o) => {
+      const properties = o.properties ?? {};
+      const text = typeof properties.text === 'string' ? properties.text : undefined;
+      return {
+        stableId: o.stableId,
+        rawType: o.rawType ?? o.type,
+        layer: o.layer,
+        boundingBox: o.boundingBox,
+        geometry: o.geometry ?? [],
+        text,
+        properties,
+        floor: o.floor,
+      };
+    });
 
-    const detected = this.detector.detect(normalized as any);
+    const detected = this.detector.detect(normalized);
 
     await this.objectModel.deleteMany({ drawingId });
     if (detected.length) {
