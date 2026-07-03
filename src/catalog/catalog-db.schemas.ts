@@ -24,7 +24,7 @@ export class NormItem extends Document {
 }
 export const NormItemSchema = SchemaFactory.createForClass(NormItem);
 NormItemSchema.index({ name: 'text', code: 'text' });
-NormItemSchema.index({ code: 1 }); // prefix search
+// code prefix search is covered by the implicit unique index on `code`
 
 /** Một đợt công bố giá tỉnh. */
 @Schema({ collection: 'price_sets', timestamps: true })
@@ -45,7 +45,7 @@ export class PriceItem extends Document {
   @Prop({ required: true }) name: string;
   @Prop({ default: '' }) unit: string;
   @Prop({ required: true }) price: number;
-  @Prop({ default: 'material' }) kind: ComponentKind;
+  @Prop({ type: String, default: 'material' }) kind: ComponentKind;
 }
 export const PriceItemSchema = SchemaFactory.createForClass(PriceItem);
 PriceItemSchema.index({ priceSetId: 1, refCode: 1 });
