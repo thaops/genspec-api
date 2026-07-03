@@ -76,6 +76,26 @@ export class ReadModeHandler {
       return;
     }
 
+    // Model can burn its whole output on thoughts and return no answer text —
+    // retry once with thinking disabled so the user never gets an empty bubble.
+    if (!reply.trim()) {
+      yield { event: 'step', data: { text: 'Đang tổng hợp câu trả lời…' } };
+      try {
+        for await (const chunk of this.ai.stream([{ text: prompt }], { thinkingBudget: 0 })) {
+          if (chunk.thought) continue;
+          reply += chunk.text;
+          yield { event: 'token', data: { text: chunk.text } };
+        }
+      } catch (err) {
+        yield { event: 'error', data: { message: `Lỗi AI: ${(err as Error).message}` } };
+        return;
+      }
+    }
+    if (!reply.trim()) {
+      yield { event: 'error', data: { message: 'AI không trả về nội dung — vui lòng gửi lại câu hỏi.' } };
+      return;
+    }
+
     yield {
       event: 'proposal',
       data: {

@@ -136,6 +136,24 @@ export class ReviewModeHandler {
       return;
     }
 
+    // Retry once without thinking if the model returned no answer text
+    if (!reply.trim()) {
+      yield { event: 'step', data: { text: 'Đang tổng hợp câu trả lời…' } };
+      try {
+        for await (const chunk of this.ai.stream([{ text: prompt }], { thinkingBudget: 0 })) {
+          if (chunk.thought) continue;
+          reply += chunk.text;
+          yield { event: 'token', data: { text: chunk.text } };
+        }
+      } catch {
+        /* fall through — empty reply handled below */
+      }
+    }
+    if (!reply.trim()) {
+      yield { event: 'error', data: { message: 'AI không trả về nội dung — vui lòng gửi lại câu hỏi.' } };
+      return;
+    }
+
     const hasErrors = findings.some((f) => f.severity === 'error');
     yield {
       event: 'proposal',

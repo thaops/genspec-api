@@ -122,21 +122,24 @@ export class AiService {
     return '';
   }
 
-  async *stream(parts: GeminiPart[]): AsyncGenerator<StreamChunk> {
+  async *stream(parts: GeminiPart[], opts?: { thinkingBudget?: number }): AsyncGenerator<StreamChunk> {
     if (!this.geminiKey) {
       throw new Error('No AI backend available');
     }
-    yield* this.streamGemini(parts);
+    yield* this.streamGemini(parts, opts);
   }
 
-  private async *streamGemini(parts: GeminiPart[]): AsyncGenerator<StreamChunk> {
+  private async *streamGemini(parts: GeminiPart[], opts?: { thinkingBudget?: number }): AsyncGenerator<StreamChunk> {
+    const budget = opts?.thinkingBudget ?? this.thinkingBudget;
     const body = JSON.stringify({
       contents: [{ role: 'user', parts }],
       generationConfig: {
         temperature: 0.2,
         // Dynamic thinking with thought summaries streamed back — surfaced to the
         // client as `thinking` events so the UI can show live reasoning.
-        thinkingConfig: { thinkingBudget: this.thinkingBudget, includeThoughts: true },
+        // budget 0 disables thinking entirely (used as retry when the model
+        // burns its whole output on thoughts and returns no answer text).
+        thinkingConfig: budget === 0 ? { thinkingBudget: 0 } : { thinkingBudget: budget, includeThoughts: true },
       },
     });
     let lastErr: unknown;
