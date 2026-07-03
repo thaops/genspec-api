@@ -23,6 +23,8 @@ import { DrawingAnnotationService } from './services/drawing-annotation.service'
 import { DrawingRevisionService } from './services/drawing-revision.service';
 import { DrawingThumbnailService } from './services/drawing-thumbnail.service';
 import { DrawingCacheService } from './services/drawing-cache.service';
+import { SceneBuilderService } from './services/scene-builder.service';
+import { DrawingSceneService } from './services/drawing-scene.service';
 // Engines
 import { ProposalEngineService } from './services/proposal-engine.service';
 import { WorkspaceGraphService } from './services/workspace-graph.service';
@@ -33,6 +35,7 @@ import { DrawingRelationship, DrawingRelationshipSchema } from './schemas/drawin
 import { DrawingRevision, DrawingRevisionSchema } from './schemas/drawing-revision.schema';
 import { DrawingIndex, DrawingIndexSchema } from './schemas/drawing-index.schema';
 import { DrawingAnnotation, DrawingAnnotationSchema } from './schemas/drawing-annotation.schema';
+import { DrawingSceneEntity, DrawingSceneSchema } from './schemas/drawing-scene.schema';
 
 @Module({
   imports: [
@@ -43,6 +46,7 @@ import { DrawingAnnotation, DrawingAnnotationSchema } from './schemas/drawing-an
       { name: DrawingRevision.name,     schema: DrawingRevisionSchema },
       { name: DrawingIndex.name,        schema: DrawingIndexSchema },
       { name: DrawingAnnotation.name,   schema: DrawingAnnotationSchema },
+      { name: DrawingSceneEntity.name,  schema: DrawingSceneSchema },
     ]),
   ],
   controllers: [DrawingController],
@@ -69,11 +73,15 @@ import { DrawingAnnotation, DrawingAnnotationSchema } from './schemas/drawing-an
     DrawingRevisionService,
     DrawingThumbnailService,
     DrawingCacheService,
+    // Scene
+    SceneBuilderService,
+    DrawingSceneService,
     // Engines
     ProposalEngineService,
     WorkspaceGraphService,
   ],
   exports: [
+    DrawingSceneService,
     DrawingSearchService,
     DrawingDetectService,
     DrawingGraphService,

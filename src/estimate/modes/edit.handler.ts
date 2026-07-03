@@ -52,6 +52,9 @@ export class EditModeHandler {
       .map((c) => `${c.code} | ${c.name} | ${c.unit} | VL ${k(c.material)} · NC ${k(c.labor)} · Máy ${k(c.machine)}`)
       .join('\n');
 
+    // Định mức/đơn giá chính thống đã import (norm_items + price_sets) khớp message + tỉnh dự án.
+    const normRef = await this.catalog.referenceBlock(message, state.projectInfo.location);
+
     const visualFiles = files.filter((f) => !this.isExcel(f.originalname));
     const excelFiles = files.filter((f) => this.isExcel(f.originalname));
     if (visualFiles.length) yield { event: 'step', data: { text: `Đọc ${visualFiles.length} tệp đính kèm…` } };
@@ -67,7 +70,7 @@ export class EditModeHandler {
 
     const streamParts: GeminiPart[] = [
       ...visualParts,
-      { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, true, history) },
+      { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, normRef, true, history) },
     ];
 
     let buf = '';
@@ -123,7 +126,7 @@ export class EditModeHandler {
       try {
         const fbParts: GeminiPart[] = [
           ...visualParts,
-          { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, false, history) },
+          { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, normRef, false, history) },
         ];
         reply = this.parse(await this.ai.generate(fbParts));
       } catch (err) {
@@ -207,6 +210,7 @@ export class EditModeHandler {
     excelText: string,
     researchText: string,
     catalogCodes: string,
+    normRef: string,
     streaming: boolean,
     history = '',
   ): string {
@@ -284,6 +288,11 @@ export class EditModeHandler {
       '',
       docContext ? `${docContext}` : '',
       '',
+      normRef ? 'ĐỊNH MỨC/ĐƠN GIÁ THAM CHIẾU (nguồn chính thống đã import):' : '',
+      normRef,
+      normRef
+        ? 'QUY TẮC: ưu tiên dùng mã hiệu và giá ở khối trên thay vì ước lượng; khi dùng phải ghi rõ nguồn sourceDoc vào source.name và source.type="government".'
+        : '',
       'ĐỊNH MỨC THAM KHẢO (TT12/2021/TT-BXD):',
       `Bê tông đổ tại chỗ:\n${concreteInfo}`,
       `Cốt thép:\n${steelInfo}`,

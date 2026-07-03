@@ -15,6 +15,7 @@ import {
   DrawingDetectedEvent,
 } from '../../events/domain-events';
 import { CloudinaryService } from '../../storage/cloudinary.service';
+import { DrawingSceneService } from './drawing-scene.service';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -32,6 +33,7 @@ export class DrawingParserService {
     private readonly indexer: DrawingIndexerService,
     private readonly events: EventEmitter2,
     private readonly cloudinary: CloudinaryService,
+    private readonly scene: DrawingSceneService,
   ) {}
 
   @OnEvent(DrawingConvertedEvent.EVENT)
@@ -72,6 +74,12 @@ export class DrawingParserService {
       const result = await parser.parse(filePath);
       const parseMs = Date.now() - t0;
       await this.log(drawingId, `[parse] done in ${parseMs}ms — pages=${result.pages.length}, layers=${result.layers.length}, entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}, parserVersion=${result.parserVersion}`);
+
+      // 1b. Build render scene (DXF geometry — includes converted DWG)
+      if (ext === 'dxf') {
+        await this.scene.buildAndPersistFromDxfFile(drawingId, filePath);
+        await this.log(drawingId, `[scene] built and persisted`);
+      }
 
       // 2. Normalize
       const t1 = Date.now();

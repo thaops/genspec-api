@@ -1,9 +1,11 @@
 import {
-  Controller, Get, Post, Delete, Param, UploadedFile,
+  Controller, Get, Post, Delete, Param, UploadedFile, UseGuards,
   UseInterceptors, Body, Query, Res, InternalServerErrorException, NotFoundException,
 } from '@nestjs/common';
-import { Response } from 'express';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { JwtAuthGuard } from '../common/jwt-auth.guard';
+import { DrawingSceneService } from './services/drawing-scene.service';
 import { DrawingUploadService } from './services/drawing-upload.service';
 import { DrawingSearchService } from './services/drawing-search.service';
 import { DrawingDetectService } from './services/drawing-detect.service';
@@ -22,6 +24,7 @@ export class DrawingController {
     private readonly revision: DrawingRevisionService,
     private readonly annotation: DrawingAnnotationService,
     private readonly graph: DrawingGraphService,
+    private readonly scene: DrawingSceneService,
   ) {}
 
   @Post()
@@ -64,6 +67,19 @@ export class DrawingController {
       if (err instanceof NotFoundException) throw err;
       throw new InternalServerErrorException(`Không thể tải file: ${err.message}`);
     }
+  }
+
+  // --- Render scene (contract v1) ---
+  @Get(':drawingId/scene')
+  @UseGuards(JwtAuthGuard)
+  async getScene(
+    @Param('estimateId') estimateId: string,
+    @Param('drawingId') drawingId: string,
+    @Res() res: Response,
+  ) {
+    const scene = await this.scene.getScene(estimateId, drawingId);
+    res.set({ 'Cache-Control': 'private, max-age=3600' });
+    res.json(scene);
   }
 
   @Delete(':drawingId')

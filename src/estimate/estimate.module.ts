@@ -7,6 +7,7 @@ import { EstimateController } from './estimate.controller';
 import { Estimate, EstimateSchema } from './estimate.schema';
 import { EstimateService } from './estimate.service';
 import { ExportF1Service } from './export-f1.service';
+import { ExportThdtService } from './export-thdt.service';
 import { ContextBuilderService } from './context-builder.service';
 import { ReadModeHandler } from './modes/read.handler';
 import { ReviewModeHandler } from './modes/review.handler';
@@ -30,6 +31,7 @@ import { DrawingObject, DrawingObjectSchema } from '../drawing/schemas/drawing-o
     EstimateService,
     CopilotService,
     ExportF1Service,
+    ExportThdtService,
     ContextBuilderService,
     ReadModeHandler,
     ReviewModeHandler,

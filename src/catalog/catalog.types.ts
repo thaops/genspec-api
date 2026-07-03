@@ -7,3 +7,12 @@ export interface CatalogItem {
   labor: number; // đơn giá nhân công / đơn vị (VND)
   machine: number; // đơn giá máy / đơn vị (VND)
 }
+
+import type { NormComponent } from './catalog-db.schemas';
+
+/** Shape trả về của GET /catalog — giữ nguyên CatalogItem + optional fields để FE cũ không vỡ. */
+export interface CatalogSearchResult extends CatalogItem {
+  source?: string; // 'seed' | sourceDoc đã import (vd "TT12/2021")
+  province?: string; // tỉnh của bộ giá dùng để tính VL/NC/M
+  components?: NormComponent[]; // hao phí định mức (nếu từ norm_items)
+}

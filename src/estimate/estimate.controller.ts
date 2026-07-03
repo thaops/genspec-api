@@ -22,6 +22,7 @@ import { CopilotService } from './copilot.service';
 import { ActionsDto, CopilotDto, CreateEstimateDto } from './dto';
 import { EstimateService } from './estimate.service';
 import { ExportF1Service } from './export-f1.service';
+import { ExportThdtService } from './export-thdt.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller()
@@ -30,12 +31,13 @@ export class EstimateController {
     private readonly estimates: EstimateService,
     private readonly copilot: CopilotService,
     private readonly exporter: ExportF1Service,
+    private readonly thdtExporter: ExportThdtService,
     private readonly catalog: CatalogService,
   ) {}
 
   @Get('catalog')
-  searchCatalog(@Query('q') q?: string) {
-    return this.catalog.search(q);
+  searchCatalog(@Query('q') q?: string, @Query('province') province?: string) {
+    return this.catalog.search(q, 20, province);
   }
 
   @Post('estimates')
@@ -152,6 +154,18 @@ export class EstimateController {
     res.set({
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${safe}.xlsx"`,
+    });
+    res.send(buffer);
+  }
+
+  @Get('estimates/:id/export-thdt')
+  async exportThdt(@CurrentUser('userId') userId: string, @Param('id') id: string, @Res() res: Response) {
+    const estimate = await this.estimates.getOne(userId, id);
+    const buffer = await this.thdtExporter.build(estimate);
+    const safe = estimate.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'du-toan';
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${safe}-thdt.xlsx"`,
     });
     res.send(buffer);
   }

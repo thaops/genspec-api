@@ -17,6 +17,9 @@ import { PdfParserService } from '../drawing/parsers/pdf-parser.service';
 import { DxfParserService } from '../drawing/parsers/dxf-parser.service';
 import { DwgConverterService } from '../drawing/converters/dwg-converter.service';
 import { CloudinaryService } from '../storage/cloudinary.service';
+import { SceneBuilderService } from '../drawing/services/scene-builder.service';
+import { DrawingSceneService } from '../drawing/services/drawing-scene.service';
+import { DrawingSceneEntity, DrawingSceneSchema } from '../drawing/schemas/drawing-scene.schema';
 
 // BullModule.forRoot() is registered globally in AppModule.
 // This module only registers the queue and its processor.
@@ -28,6 +31,7 @@ import { CloudinaryService } from '../storage/cloudinary.service';
       { name: DrawingObject.name,       schema: DrawingObjectSchema },
       { name: DrawingIndex.name,        schema: DrawingIndexSchema },
       { name: DrawingRelationship.name, schema: DrawingRelationshipSchema },
+      { name: DrawingSceneEntity.name,  schema: DrawingSceneSchema },
     ]),
   ],
   providers: [
@@ -41,6 +45,8 @@ import { CloudinaryService } from '../storage/cloudinary.service';
     DxfParserService,
     DwgConverterService,
     CloudinaryService,
+    SceneBuilderService,
+    DrawingSceneService,
   ],
   controllers: [JobStatusController],
   exports: [BullModule],

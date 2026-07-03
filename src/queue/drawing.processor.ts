@@ -16,6 +16,7 @@ import { DrawingGraphService } from '../drawing/services/drawing-graph.service';
 import { DrawingParserFactory } from '../drawing/parsers/drawing-parser.factory';
 import { DwgConverterService } from '../drawing/converters/dwg-converter.service';
 import { CloudinaryService } from '../storage/cloudinary.service';
+import { DrawingSceneService } from '../drawing/services/drawing-scene.service';
 
 @Processor(DRAWING_QUEUE, { concurrency: 2 })
 export class DrawingJobProcessor extends WorkerHost {
@@ -32,6 +33,7 @@ export class DrawingJobProcessor extends WorkerHost {
     private readonly graph: DrawingGraphService,
     private readonly dwgConverter: DwgConverterService,
     private readonly cloudinary: CloudinaryService,
+    private readonly scene: DrawingSceneService,
   ) {
     super();
   }
@@ -53,9 +55,20 @@ export class DrawingJobProcessor extends WorkerHost {
         await this.progress(job, 'converting', 'Đang chuyển đổi DWG → DXF...', 15);
         try {
           const dxfPath = await this.dwgConverter.convert(filePath);
-          await this.drawingModel.updateOne({ _id: drawingId }, { convertedUrl: dxfPath });
           parsePath = dxfPath;
           parseExt  = 'dxf';
+          // Persist converted DXF durably so scenes can be rebuilt later
+          let convertedUrl = dxfPath;
+          try {
+            const up = await this.cloudinary.uploadBuffer(fs.readFileSync(dxfPath), {
+              folder: `genspec/drawings/${estimateId}/converted`,
+              fileName: `${drawingId}.dxf`,
+            });
+            convertedUrl = up.url;
+          } catch (upErr: any) {
+            this.logger.warn(`Converted DXF upload failed, keeping local path: ${upErr.message}`);
+          }
+          await this.drawingModel.updateOne({ _id: drawingId }, { convertedUrl });
         } catch (err: any) {
           // ODA not installed — mark failed with helpful message
           await this.setStatus(drawingId, 'failed',
@@ -69,6 +82,11 @@ export class DrawingJobProcessor extends WorkerHost {
       await this.setStatus(drawingId, 'parsing');
       const parser = this.parserFactory.resolve(parseExt);
       const result = await parser.parse(parsePath);
+
+      // 3b. Build render scene (DXF geometry — includes converted DWG)
+      if (parseExt === 'dxf') {
+        await this.scene.buildAndPersistFromDxfFile(drawingId, parsePath);
+      }
 
       // 4. Normalize + Detect
       await this.progress(job, 'detecting', 'Đang phân tích đối tượng...', 55);
