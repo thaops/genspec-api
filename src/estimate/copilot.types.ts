@@ -2,6 +2,7 @@ import { Action, Confidence, TraceItem, ValidationReport, ProposalPreview } from
 
 export type StreamEvent =
   | { event: 'token'; data: { text: string } }
+  | { event: 'thinking'; data: { text: string } }
   | { event: 'step'; data: { text: string } }
   | {
       event: 'proposal';

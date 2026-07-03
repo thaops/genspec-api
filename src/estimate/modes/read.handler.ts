@@ -64,8 +64,12 @@ export class ReadModeHandler {
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
-        reply += chunk;
-        yield { event: 'token', data: { text: chunk } };
+        if (chunk.thought) {
+          yield { event: 'thinking', data: { text: chunk.text } };
+          continue;
+        }
+        reply += chunk.text;
+        yield { event: 'token', data: { text: chunk.text } };
       }
     } catch (err) {
       yield { event: 'error', data: { message: `Lỗi AI: ${(err as Error).message}` } };

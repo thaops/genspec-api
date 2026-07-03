@@ -79,13 +79,18 @@ export class EditModeHandler {
 
     try {
       for await (const chunk of this.ai.stream(streamParts)) {
+        if (chunk.thought) {
+          yield { event: 'thinking', data: { text: chunk.text } };
+          continue;
+        }
+        const text = chunk.text;
         if (!jsonStarted) {
-          const ji = chunk.search(/JSON:/i);
-          const visible = (ji >= 0 ? chunk.slice(0, ji) : chunk).replace(/\bSTEP:\s*/gi, '');
+          const ji = text.search(/JSON:/i);
+          const visible = (ji >= 0 ? text.slice(0, ji) : text).replace(/\bSTEP:\s*/gi, '');
           if (visible.trim()) yield { event: 'token', data: { text: visible } };
         }
-        buf += chunk;
-        fullText += chunk;
+        buf += text;
+        fullText += text;
         let idx: number;
         while ((idx = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, idx);

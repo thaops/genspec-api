@@ -4,6 +4,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export type GeminiPart = { inlineData: { data: string; mimeType: string } } | { text: string };
 
+/** One streamed chunk — `thought: true` carries the model's reasoning summary. */
+export type StreamChunk = { text: string; thought: boolean };
+
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
@@ -11,6 +14,7 @@ export class AiService {
   private readonly geminiKey?: string;
   private readonly geminiSearchModels: string[];
   private readonly geminiEstimateModels: string[];
+  private readonly thinkingBudget: number;
 
   constructor(private readonly config: ConfigService) {
     this.geminiKey = this.config.get<string>('GEMINI_API_KEY');
@@ -18,6 +22,8 @@ export class AiService {
     const search = this.config.get<string>('GEMINI_SEARCH_MODEL') ?? 'gemini-2.5-flash';
     this.geminiEstimateModels = [...new Set([estimate, 'gemini-2.5-flash-lite', 'gemini-flash-latest'])];
     this.geminiSearchModels = [...new Set([search, 'gemini-2.5-flash-lite', 'gemini-flash-latest'])];
+    // -1 = dynamic (model decides), 0 = off
+    this.thinkingBudget = Number(this.config.get<string>('GEMINI_THINKING_BUDGET') ?? -1);
     if (!this.geminiKey) {
       this.logger.warn('No AI backend (GEMINI_API_KEY) — AI features disabled');
     }
@@ -116,17 +122,22 @@ export class AiService {
     return '';
   }
 
-  async *stream(parts: GeminiPart[]): AsyncGenerator<string> {
+  async *stream(parts: GeminiPart[]): AsyncGenerator<StreamChunk> {
     if (!this.geminiKey) {
       throw new Error('No AI backend available');
     }
     yield* this.streamGemini(parts);
   }
 
-  private async *streamGemini(parts: GeminiPart[]): AsyncGenerator<string> {
+  private async *streamGemini(parts: GeminiPart[]): AsyncGenerator<StreamChunk> {
     const body = JSON.stringify({
       contents: [{ role: 'user', parts }],
-      generationConfig: { temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } },
+      generationConfig: {
+        temperature: 0.2,
+        // Dynamic thinking with thought summaries streamed back — surfaced to the
+        // client as `thinking` events so the UI can show live reasoning.
+        thinkingConfig: { thinkingBudget: this.thinkingBudget, includeThoughts: true },
+      },
     });
     let lastErr: unknown;
     for (const model of this.geminiEstimateModels) {
@@ -171,14 +182,16 @@ export class AiService {
             }
             try {
               const obj = JSON.parse(json) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
-              // Filter out Gemini 2.5 thinking (thought) parts — they appear before output text
-              // and contain reasoning with JSON-like content that breaks the stream parser.
-              const tx = (obj.candidates?.[0]?.content?.parts ?? [])
-                .filter((p) => !p.thought)
-                .map((p) => p.text ?? '')
-                .join('');
+              // Thought parts stream separately (thought: true) so downstream
+              // parsers only ever see answer text in non-thought chunks.
+              const partsArr = obj.candidates?.[0]?.content?.parts ?? [];
+              const thoughtTx = partsArr.filter((p) => p.thought).map((p) => p.text ?? '').join('');
+              const tx = partsArr.filter((p) => !p.thought).map((p) => p.text ?? '').join('');
+              if (thoughtTx) {
+                yield { text: thoughtTx, thought: true };
+              }
               if (tx) {
-                yield tx;
+                yield { text: tx, thought: false };
               }
             } catch {}
           }
