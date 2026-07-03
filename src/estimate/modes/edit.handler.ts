@@ -276,6 +276,7 @@ export class EditModeHandler {
       '',
       context.activeSheetSummary ? `SHEET ĐANG XEM (chỉnh sửa ưu tiên ở đây):\n${context.activeSheetSummary}` : '',
       context.focusedData ? `VÙNG ĐANG CHỌN (${context.selectionLabel ?? ''}) — action phải nhắm vào vùng này trước:\n${context.focusedData}` : '',
+      context.drawingSummary ? `BẢN VẼ ĐANG MỞ:\n${context.drawingSummary}` : '',
       `WORKBOOK:\n${context.workbookSummary}`,
       '',
       researchText ? 'DỮ LIỆU WEB (giá/định mức mới nhất):' : '',

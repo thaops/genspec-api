@@ -71,6 +71,9 @@ export class CopilotService {
     activeSheetId?: string,
     selectedRange?: { startRow: number; startCol: number; endRow: number; endCol: number },
     editPermission = false,
+    drawingId?: string,
+    objectId?: string,
+    drawingContext?: { page?: number; scale?: number; activeTool?: string; layer?: string; objectType?: string },
   ): AsyncGenerator<StreamEvent> {
     if (!message?.trim() && files.length === 0) {
       yield { event: 'error', data: { message: 'Cần nhập yêu cầu hoặc đính kèm tệp.' } };
@@ -86,6 +89,9 @@ export class CopilotService {
       this.estimates.getConversation(userId, id).catch(() => [] as any[]),
     ]);
     const context = this.contextBuilder.buildContext(doc as any, activeSheetId, selectedRange);
+    if (drawingId) {
+      context.drawingSummary = await this.contextBuilder.buildDrawingSummary(drawingId, objectId, drawingContext);
+    }
     const history = (rawConvo as any[])
       .slice(-6)
       .filter((m: any) => m.kind === 'user' || m.kind === 'assistant')

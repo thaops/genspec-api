@@ -1,6 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { Workbook } from './estimate.types';
 import { getWorkbookSummary, getSheetSummary } from './tools/tool-registry';
+import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
+import { DrawingObject, DrawingObjectDocument } from '../drawing/schemas/drawing-object.schema';
+
+export interface DrawingViewContext {
+  page?: number;
+  scale?: number;
+  activeTool?: string;
+  layer?: string;
+  objectType?: string;
+}
 
 export interface CellRow {
   rowKey: string;
@@ -14,6 +26,7 @@ export interface WorkbookContext {
   neighborRows?: CellRow[];
   focusedData?: string;
   selectionLabel?: string; // human-readable "B3:C5"
+  drawingSummary?: string; // compact summary of the active drawing (if any)
 }
 
 // Kept for backward compatibility with any code that still imports CompressedContext
@@ -21,6 +34,61 @@ export type CompressedContext = WorkbookContext;
 
 @Injectable()
 export class ContextBuilderService {
+  constructor(
+    @InjectModel(Drawing.name) private readonly drawingModel: Model<DrawingDocument>,
+    @InjectModel(DrawingObject.name) private readonly drawingObjectModel: Model<DrawingObjectDocument>,
+  ) {}
+
+  /** Compact summary of the active drawing for the copilot prompt. Returns undefined on missing/failed load. */
+  async buildDrawingSummary(
+    drawingId: string,
+    objectId?: string,
+    drawingContext?: DrawingViewContext,
+  ): Promise<string | undefined> {
+    try {
+      const [drawing, objects] = await Promise.all([
+        this.drawingModel.findById(drawingId).lean(),
+        this.drawingObjectModel.find({ drawingId }).lean(),
+      ]);
+      if (!drawing) return undefined;
+
+      const byType: Record<string, number> = {};
+      for (const o of objects) byType[o.type] = (byType[o.type] ?? 0) + 1;
+      const typeLine = Object.entries(byType)
+        .map(([t, n]) => `${t}: ${n}`)
+        .join(', ');
+
+      const lines: string[] = [
+        `Bản vẽ: "${drawing.name}" (${drawing.type}, ${drawing.pageCount} trang, trạng thái: ${drawing.parseStatus})`,
+        `Tổng ${objects.length} đối tượng${typeLine ? ` — ${typeLine}` : ''}`,
+      ];
+
+      if (objectId) {
+        const obj = objects.find((o) => String((o as any)._id) === objectId || o.stableId === objectId);
+        if (obj) {
+          lines.push(
+            `Đối tượng đang chọn: ${obj.type} (layer: ${obj.layer}${obj.floor ? `, tầng: ${obj.floor}` : ''}, confidence: ${obj.confidence})` +
+              (Object.keys(obj.properties ?? {}).length ? ` — thuộc tính: ${JSON.stringify(obj.properties)}` : ''),
+          );
+        }
+      }
+
+      if (drawingContext) {
+        const view: string[] = [];
+        if (drawingContext.page != null) view.push(`trang ${drawingContext.page}`);
+        if (drawingContext.scale != null) view.push(`tỷ lệ ${drawingContext.scale}`);
+        if (drawingContext.activeTool) view.push(`công cụ: ${drawingContext.activeTool}`);
+        if (drawingContext.layer) view.push(`layer: ${drawingContext.layer}`);
+        if (drawingContext.objectType) view.push(`loại đối tượng: ${drawingContext.objectType}`);
+        if (view.length) lines.push(`Đang xem: ${view.join(', ')}`);
+      }
+
+      return lines.join('\n');
+    } catch {
+      return undefined;
+    }
+  }
+
   buildContext(
     workbook: Workbook,
     activeSheetId?: string,

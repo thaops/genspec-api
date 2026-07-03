@@ -116,6 +116,7 @@ export class ReadModeHandler {
       '',
       context.activeSheetSummary ? `SHEET ĐANG XEM (ưu tiên cao nhất):\n${context.activeSheetSummary}` : '',
       context.focusedData ? `VÙNG ĐANG CHỌN (${context.selectionLabel ?? ''}) — đây là ngữ cảnh trực tiếp, ưu tiên cao nhất:\n${context.focusedData}` : '',
+      context.drawingSummary ? `BẢN VẼ ĐANG MỞ:\n${context.drawingSummary}` : '',
       `TỔNG QUAN WORKBOOK:\n${context.workbookSummary}`,
       searchContext ? `\n${searchContext}` : '',
       webContext ? `\n${webContext}` : '',

@@ -13,12 +13,14 @@ import { ReviewModeHandler } from './modes/review.handler';
 import { EditModeHandler } from './modes/edit.handler';
 import { CitationEngineService } from './sources/citation-engine';
 import { Drawing, DrawingSchema } from '../drawing/schemas/drawing.schema';
+import { DrawingObject, DrawingObjectSchema } from '../drawing/schemas/drawing-object.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Estimate.name, schema: EstimateSchema },
       { name: Drawing.name, schema: DrawingSchema },
+      { name: DrawingObject.name, schema: DrawingObjectSchema },
     ]),
     AiModule,
     CatalogModule,

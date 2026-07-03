@@ -189,6 +189,7 @@ export class ReviewModeHandler {
       history ? `LỊCH SỬ:\n${history}` : '',
       '',
       context.activeSheetSummary ? `SHEET ĐANG XEM (review tập trung vào đây trước):\n${context.activeSheetSummary}` : '',
+      context.drawingSummary ? `BẢN VẼ ĐANG MỞ:\n${context.drawingSummary}` : '',
       `TỔNG QUAN WORKBOOK:\n${context.workbookSummary}`,
       '',
       findings.length > 0 ? 'KẾT QUẢ KIỂM TRA:' : '',

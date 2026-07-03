@@ -15,7 +15,7 @@ export class DrawingDetectService {
 
   async detect(estimateId: string, drawingId: string) {
     const existing = await this.objectModel.find({ drawingId }).lean();
-    if (!existing.length) return { drawingId, objectCount: 0, message: 'No objects to re-detect' };
+    if (!existing.length) return { drawingId, objectCount: 0, objects: [], message: 'No objects to re-detect' };
 
     // Re-run detection on existing normalized objects
     const normalized = existing.map((o) => ({
@@ -47,6 +47,7 @@ export class DrawingDetectService {
       await this.objectModel.insertMany(docs, { ordered: false });
     }
 
-    return { drawingId, objectCount: detected.length };
+    const objects = await this.objectModel.find({ drawingId }).lean();
+    return { drawingId, objectCount: detected.length, objects };
   }
 }

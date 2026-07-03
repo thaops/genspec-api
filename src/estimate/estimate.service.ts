@@ -12,6 +12,7 @@ import { buildTrace } from './trace';
 import { validate } from './validation';
 import { generatePatch, applyRollback } from './patch-history';
 import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
+import { excelToUniverSheets } from './excel-to-univer';
 
 function stateOf(doc: EstimateDocument): EstimateState {
   return {
@@ -207,128 +208,11 @@ export class EstimateService {
     const excelWb = new ExcelJS.Workbook();
     await excelWb.xlsx.load(buffer);
 
-    // Shared style registry (Univer uses workbook-level style IDs referenced by cells)
-    const stylesRegistry: Record<string, any> = {};
-    const styleKeyToId: Record<string, string> = {};
-    let styleCounter = 0;
-
-    function hexFromArgb(argb?: string): string | undefined {
-      if (!argb || argb.length < 6) return undefined;
-      const hex = (argb.length === 8 ? argb.slice(2) : argb).toUpperCase();
-      if (hex === 'FFFFFF' || hex === '000000' || hex === '00000000') return undefined;
-      return '#' + hex;
-    }
-
-    function buildStyleId(cell: ExcelJS.Cell): string | undefined {
-      const s: Record<string, any> = {};
-      const fill = (cell as any).fill;
-      if (fill?.type === 'pattern' && fill.pattern !== 'none') {
-        const rgb = hexFromArgb(fill.fgColor?.argb);
-        if (rgb) s.bg = { rgb };
-      }
-      const font = (cell as any).font;
-      if (font?.bold) s.bl = 1;
-      if (font?.italic) s.it = 1;
-      if (font?.size && font.size !== 11) s.fs = font.size;
-      if (font?.color?.argb) { const rgb = hexFromArgb(font.color.argb); if (rgb) s.cl = { rgb }; }
-      const align = (cell as any).alignment;
-      const HT: Record<string, number> = { left: 1, center: 2, right: 3 };
-      const VT: Record<string, number> = { top: 1, middle: 2, bottom: 3 };
-      if (align?.horizontal && HT[align.horizontal]) s.ht = HT[align.horizontal];
-      if (align?.vertical && VT[align.vertical]) s.vt = VT[align.vertical];
-      if (align?.wrapText) s.tb = 3;
-      if (!Object.keys(s).length) return undefined;
-      const key = JSON.stringify(s);
-      if (!styleKeyToId[key]) {
-        const newId = String(++styleCounter);
-        styleKeyToId[key] = newId;
-        stylesRegistry[newId] = s;
-      }
-      return styleKeyToId[key];
-    }
-
-    const sheets = excelWb.worksheets.map((ws) => {
-      const cellData: Record<string, Record<string, any>> = {};
-      const columnData: Record<string, { w: number }> = {};
-      const rowData: Record<string, { h: number }> = {};
-      let maxRow = 0;
-      let maxCol = 0;
-
-      // Column widths: Excel char units → pixels (≈ 8px per char)
-      for (let ci = 1; ci <= ws.columnCount; ci++) {
-        const col = ws.getColumn(ci);
-        const w = (col as any).width;
-        if (w && w > 0) columnData[String(ci - 1)] = { w: Math.round(w * 8) };
-      }
-
-      ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-        const ri = rowNumber - 1;
-        // Row heights: points → pixels (1pt ≈ 1.333px at 96dpi)
-        if ((row as any).height > 0) rowData[String(ri)] = { h: Math.round((row as any).height * 1.333) };
-
-        row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-          const ci = colNumber - 1;
-          let v: any = cell.value;
-          let f: string | undefined;
-
-          if (typeof v === 'object' && v !== null && 'formula' in v) {
-            const fs = String((v as any).formula ?? '').trim();
-            if (fs) f = '=' + fs;
-            v = (v as any).result ?? '';
-          }
-          if (typeof v === 'object' && v !== null && 'richText' in v) {
-            v = ((v as any).richText as Array<{ text?: string }>).map((p) => p.text ?? '').join('');
-          }
-          if (typeof v === 'object' && v !== null && 'text' in v) v = (v as any).text;
-          if (v instanceof Date) v = v.toLocaleDateString('vi-VN');
-          if (typeof v === 'object' && v !== null) v = String(v);
-
-          const sid = buildStyleId(cell);
-          const hasValue = v !== null && v !== undefined && v !== '';
-          if (!hasValue && !f && !sid) return;
-
-          if (!cellData[String(ri)]) cellData[String(ri)] = {};
-          const entry: any = f ? { v: v ?? '', f } : { v: v ?? '' };
-          if (sid) entry.s = sid;
-          cellData[String(ri)][String(ci)] = entry;
-
-          if (ri > maxRow) maxRow = ri;
-          if (ci > maxCol) maxCol = ci;
-        });
-      });
-
-      // Merged cells
-      const mergeData: any[] = [];
-      const wsModel = (ws as any).model;
-      if (Array.isArray(wsModel?.merges)) {
-        for (const mergeRef of wsModel.merges) {
-          const parts = String(mergeRef).split(':');
-          if (parts.length !== 2) continue;
-          try {
-            const sc = ws.getCell(parts[0]);
-            const ec = ws.getCell(parts[1]);
-            mergeData.push({ startRow: sc.row - 1, startColumn: sc.col - 1, endRow: ec.row - 1, endColumn: ec.col - 1 });
-          } catch { /* skip invalid */ }
-        }
-      }
-
-      return {
-        id: `sheet-${ws.id}`,
-        name: ws.name,
-        data: {
-          cellData,
-          rowCount: Math.max(maxRow + 10, 100),
-          columnCount: Math.max(maxCol + 5, 20),
-          ...(Object.keys(columnData).length && { columnData }),
-          ...(Object.keys(rowData).length && { rowData }),
-          ...(mergeData.length && { mergeData }),
-        },
-      };
-    });
+    const { sheets, styles } = excelToUniverSheets(excelWb);
 
     // Attach workbook-level style registry to first sheet so WorkbookEditor can restore it
-    if (sheets.length > 0 && Object.keys(stylesRegistry).length > 0) {
-      (sheets[0].data as any)._styles = stylesRegistry;
+    if (sheets.length > 0 && Object.keys(styles).length > 0) {
+      (sheets[0].data as any)._styles = styles;
     }
 
     const state = stateOf(doc);
