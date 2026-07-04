@@ -107,6 +107,17 @@ export class CopilotDto {
   @IsString()
   objectId?: string;
 
+  /** Hệ số hiệu chỉnh m/đơn vị vẽ từ FE (localStorage calibration) — multipart gửi string. */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value == null || value === '') return undefined;
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  })
+  @IsNumber()
+  @IsPositive()
+  calibrationFactor?: number;
+
   @IsOptional()
   @Transform(parseJsonField)
   drawingContext?: {

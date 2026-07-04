@@ -15,6 +15,17 @@ const HEADER_LABELS: Record<ColumnKey, string> = {
   note: 'Ghi chú',
 };
 
+// Cột giá optional (G/H) — chỉ ghi khi có ít nhất 1 dòng có giá (backward compat 6 cột).
+const PRICE_COLUMNS = ['unitPrice', 'total'] as const;
+type PriceColumnKey = (typeof PRICE_COLUMNS)[number];
+const PRICE_HEADER_LABELS: Record<PriceColumnKey, string> = {
+  unitPrice: 'Đơn giá',
+  total: 'Thành tiền',
+};
+
+/** Dòng chuẩn 6 cột + 2 cột giá optional. */
+export type RescueRow = Record<ColumnKey, string> & Partial<Record<PriceColumnKey, string>>;
+
 /** Bỏ dấu tiếng Việt + lowercase để so khớp fuzzy. */
 function normalize(s: string): string {
   return s
@@ -164,7 +175,7 @@ export function tableToUpdateCellsDetailed(
 
 /** Ghi một dãy dòng (đã map theo cột chuẩn) vào dòng trống đầu tiên của sheet khối lượng. */
 export function rowsToUpdateCells(
-  rows: Record<ColumnKey, string>[],
+  rows: RescueRow[],
   state: EstimateState,
   sheetNameHint?: string,
 ): TableRescueResult | null {
@@ -172,7 +183,12 @@ export function rowsToUpdateCells(
   const sheet = pickTargetSheet(state.sheets ?? [], sheetNameHint);
   if (!sheet) return null;
 
-  const colLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
+  const hasPrice = rows.some((r) => (r.unitPrice ?? '') !== '' || (r.total ?? '') !== '');
+  const columns: readonly (ColumnKey | PriceColumnKey)[] = hasPrice
+    ? [...COLUMN_ORDER, ...PRICE_COLUMNS]
+    : COLUMN_ORDER;
+  const headerLabels: Record<string, string> = { ...HEADER_LABELS, ...PRICE_HEADER_LABELS };
+  const colLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
   const actions: Action[] = [];
   const last = lastOccupiedRow(sheet);
   let row = last === 0 ? 1 : last + 2; // sheet trống → dòng 1; ngược lại sau dòng occupied cuối + 1
@@ -189,12 +205,12 @@ export function rowsToUpdateCells(
   };
 
   if (last === 0) {
-    COLUMN_ORDER.forEach((key, i) => push(`${colLetters[i]}${row}`, HEADER_LABELS[key]));
+    columns.forEach((key, i) => push(`${colLetters[i]}${row}`, headerLabels[key]));
     row++;
   }
 
   for (const record of rows) {
-    COLUMN_ORDER.forEach((key, i) => push(`${colLetters[i]}${row}`, record[key] ?? ''));
+    columns.forEach((key, i) => push(`${colLetters[i]}${row}`, record[key] ?? ''));
     row++;
   }
 

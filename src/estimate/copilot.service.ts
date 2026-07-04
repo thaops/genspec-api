@@ -1,12 +1,18 @@
 import * as https from 'node:https';
 import * as http from 'node:http';
+import * as zlib from 'node:zlib';
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { AiService } from '../ai/ai.service';
+import { DrawingSceneEntity, DrawingSceneDocument } from '../drawing/schemas/drawing-scene.schema';
 import { EstimateService } from './estimate.service';
 import { ContextBuilderService } from './context-builder.service';
 import { ReadModeHandler } from './modes/read.handler';
 import { ReviewModeHandler } from './modes/review.handler';
 import { EditModeHandler } from './modes/edit.handler';
+import { TakeoffEngineService } from './takeoff-engine.service';
+import { previewActions } from './transparency';
 import { compute } from './boq.engine';
 
 import { StreamEvent } from './copilot.types';
@@ -49,6 +55,15 @@ const REVIEW_INTENT = /(soat loi|tim loi|quet loi|bat thuong|trung|audit|review|
 // Web/legal intent overrides REVIEW — these are research questions, not document audits
 const WEB_LEGAL_INTENT = /(thong tu|nghi dinh|quyet dinh|quy dinh|phap ly|dinh muc|tren mang|cu chua|hien hanh|moi nhat|thông tư|nghị định|quyết định|quy định|pháp lý|định mức|trên mạng|cũ chưa|hiện hành|mới nhất)/i;
 const PRICE_INTENT = /(gia|don gia|vat lieu|vat tu|dinh muc|du toan|lap|boc|khoi luong|bao gia|thi truong|giá|đơn giá|vật liệu|vật tư|định mức|dự toán|lập|bóc|khối lượng|báo giá|thị trường|cập nhật)/i;
+// "Bóc (tách) khối lượng" tự do trong chat — route thẳng deterministic engine, KHÔNG cho LLM bịa số.
+const TAKEOFF_INTENT = /(bóc|boc)\s*(tách|tach)?\s*(khối lượng|khoi luong)|\btakeoff\b/i;
+// Prompt cấu trúc ⚡ từ FE — cũng route engine cho an toàn (dù FE đã có đường REST riêng).
+const TAKEOFF_ACTION = /\[ACTION:\s*generate[_-]?takeoff/i;
+
+// Quy đổi đơn vị bản vẽ ($INSUNITS) → mét — port từ FE DrawingWorkspace.
+const INSUNITS_TO_METERS: Record<string, number> = { mm: 0.001, m: 1, inch: 0.0254 };
+// Giả định mặc định khi chat tự do (FE popover chưa gửi kèm).
+const DEFAULT_TAKEOFF_ASSUMPTIONS = { floorHeight: 3.3, wallThickness: 0.2, beamDepth: 0.4 };
 
 @Injectable()
 export class CopilotService {
@@ -61,6 +76,8 @@ export class CopilotService {
     private readonly readHandler: ReadModeHandler,
     private readonly reviewHandler: ReviewModeHandler,
     private readonly editHandler: EditModeHandler,
+    private readonly takeoffEngine: TakeoffEngineService,
+    @InjectModel(DrawingSceneEntity.name) private readonly sceneModel: Model<DrawingSceneDocument>,
   ) {}
 
   async *streamChat(
@@ -74,6 +91,7 @@ export class CopilotService {
     drawingId?: string,
     objectId?: string,
     drawingContext?: { page?: number; scale?: number; activeTool?: string; layer?: string; objectType?: string },
+    calibrationFactor?: number,
   ): AsyncGenerator<StreamEvent> {
     if (!message?.trim() && files.length === 0) {
       yield { event: 'error', data: { message: 'Cần nhập yêu cầu hoặc đính kèm tệp.' } };
@@ -97,6 +115,13 @@ export class CopilotService {
       .filter((m: any) => m.kind === 'user' || m.kind === 'assistant')
       .map((m: any) => `${m.kind === 'user' ? 'User' : 'Minh'}: ${String(m.text ?? '').slice(0, 300)}`)
       .join('\n');
+
+    // "Bóc khối lượng" + có bản vẽ → deterministic engine, KHÔNG bao giờ để LLM ước lượng khối lượng.
+    const normMsg = normalizeVi(message);
+    if (drawingId && (TAKEOFF_INTENT.test(message) || TAKEOFF_INTENT.test(normMsg) || TAKEOFF_ACTION.test(message))) {
+      yield* this.runTakeoffEngine(userId, id, doc, drawingId, calibrationFactor);
+      return;
+    }
 
     const rawMode = this.detectMode(message, !!selectedRange);
     // In safe mode (no editPermission) downgrade edit intent to read
@@ -130,6 +155,104 @@ export class CopilotService {
     }
 
     yield* this.editHandler.handle(state, context, message, files, research, history);
+  }
+
+  /**
+   * Route "bóc khối lượng" → TakeoffEngineService (deterministic, không LLM).
+   * Ưu tiên calibrationFactor FE gửi; thiếu → heuristic $INSUNITS từ scene
+   * (plausibility bbox 2m–5km, port từ FE DrawingWorkspace); vẫn không suy ra
+   * được → proposal hướng dẫn thay vì để LLM bịa số.
+   */
+  private async *runTakeoffEngine(
+    userId: string,
+    estimateId: string,
+    doc: unknown,
+    drawingId: string,
+    calibrationFactor?: number,
+  ): AsyncGenerator<StreamEvent> {
+    yield { event: 'step', data: { text: 'Đo hình học bằng engine (không dùng AI ước lượng)…' } };
+
+    const factor =
+      calibrationFactor != null && calibrationFactor > 0
+        ? calibrationFactor
+        : await this.inferCalibrationFactor(drawingId);
+
+    if (factor == null) {
+      const state = this.estimates.stateForPrompt(doc as any);
+      yield {
+        event: 'proposal',
+        data: {
+          thinking: [
+            'Yêu cầu bóc khối lượng — route sang engine đo hình học (không LLM).',
+            'Không có hệ số hiệu chỉnh từ FE và không suy ra được đơn vị bản vẽ hợp lý từ header/scene.',
+            'Từ chối chạy engine với tỉ lệ đoán mò — không ước lượng khối lượng.',
+          ],
+          message:
+            'Chưa xác định được tỉ lệ bản vẽ (đơn vị vẽ → mét) nên tôi không bóc khối lượng để tránh sai số. ' +
+            'Hãy bấm nút ⚡ trên bản vẽ (có hiệu chỉnh tỉ lệ) để bóc chính xác bằng engine đo hình học.',
+          actions: [],
+          sources: [],
+          preview: previewActions(state, []),
+          validation: {
+            status: 'warning',
+            score: 0,
+            findings: [
+              {
+                id: 'takeoff-engine-calibration',
+                severity: 'warn',
+                area: 'quantity',
+                title: 'Thiếu tỉ lệ bản vẽ',
+                detail:
+                  'Không có calibration và header bản vẽ không cho đơn vị hợp lý (kích thước công trình ngoài khoảng 2m–5km). Hiệu chỉnh 2 điểm trên bản vẽ rồi bấm ⚡.',
+              },
+            ],
+            consistency: [],
+          },
+          trace: [],
+        },
+      };
+      return;
+    }
+
+    const src = calibrationFactor != null && calibrationFactor > 0 ? 'hiệu chỉnh từ bản vẽ' : 'suy từ đơn vị bản vẽ ($INSUNITS)';
+    yield { event: 'step', data: { text: `Tỉ lệ ${factor} m/đơn vị vẽ (${src}) — giả định mặc định cao tầng 3.3m, tường 0.2m, dầm 0.4m` } };
+
+    try {
+      const result = await this.takeoffEngine.run(userId, estimateId, {
+        drawingId,
+        unitsPerDrawingUnit: factor,
+        assumptions: { ...DEFAULT_TAKEOFF_ASSUMPTIONS },
+      });
+      result.thinking.unshift(
+        `Chat "bóc khối lượng" route thẳng engine — tỉ lệ ${factor} m/đơn vị (${src}); giả định MẶC ĐỊNH cao tầng 3.3m, dày tường 0.2m, cao dầm 0.4m (chỉnh trong popover ⚡ nếu khác).`,
+      );
+      yield { event: 'proposal', data: result };
+    } catch (err) {
+      yield { event: 'error', data: { message: (err as Error).message } };
+    }
+  }
+
+  /**
+   * Heuristic đơn vị bản vẽ từ scene đã persist: units khai báo nếu hợp lý,
+   * ngược lại thử mm → m → inch với plausibility bbox 2m–5km. Null = không suy ra được.
+   */
+  private async inferCalibrationFactor(drawingId: string): Promise<number | null> {
+    try {
+      const stored = (await this.sceneModel.findOne({ drawingId }).lean()) as any;
+      if (!stored?.gz) return null;
+      const buf = Buffer.isBuffer(stored.gz) ? stored.gz : Buffer.from(stored.gz.buffer ?? stored.gz);
+      const scene = JSON.parse(zlib.gunzipSync(buf).toString('utf-8'));
+      const w = (scene.bbox?.maxX ?? 0) - (scene.bbox?.minX ?? 0);
+      const h = (scene.bbox?.maxY ?? 0) - (scene.bbox?.minY ?? 0);
+      const span = Math.max(w, h) || 0;
+      if (span <= 0) return null;
+      const plausible = (f: number) => span * f >= 2 && span * f <= 5000;
+      const declared = INSUNITS_TO_METERS[scene.units as string];
+      if (declared != null && plausible(declared)) return declared;
+      return [0.001, 1, 0.0254].find(plausible) ?? null;
+    } catch {
+      return null;
+    }
   }
 
   async generateInsights(userId: string, id: string): Promise<InsightItem[]> {

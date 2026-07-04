@@ -109,7 +109,7 @@ export class EstimateController {
     (res.socket as any)?.setNoDelay?.(true);
     res.flushHeaders?.();
     try {
-      for await (const ev of this.copilot.streamChat(userId, id, dto.message ?? '', files ?? [], dto.activeSheetId, dto.selectedRange, dto.editPermission ?? false, dto.drawingId, dto.objectId, dto.drawingContext)) {
+      for await (const ev of this.copilot.streamChat(userId, id, dto.message ?? '', files ?? [], dto.activeSheetId, dto.selectedRange, dto.editPermission ?? false, dto.drawingId, dto.objectId, dto.drawingContext, dto.calibrationFactor)) {
         res.write(`event: ${ev.event}\ndata: ${JSON.stringify(ev.data)}\n\n`);
         (res as any).flush?.();
       }

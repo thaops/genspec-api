@@ -6,6 +6,35 @@ import { CATALOG } from './catalog.seed';
 import { CatalogItem, CatalogSearchResult } from './catalog.types';
 import { extractProvinceFromText } from './province-aliases';
 
+/** Bỏ dấu tiếng Việt + lowercase — dùng chung cho match giá/tỉnh (pure, không Mongo). */
+export function normalizeVn(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd');
+}
+
+/**
+ * Tra giá 1 hao phí trong danh sách price_items: match refCode trước,
+ * fallback fuzzy name (pure — tái dùng bởi CatalogService lẫn TakeoffEngine).
+ */
+export function lookupComponentPrice(
+  comp: { refCode?: string; name: string },
+  prices: { refCode?: string; name: string; price: number }[],
+): number | undefined {
+  if (comp.refCode) {
+    const byRef = prices.find((p) => p.refCode && p.refCode.toLowerCase() === comp.refCode!.toLowerCase());
+    if (byRef) return byRef.price;
+  }
+  const n = normalizeVn(comp.name);
+  const byName = prices.find((p) => {
+    const pn = normalizeVn(p.name);
+    return pn === n || pn.includes(n) || n.includes(pn);
+  });
+  return byName?.price;
+}
+
 export interface ReferenceBlockResult {
   text: string;
   /** Nguồn giá tỉnh chính thống đã khớp — để cưỡng chế vào proposal sources (type: government). */
@@ -152,16 +181,7 @@ export class CatalogService {
   }
 
   private lookupPrice(comp: NormComponent, prices: PriceItem[]): number | undefined {
-    if (comp.refCode) {
-      const byRef = prices.find((p) => p.refCode && p.refCode.toLowerCase() === comp.refCode!.toLowerCase());
-      if (byRef) return byRef.price;
-    }
-    const n = this.normalize(comp.name);
-    const byName = prices.find((p) => {
-      const pn = this.normalize(p.name);
-      return pn === n || pn.includes(n) || n.includes(pn);
-    });
-    return byName?.price;
+    return lookupComponentPrice(comp, prices);
   }
 
   private toResult(n: NormItem, priceCtx: { set: PriceSet; prices: PriceItem[] } | null): CatalogSearchResult {
@@ -222,10 +242,16 @@ export class CatalogService {
   }
 
   private normalize(s: string): string {
-    return s
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/đ/g, 'd');
+    return normalizeVn(s);
+  }
+
+  /**
+   * Price set MỚI NHẤT của tỉnh khớp projectInfo.location (matchProvince + effectiveDate desc).
+   * Không khớp / chưa import → null. Dùng bởi TakeoffEngine để gán giá thật.
+   */
+  async priceContextForLocation(location?: string): Promise<{ set: PriceSet; prices: PriceItem[] } | null> {
+    const province = await this.matchProvince(undefined, location);
+    if (!province) return null;
+    return this.loadPriceContext(province);
   }
 }

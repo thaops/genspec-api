@@ -3,7 +3,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { NormItem } from '../catalog/catalog-db.schemas';
+import { NormComponent, NormItem } from '../catalog/catalog-db.schemas';
+import { CatalogService, lookupComponentPrice } from '../catalog/catalog.service';
 import { DrawingObject, DrawingObjectDocument } from '../drawing/schemas/drawing-object.schema';
 import { EstimateService } from './estimate.service';
 import { Action, EstimateState, ValidationFinding, ValidationReport } from './estimate.types';
@@ -29,6 +30,8 @@ export interface NormCandidate {
   name: string;
   unit: string;
   sourceDoc?: string;
+  /** Hao phí VL/NC/M từ norm_items — nguồn tính đơn giá thật. */
+  components?: { kind?: string; refCode?: string; name: string; unit?: string; norm: number }[];
 }
 
 export type TakeoffRowKey =
@@ -52,6 +55,67 @@ export interface TakeoffEngineRow {
   unit: string;
   quantity: number;
   note: string;
+  /** Đơn giá VNĐ (làm tròn) từ price_items tỉnh — undefined khi thiếu giá (KHÔNG ước lượng). */
+  unitPrice?: number;
+  /** Thành tiền = unitPrice × quantity (làm tròn VNĐ). */
+  totalPrice?: number;
+}
+
+// ===== Pricing (pure — verify script gọi trực tiếp, không Mongo) =====
+
+export interface PricingPriceItem {
+  refCode?: string;
+  name: string;
+  price: number;
+}
+
+export interface PriceContextLite {
+  province: string;
+  sourceDoc: string;
+  effectiveDate: string; // yyyy-mm-dd
+  prices: PricingPriceItem[];
+}
+
+/**
+ * Đơn giá 1 công tác = Σ (norm × giá price_item khớp) trên TOÀN BỘ components.
+ * Bất kỳ component nào không khớp giá → null (không ước lượng phần thiếu).
+ */
+export function priceNormComponents(
+  components: { refCode?: string; name: string; norm: number }[] | undefined,
+  prices: PricingPriceItem[],
+): number | null {
+  if (!components?.length || !prices.length) return null;
+  let total = 0;
+  for (const c of components) {
+    const p = lookupComponentPrice(c, prices);
+    if (p == null) return null;
+    total += c.norm * p;
+  }
+  return Math.round(total);
+}
+
+/**
+ * Gán đơn giá/thành tiền vào rows từ price_set tỉnh. Mutate-free: trả rows mới.
+ * Thiếu giá → giữ nguyên dòng (cột giá trống), caller sinh finding warn.
+ */
+export function applyPricingToRows(
+  rows: TakeoffEngineRow[],
+  candidates: NormCandidateMap,
+  ctx: PriceContextLite | null,
+): TakeoffEngineRow[] {
+  if (!ctx) return rows;
+  return rows.map((r) => {
+    if (!r.code) return r;
+    const cand = candidates[r.key];
+    const unitPrice = priceNormComponents(cand?.components, ctx.prices);
+    if (unitPrice == null) return r;
+    return {
+      ...r,
+      unitPrice,
+      totalPrice: Math.round(unitPrice * r.quantity),
+      note: `${r.note} — giá ${ctx.province} ${ctx.sourceDoc || 'công bố giá'} ${ctx.effectiveDate}`,
+    };
+  });
 }
 
 /** Bề rộng dầm giả định cố định (m) — ghi rõ trong Ghi chú mỗi dòng dầm. */
@@ -234,14 +298,25 @@ export function computeTakeoffRows(
   return rows;
 }
 
-/** Bảng markdown 6 cột chuẩn (STT/Mã/Tên/ĐV/KL/Ghi chú). */
+/** Bảng markdown 6 cột chuẩn (STT/Mã/Tên/ĐV/KL/Ghi chú); +2 cột Đơn giá/Thành tiền khi có ít nhất 1 dòng có giá. */
 export function rowsToMarkdownTable(rows: TakeoffEngineRow[]): string {
-  const lines = [
-    '| STT | Mã hiệu định mức | Tên công tác | Đơn vị | Khối lượng | Ghi chú |',
-    '| --- | --- | --- | --- | --- | --- |',
-  ];
+  const hasPrice = rows.some((r) => r.unitPrice != null);
+  const vnd = (v?: number) => (v != null ? v.toLocaleString('vi-VN') : '');
+  const lines = hasPrice
+    ? [
+        '| STT | Mã hiệu định mức | Tên công tác | Đơn vị | Khối lượng | Đơn giá | Thành tiền | Ghi chú |',
+        '| --- | --- | --- | --- | --- | --- | --- | --- |',
+      ]
+    : [
+        '| STT | Mã hiệu định mức | Tên công tác | Đơn vị | Khối lượng | Ghi chú |',
+        '| --- | --- | --- | --- | --- | --- |',
+      ];
   rows.forEach((r, i) => {
-    lines.push(`| ${i + 1} | ${r.code} | ${r.name} | ${r.unit} | ${r.quantity} | ${r.note} |`);
+    lines.push(
+      hasPrice
+        ? `| ${i + 1} | ${r.code} | ${r.name} | ${r.unit} | ${r.quantity} | ${vnd(r.unitPrice)} | ${vnd(r.totalPrice)} | ${r.note} |`
+        : `| ${i + 1} | ${r.code} | ${r.name} | ${r.unit} | ${r.quantity} | ${r.note} |`,
+    );
   });
   return lines.join('\n');
 }
@@ -261,6 +336,7 @@ export class TakeoffEngineService {
     @InjectModel(DrawingObject.name) private readonly drawingObjectModel: Model<DrawingObjectDocument>,
     @InjectModel(NormItem.name) private readonly normModel: Model<NormItem>,
     private readonly estimates: EstimateService,
+    private readonly catalog: CatalogService,
   ) {}
 
   /** Tra norm_items theo keyword — KHÔNG hardcode mã; không có DB match → undefined. */
@@ -274,7 +350,13 @@ export class TakeoffEngineService {
             .sort({ code: 1 })
             .lean();
           if (hit) {
-            map[key] = { code: hit.code, name: hit.name, unit: hit.unit, sourceDoc: hit.sourceDoc };
+            map[key] = {
+              code: hit.code,
+              name: hit.name,
+              unit: hit.unit,
+              sourceDoc: hit.sourceDoc,
+              components: (hit.components ?? []) as NormComponent[],
+            };
             return;
           }
         }
@@ -297,7 +379,21 @@ export class TakeoffEngineService {
     const allKeys = Object.keys(NORM_KEYWORDS) as TakeoffRowKey[];
     const normCandidates = await this.findNormCandidates(allKeys);
 
-    const rows = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates);
+    const bareRows = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates);
+
+    // Giá THẬT từ price_set tỉnh mới nhất khớp projectInfo.location — không có thì cột giá trống.
+    const priceCtxRaw = await this.catalog
+      .priceContextForLocation(state.projectInfo?.location)
+      .catch(() => null);
+    const priceCtx: PriceContextLite | null = priceCtxRaw
+      ? {
+          province: priceCtxRaw.set.province,
+          sourceDoc: priceCtxRaw.set.sourceDoc || 'Công bố giá',
+          effectiveDate: new Date(priceCtxRaw.set.effectiveDate).toISOString().slice(0, 10),
+          prices: priceCtxRaw.prices.map((p) => ({ refCode: p.refCode, name: p.name, price: p.price })),
+        }
+      : null;
+    const rows = applyPricingToRows(bareRows, normCandidates, priceCtx);
 
     const takeoffActions: Action[] = rows.map((r) => ({
       type: 'upsert_takeoff',
@@ -316,6 +412,8 @@ export class TakeoffEngineService {
         unit: r.unit,
         quantity: String(r.quantity),
         note: r.note,
+        unitPrice: r.unitPrice != null ? String(r.unitPrice) : '',
+        total: r.totalPrice != null ? String(r.totalPrice) : '',
       })),
       state,
       'Khối lượng',
@@ -325,10 +423,15 @@ export class TakeoffEngineService {
     const a = input.assumptions;
     const groups = [...new Set(rows.map((r) => r.group))];
     const missingCode = rows.filter((r) => !r.code);
+    const missingPrice = rows.filter((r) => r.unitPrice == null);
+    const pricedCount = rows.length - missingPrice.length;
     const message = [
       `Đã bóc khối lượng ${rows.length} dòng từ ${groups.length} nhóm cấu kiện (${groups.join(', ')}) — ${objects.length} đối tượng hình học${rejected.size ? `, đã loại ${rejected.size} đối tượng bị từ chối` : ''}.`,
       `Giả định: cao tầng ${a.floorHeight}m, dày tường ${a.wallThickness}m, cao dầm ${a.beamDepth}m, bề rộng dầm ${ASSUMED_BEAM_WIDTH}m, tỷ lệ ${input.unitsPerDrawingUnit} m/đơn vị vẽ.`,
       `Khối lượng do máy tính từ hình học bản vẽ — không phải AI ước lượng.`,
+      priceCtx
+        ? `Đơn giá: ${pricedCount}/${rows.length} công tác gán từ công bố giá ${priceCtx.province} (${priceCtx.sourceDoc}, hiệu lực ${priceCtx.effectiveDate})${missingPrice.length ? `; ${missingPrice.length} công tác chưa có giá — cột giá để trống` : ''}.`
+        : `Đơn giá: chưa có công bố giá tỉnh khớp địa điểm dự án — cột giá để trống (import tại /settings).`,
       '',
       rowsToMarkdownTable(rows),
     ].join('\n');
@@ -340,19 +443,36 @@ export class TakeoffEngineService {
       title: `Thiếu mã định mức: ${r.name}`,
       detail: `Dòng "${r.name}" (${r.quantity} ${r.unit}) chưa có mã trong norm_items — cần import bộ định mức hoặc chọn mã thủ công.`,
     }));
-    findings.push({
-      id: 'takeoff-engine-price',
-      severity: 'info',
-      area: 'unitPrice',
-      title: 'Chưa gán đơn giá',
-      detail: 'Engine chỉ bóc khối lượng từ hình học; đơn giá/phân tích vật tư cần bước tiếp theo.',
-    });
+    if (missingPrice.length > 0) {
+      findings.push({
+        id: 'takeoff-engine-price',
+        severity: 'warn',
+        area: 'unitPrice',
+        title: `Chưa có đơn giá cho ${missingPrice.length} công tác`,
+        detail: `${missingPrice.length}/${rows.length} công tác chưa có đơn giá${priceCtx ? ` trong công bố giá ${priceCtx.province} (${priceCtx.sourceDoc} ${priceCtx.effectiveDate})` : ' — chưa khớp công bố giá tỉnh nào'} — import công bố giá tỉnh tại /settings. Engine KHÔNG ước lượng giá.`,
+      });
+    } else if (priceCtx) {
+      findings.push({
+        id: 'takeoff-engine-price',
+        severity: 'info',
+        area: 'unitPrice',
+        title: `Đơn giá theo ${priceCtx.sourceDoc} — ${priceCtx.province}`,
+        detail: `Toàn bộ ${rows.length} công tác gán đơn giá từ công bố giá ${priceCtx.province}, hiệu lực ${priceCtx.effectiveDate}.`,
+      });
+    }
+    // đủ mã + đủ giá → 90; đủ mã thiếu giá → 75; thiếu mã → 55
+    const score = missingCode.length > 0 ? 55 : missingPrice.length > 0 ? 75 : 90;
     const validation: ValidationReport = {
-      status: missingCode.length === 0 ? 'reasonable' : 'warning',
-      score: missingCode.length === 0 ? 80 : 55,
+      status: score === 90 ? 'reasonable' : 'warning',
+      score,
       findings,
       consistency: [],
     };
+
+    const sources: { title?: string; uri?: string; type?: string }[] =
+      priceCtx && pricedCount > 0
+        ? [{ title: `${priceCtx.sourceDoc} — ${priceCtx.province}`, type: 'government' }]
+        : [];
 
     return {
       thinking: [
@@ -360,10 +480,13 @@ export class TakeoffEngineService {
         `Đo hình học (polyline/shoelace/bbox) × ${input.unitsPerDrawingUnit} m/đơn vị.`,
         `Áp công thức cố định (tường/cột/dầm/cửa) với giả định người dùng.`,
         `Tra mã định mức trong norm_items: ${rows.length - missingCode.length}/${rows.length} dòng có mã.`,
+        priceCtx
+          ? `Gán đơn giá từ công bố giá ${priceCtx.province} (${priceCtx.sourceDoc}, hiệu lực ${priceCtx.effectiveDate}): ${pricedCount}/${rows.length} dòng có giá.`
+          : 'Không có công bố giá tỉnh khớp địa điểm dự án — cột đơn giá để trống (không ước lượng).',
       ],
       message,
       actions,
-      sources: [] as { title?: string; uri?: string; type?: string }[],
+      sources,
       preview: previewActions(state, actions),
       validation,
       trace: [],
