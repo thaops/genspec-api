@@ -151,6 +151,24 @@ export function tableToUpdateCellsDetailed(
 ): TableRescueResult | null {
   const table = extractTable(message);
   if (!table) return null;
+  const rows = table.rows.map((cells) => {
+    const record: Partial<Record<ColumnKey, string>> = {};
+    COLUMN_ORDER.forEach((key) => {
+      const idx = table.columnMap[key];
+      record[key] = idx !== undefined ? (cells[idx] ?? '') : '';
+    });
+    return record as Record<ColumnKey, string>;
+  });
+  return rowsToUpdateCells(rows, state, sheetNameHint);
+}
+
+/** Ghi một dãy dòng (đã map theo cột chuẩn) vào dòng trống đầu tiên của sheet khối lượng. */
+export function rowsToUpdateCells(
+  rows: Record<ColumnKey, string>[],
+  state: EstimateState,
+  sheetNameHint?: string,
+): TableRescueResult | null {
+  if (rows.length === 0) return null;
   const sheet = pickTargetSheet(state.sheets ?? [], sheetNameHint);
   if (!sheet) return null;
 
@@ -175,14 +193,34 @@ export function tableToUpdateCellsDetailed(
     row++;
   }
 
-  for (const cells of table.rows) {
-    COLUMN_ORDER.forEach((key, i) => {
-      const idx = table.columnMap[key];
-      const value = idx !== undefined ? (cells[idx] ?? '') : '';
-      push(`${colLetters[i]}${row}`, value);
-    });
+  for (const record of rows) {
+    COLUMN_ORDER.forEach((key, i) => push(`${colLetters[i]}${row}`, record[key] ?? ''));
     row++;
   }
 
   return { actions, sheetName: sheet.name, startRow, endRow: row - 1 };
+}
+
+/**
+ * upsert_takeoff ghi vào kho takeoff có cấu trúc (nguồn cho F1 export) nhưng
+ * KHÔNG hiển thị trên sheet Univer — mirror mỗi item thành các ô nhìn thấy
+ * được trong sheet "Khối lượng" để người dùng thấy ngay kết quả.
+ */
+export function takeoffActionsToUpdateCells(
+  actions: Action[],
+  state: EstimateState,
+): TableRescueResult | null {
+  const takeoffs = actions.filter((a: any) => a.type === 'upsert_takeoff') as any[];
+  if (takeoffs.length === 0) return null;
+  // Đã có update_cells đi kèm (model tự ghi sheet) → không mirror để tránh ghi đôi
+  if (actions.some((a: any) => a.type === 'update_cells')) return null;
+  const rows = takeoffs.map((t, i) => ({
+    stt: String(i + 1),
+    code: String(t.code ?? ''),
+    name: String(t.name ?? ''),
+    unit: String(t.unit ?? ''),
+    quantity: t.quantity != null ? String(t.quantity) : '',
+    note: String(t.note ?? ''),
+  }));
+  return rowsToUpdateCells(rows, state);
 }

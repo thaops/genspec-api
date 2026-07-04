@@ -12,7 +12,7 @@ import { buildTrace } from '../trace';
 import { previewActions } from '../transparency';
 import { validate } from '../validation';
 import { CitationEngineService } from '../sources/citation-engine';
-import { tableToUpdateCellsDetailed } from '../markdown-table-actions';
+import { tableToUpdateCellsDetailed, takeoffActionsToUpdateCells } from '../markdown-table-actions';
 import { CONCRETE_NORMS, STEEL_NORMS } from '../knowledge/qs-standards';
 import { getChecklistForBuilding } from '../knowledge/work-checklist';
 
@@ -294,6 +294,17 @@ export class EditModeHandler {
         message:
           reply.message +
           '\n\n⚠ Lưu ý: chưa có thay đổi nào được ghi vào bảng tính — hãy bấm Apply trên đề xuất (nếu có) hoặc yêu cầu lại cụ thể.',
+      };
+    }
+
+    // upsert_takeoff chỉ vào kho cấu trúc (F1 export) — mirror thành ô nhìn
+    // thấy được trên sheet "Khối lượng" để user thấy kết quả ngay trên grid.
+    const mirror = takeoffActionsToUpdateCells(reply.actions, state);
+    if (mirror && mirror.actions.length > 0) {
+      reply = { ...reply, actions: [...reply.actions, ...mirror.actions] };
+      yield {
+        event: 'step',
+        data: { text: `Ghi ${mirror.actions.length} ô vào sheet ${mirror.sheetName} (dòng ${mirror.startRow}-${mirror.endRow})` },
       };
     }
 
