@@ -6,10 +6,16 @@
  * `rotation * 180/PI`). Scene contract uses DEGREES → converted here.
  *
  * INSERT: block definitions come from db.tables.BLOCK_RECORD (exposed by
- * DwgParserService in metadata.blocks). If the referenced block exists,
- * entities are expanded ONE level (scale/rotate/translate). Nested INSERTs
- * inside a block, and missing blocks, degrade to a marker: small circle
- * (~0.5% of drawing diagonal) + block name text at the insertion point.
+ * DwgParserService in metadata.blocks). Blocks are expanded RECURSIVELY up to
+ * MAX_BLOCK_DEPTH levels (cycle-guarded by a visiting set of block names).
+ * Missing definitions / depth-exceeded / cycles degrade to a small fixed-size
+ * cross marker (2 lines) + block name text at the insertion point.
+ *
+ * MTEXT: '\n' (from MTEXT \P) splits into multiple text entities stacked
+ * downward (CAD Y-up): line i at y0 − i·1.4·h. TEXT/ATTRIB stay single-line.
+ *
+ * INSERT attribs[]: ATTRIB coordinates are already WORLD-space — rendered
+ * under the PARENT transform only, never the insert's own transform.
  */
 import type { DrawingParseResult, RawEntity } from '../parsers/drawing-parser.interface';
 import type { DwgBlockDef } from '../parsers/dwg-parser.service';
@@ -17,6 +23,10 @@ import { coerceDwgText } from '../parsers/dwg-parser.service';
 import type { DxfDocument, DxfEntity, DxfUnits } from '../parsers/dxf-parser.service';
 
 const RAD2DEG = 180 / Math.PI;
+const MAX_BLOCK_DEPTH = 4;
+const MAX_MTEXT_LINES = 20;
+const MAX_TEXT_CHARS = 120;
+const MTEXT_LINE_SPACING = 1.4;
 
 export interface DwgAdaptResult {
   doc: DxfDocument;
@@ -55,14 +65,17 @@ export function adaptDwgToDxfDocument(result: DrawingParseResult): DwgAdaptResul
     result.extMax.x - result.extMin.x,
     result.extMax.y - result.extMin.y,
   );
-  const markerR = Math.max(diag * 0.005, 1e-6);
+  // Missing-block marker: small fixed cross — 150 drawing units or 0.02% of
+  // the diagonal, whichever is SMALLER (never a huge circle again).
+  const markerSize = Math.max(Math.min(150, diag * 0.0002), 1e-6);
 
   const entities: DxfEntity[] = [];
   const identity: Affine = (x, y) => [x, y];
 
   const rawEntities = result.pages.flatMap((p) => p.entities);
+  const visiting = new Set<string>();
   for (const e of rawEntities) {
-    convertEntity(e, identity, 1, 0, entities, drop, blocks, markerR, true);
+    convertEntity(e, identity, 1, 0, entities, drop, blocks, markerSize, 0, visiting);
   }
 
   return {
@@ -90,8 +103,9 @@ function convertEntity(
   out: DxfEntity[],
   drop: (t: string) => void,
   blocks: Record<string, DwgBlockDef>,
-  markerR: number,
-  allowExpand: boolean,
+  markerSize: number,
+  depth: number,
+  visiting: Set<string>,
 ): void {
   const layer = e.layer ?? '0';
   const colorIndex = colorOf(e);
@@ -156,11 +170,32 @@ function convertEntity(
       return;
     }
 
-    case 'TEXT':
-    case 'MTEXT': {
+    case 'TEXT': {
       pushText(e.x, e.y, e.text,
         num(e.properties?.textHeight),
         num(e.properties?.rotation) * RAD2DEG + rotDeg);
+      return;
+    }
+
+    case 'MTEXT': {
+      // \P was preserved as '\n' by coerceDwgText(keepLineBreaks) — split into
+      // stacked text entities instead of one endless line.
+      const s = coerceDwgText(e.text, { keepLineBreaks: true });
+      if (!s) return;
+      const h = num(e.properties?.textHeight) || 1;
+      const rot = num(e.properties?.rotation) * RAD2DEG + rotDeg;
+      let lines = s.split('\n');
+      if (lines.length > MAX_MTEXT_LINES) {
+        lines = lines.slice(0, MAX_MTEXT_LINES);
+        lines[MAX_MTEXT_LINES - 1] += '…';
+      }
+      lines.forEach((line, i) => {
+        const t = line.length > MAX_TEXT_CHARS ? line.slice(0, MAX_TEXT_CHARS) + '…' : line;
+        // CAD is Y-up: next line goes DOWN — offset in block-local space so tf
+        // (block rotation/scale) still applies correctly.
+        const [tx, ty] = tf(e.x, e.y - i * MTEXT_LINE_SPACING * h);
+        out.push({ kind: 'text', layer, colorIndex, x: tx, y: ty, h: h * scaleMag, rot, text: t });
+      });
       return;
     }
 
@@ -182,7 +217,17 @@ function convertEntity(
     case 'INSERT': {
       const name = String(e.blockName ?? e.properties?.blockName ?? '');
       const def = blocks[name];
-      if (def && allowExpand) {
+
+      // ATTRIB texts carry WORLD coordinates already — render under the
+      // PARENT transform only. Applying the insert's own transform on top
+      // would double-transform them.
+      if (e.attribs) {
+        for (const a of e.attribs) {
+          convertEntity(a, tf, scaleMag, rotDeg, out, drop, blocks, markerSize, depth, visiting);
+        }
+      }
+
+      if (def && depth < MAX_BLOCK_DEPTH && !visiting.has(name)) {
         const sx = num(e.properties?.scaleX, 1) || 1;
         const sy = num(e.properties?.scaleY, 1) || 1;
         const rot = num(e.properties?.rotation); // radians
@@ -195,16 +240,20 @@ function convertEntity(
         };
         const childMag = scaleMag * (Math.abs(sx) + Math.abs(sy)) / 2;
         const childRot = rotDeg + rot * RAD2DEG;
+        visiting.add(name);
         for (const be of def.entities) {
-          // one-level expansion only: nested INSERT degrades to marker
-          convertEntity(be, child, childMag, childRot, out, drop, blocks, markerR, false);
+          convertEntity(be, child, childMag, childRot, out, drop, blocks, markerSize, depth + 1, visiting);
         }
+        visiting.delete(name);
       } else {
-        // No definition (or nested) → marker so user still sees position
+        // Truly missing definition (or depth/cycle limit) → small fixed cross
+        // + block name, so position is visible without covering the drawing.
         const [cx, cy] = tf(e.x, e.y);
-        out.push({ kind: 'circle', layer, colorIndex, cx, cy, r: markerR * scaleMag });
-        if (name) out.push({ kind: 'text', layer, colorIndex, x: cx + markerR * 1.2, y: cy, h: markerR * scaleMag, rot: 0, text: name });
-        if (def && !allowExpand) drop('INSERT_NESTED');
+        const s = markerSize / 2;
+        out.push({ kind: 'line', layer, colorIndex, x1: cx - s, y1: cy, x2: cx + s, y2: cy });
+        out.push({ kind: 'line', layer, colorIndex, x1: cx, y1: cy - s, x2: cx, y2: cy + s });
+        if (name) out.push({ kind: 'text', layer, colorIndex, x: cx + s * 1.2, y: cy, h: markerSize * 0.6, rot: 0, text: name });
+        if (def) drop('INSERT_NESTED'); // depth exceeded or cycle
       }
       return;
     }

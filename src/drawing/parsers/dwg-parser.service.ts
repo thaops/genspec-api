@@ -13,22 +13,32 @@ import type {
  * libredwg-web sometimes returns text as an object ({ text } / { value }) —
  * without this, downstream renders "[object Object]".
  * Also strips MTEXT inline format codes (\P, {\fArial;...}, %%c...).
+ *
+ * keepLineBreaks: \P (MTEXT paragraph break) → '\n' so the adapter can split
+ * into multiple text entities. Default (false) flattens to a single line
+ * (TEXT/ATTRIB/DIMENSION callers).
  */
-export function coerceDwgText(raw: unknown): string {
+export function coerceDwgText(raw: unknown, opts?: { keepLineBreaks?: boolean }): string {
   let s: unknown = raw;
   if (s !== null && typeof s === 'object') {
     s = (s as any).text ?? (s as any).value ?? '';
   }
   if (typeof s !== 'string') s = s === null || s === undefined ? '' : String(s);
-  return (s as string)
-    .replace(/\\P/g, ' ')                  // paragraph break
+  const cleaned = (s as string)
+    .replace(/\\P/g, '\n')                 // paragraph break
     .replace(/\\[A-Za-z][^;{}\\]*;/g, '')  // format codes: \fArial|b0;, \H2.5x;, \C1;
     .replace(/[{}]/g, '')
     .replace(/%%[cC]/g, 'Ø')
     .replace(/%%[dD]/g, '°')
-    .replace(/%%[pP]/g, '±')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+    .replace(/%%[pP]/g, '±');
+  if (opts?.keepLineBreaks) {
+    return cleaned
+      .split('\n')
+      .map((l) => l.replace(/[ \t]{2,}/g, ' ').trim())
+      .filter((l) => l.length > 0)
+      .join('\n');
+  }
+  return cleaned.replace(/\s+/g, ' ').trim();
 }
 
 /** Block definition extracted from db.tables.BLOCK_RECORD — entities are block-local. */
@@ -292,7 +302,7 @@ export class DwgParserService implements DrawingParserInterface {
       }
 
       case 'MTEXT': {
-        const cleanText = coerceDwgText(e.text);
+        const cleanText = coerceDwgText(e.text, { keepLineBreaks: true });
         return { ...base, type: 'MTEXT',
           x: e.insertionPoint?.x ?? 0, y: e.insertionPoint?.y ?? 0,
           text: cleanText,
@@ -305,10 +315,18 @@ export class DwgParserService implements DrawingParserInterface {
 
       case 'INSERT': {
         const ix = e.insertionPoint?.x ?? 0, iy = e.insertionPoint?.y ?? 0;
-        // Log first INSERT fully to understand structure (only once)
+        // ATTRIB sub-entities carry their own WORLD insertionPoint — map them
+        // as plain TEXT so the adapter renders them without the insert transform.
+        const attribsRaw: any[] = e.attribs ?? e.attributes ?? [];
+        const attribs: RawEntity[] = [];
+        for (const a of attribsRaw) {
+          const m = this.mapEntity(a);
+          if (m && m.text) attribs.push(m);
+        }
         return { ...base, type: 'INSERT',
           x: ix, y: iy,
           blockName: e.name ?? e.blockName,
+          attribs: attribs.length ? attribs : undefined,
           properties: { ...base.properties,
             blockName: e.name ?? e.blockName ?? '',
             scaleX: e.scaleFactors?.x ?? e.xScale ?? 1,

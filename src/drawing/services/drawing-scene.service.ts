@@ -16,6 +16,8 @@ import { DwgConverterService } from '../converters/dwg-converter.service';
 import { CloudinaryService } from '../../storage/cloudinary.service';
 
 const MAX_GZ_BYTES = 15 * 1024 * 1024; // 15MB — above this, store a truncated scene
+// Bump whenever adapter/builder output changes shape — stale scenes rebuild on next GET
+const SCENE_BUILDER_VERSION = 2;
 const FALLBACK_CAP = 20_000;           // entity cap used when full scene gz exceeds limit
 
 @Injectable()
@@ -81,7 +83,7 @@ export class DrawingSceneService {
 
     await this.sceneModel.updateOne(
       { drawingId },
-      { $set: { drawingId, gz, size: Buffer.byteLength(json), truncated: scene.truncated === true } },
+      { $set: { drawingId, gz, size: Buffer.byteLength(json), truncated: scene.truncated === true, builderVersion: SCENE_BUILDER_VERSION } },
       { upsert: true },
     );
     this.logger.log(`[Scene] persisted drawing ${drawingId}: ${scene.entities.length} entities, gz=${gz.length}B`);
@@ -94,7 +96,11 @@ export class DrawingSceneService {
     if (!drawing) throw new NotFoundException('Drawing not found');
 
     const stored = await this.sceneModel.findOne({ drawingId }).lean() as any;
-    if (stored?.gz) {
+    // Scenes built by an older adapter (giant insert markers, single-line
+    // MTEXT, "[object Object]" texts) are rebuilt instead of served stale.
+    const stale = stored && (stored.builderVersion ?? 0) < SCENE_BUILDER_VERSION
+      && (drawing.type === 'dxf' || drawing.type === 'dwg');
+    if (stored?.gz && !stale) {
       const buf = Buffer.isBuffer(stored.gz) ? stored.gz : Buffer.from(stored.gz.buffer ?? stored.gz);
       return JSON.parse(zlib.gunzipSync(buf).toString('utf-8'));
     }

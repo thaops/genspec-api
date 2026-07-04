@@ -18,6 +18,10 @@ export class DrawingSceneEntity {
 
   @Prop({ default: false })
   truncated: boolean;
+
+  /** Adapter/builder version that produced this scene — older versions rebuild on GET */
+  @Prop({ default: 0 })
+  builderVersion: number;
 }
 
 export const DrawingSceneSchema = SchemaFactory.createForClass(DrawingSceneEntity);

@@ -19,6 +19,7 @@ export interface RawEntity {
   blockName?: string;
   page?: number;
   vertices?: number[][];  // multi-vertex entities (LWPOLYLINE, SPLINE, POLYLINE)
+  attribs?: RawEntity[];  // INSERT attribute texts — coordinates already in WORLD space
   properties: Record<string, string | number>;
 }
 
