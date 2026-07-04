@@ -45,7 +45,7 @@ export class DrawingController {
   getDrawing(
     @Param('estimateId') estimateId: string,
     @Param('drawingId') drawingId: string,
-  ) {
+  ): Promise<Record<string, any>> {
     return this.upload.getWithObjects(estimateId, drawingId);
   }
 

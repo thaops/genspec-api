@@ -265,10 +265,17 @@ export function rowsToUpdateCells(
 
   const actions: Action[] = [];
   const last = lastOccupiedRow(sheet);
-  let row = last === 0 ? 1 : last + 2; // sheet trống → dòng 1; ngược lại sau dòng occupied cuối + 1
+  // Sheet đã có header block của engine ở dòng 1 → GHI ĐÈ từ dòng 2 (idempotent),
+  // không append thêm bảng thứ 2 mỗi lần bóc lại.
+  const hasEngineHeader =
+    currentValueAt(sheet, 'A1') === HEADER_LABELS.stt &&
+    currentValueAt(sheet, 'I1') === HEADER_LABELS.note;
+  let row = hasEngineHeader ? 2 : last === 0 ? 1 : last + 2; // trống → dòng 1; header engine → đè từ dòng 2; ngược lại append sau dòng occupied cuối + 1
   const startRow = row;
 
+  const written = new Set<string>();
   const push = (cell: string, newValue: string) => {
+    written.add(cell);
     actions.push({
       type: 'update_cells',
       sheetId: sheet.id,
@@ -296,6 +303,20 @@ export function rowsToUpdateCells(
   if (opts?.footnote) {
     footnoteRow = endRow + 2; // cách 1 dòng trống
     push(`B${footnoteRow}`, opts.footnote);
+  }
+
+  if (hasEngineHeader) {
+    // Xoá rác cũ thừa ra: mọi ô còn giá trị từ dòng 2 đến dòng occupied cuối cũ
+    // (dòng data cũ dư + footnote cũ) mà lần ghi này không đè lên.
+    for (let r = 2; r <= last; r++) {
+      for (const letter of COL_LETTERS) {
+        const cell = `${letter}${r}`;
+        if (written.has(cell)) continue;
+        if (currentValueAt(sheet, cell) === '') continue;
+        push(cell, '');
+      }
+    }
+    headerRow = 1; // giữ style header khi re-format (không ghi lại text header)
   }
 
   const formatAction = buildTakeoffFormatAction(sheet.id, headerRow, dataStartRow, endRow, footnoteRow);

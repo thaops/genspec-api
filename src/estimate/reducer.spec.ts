@@ -137,7 +137,7 @@ describe('applyActions – set_sheets', () => {
     ];
     const { state } = applyActions(initial, [{ type: 'set_sheets', sheets: newSheets } as any]);
     expect(state.sheets).toHaveLength(2);
-    expect(state.sheets[0].id).toBe('s2');
+    expect(state.sheets![0].id).toBe('s2');
   });
 });
 

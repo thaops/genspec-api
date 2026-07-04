@@ -41,6 +41,32 @@ function clone(s: EstimateState): EstimateState {
   };
 }
 
+/** Bỏ dấu tiếng Việt + lowercase để so khớp tên sheet. */
+function normalizeName(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Resolve sheet đích cho update_cells/format_sheet khi sheetId có thể stale:
+ * (1) đúng id → (2) sheet tên chứa "khối lượng" → (3) sheet đầu tiên → (4) -1 (không có sheet).
+ */
+function resolveSheetIndex(sheets: { id: string; name: string }[], sheetId: string): number {
+  const byId = sheets.findIndex((s) => s.id === sheetId);
+  if (byId >= 0) return byId;
+  const byName = sheets.findIndex((s) => normalizeName(s.name).includes('khoi luong'));
+  if (byName >= 0) return byName;
+  return sheets.length > 0 ? 0 : -1;
+}
+
+function makeTakeoffSheet(id: string) {
+  return { id, name: 'Khối lượng', data: { cellData: {}, rowCount: 100, columnCount: 20 } };
+}
+
 function upsert<T extends { id: string }>(list: T[], match: (x: T) => boolean, build: (existing?: T) => T): T[] {
   const idx = list.findIndex(match);
   if (idx >= 0) {
@@ -155,9 +181,16 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
       return { ...state, sheets: a.sheets };
 
     case 'update_cells': {
-      if (!state.sheets) return state;
-      const nextSheets = state.sheets.map((s) => {
-        if (s.id !== a.sheetId) return s;
+      // sheetId có thể stale (sheet bị tái tạo trước khi Apply) — resolve fallback
+      // theo tên "Khối lượng" → sheet đầu → tạo mới, thay vì âm thầm no-op.
+      const baseSheets = state.sheets ? [...state.sheets] : [];
+      let idx = resolveSheetIndex(baseSheets, a.sheetId);
+      if (idx < 0) {
+        baseSheets.push(makeTakeoffSheet(a.sheetId));
+        idx = baseSheets.length - 1;
+      }
+      const nextSheets = baseSheets.map((s, i) => {
+        if (i !== idx) return s;
         const cellData = { ...s.data?.cellData };
         const { row, col } = parseExcelCell(a.cell);
         const rKey = String(row);
@@ -167,6 +200,9 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
         if (isFormula) {
           // Store formula in `f` field; Univer will compute `v` at render time
           rowData[cKey] = { ...rowData[cKey], f: String(a.newValue).slice(1), v: null };
+        } else if (a.newValue == null || a.newValue === '') {
+          // Xoá ô: '' KHÔNG được ép thành Number('')=0 — clear hẳn giá trị/formula.
+          rowData[cKey] = { ...rowData[cKey], v: null, f: undefined };
         } else {
           rowData[cKey] = { ...rowData[cKey], v: isFinite(Number(a.newValue)) ? Number(a.newValue) : a.newValue, f: undefined };
         }
@@ -195,9 +231,14 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
     }
 
     case 'format_sheet': {
-      if (!state.sheets) return state;
-      const nextSheets = state.sheets.map((s) => {
-        if (s.id !== a.sheetId) return s;
+      const baseSheets = state.sheets ? [...state.sheets] : [];
+      let idx = resolveSheetIndex(baseSheets, a.sheetId);
+      if (idx < 0) {
+        baseSheets.push(makeTakeoffSheet(a.sheetId));
+        idx = baseSheets.length - 1;
+      }
+      const nextSheets = baseSheets.map((s, i) => {
+        if (i !== idx) return s;
         const data = { ...s.data };
         if (a.columnWidths && Object.keys(a.columnWidths).length) {
           const columnData = { ...data.columnData };

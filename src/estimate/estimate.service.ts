@@ -149,8 +149,8 @@ export class EstimateService {
     doc.labor = state.labor;
     doc.equipment = state.equipment;
     doc.markups = state.markups;
-    doc.sheets = state.sheets;
-    doc.entityMaps = state.entityMaps;
+    doc.sheets = state.sheets ?? [];
+    doc.entityMaps = state.entityMaps ?? [];
     (doc as any).patchHistory = state.patchHistory;
     doc.costs = computed.costs;
     await doc.save();

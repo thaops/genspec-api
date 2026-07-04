@@ -528,8 +528,19 @@ export class TakeoffEngineService {
       : null;
     const rows = applyPricingToRows(bareRows, normCandidates, priceCtx);
 
+    // Id deterministic theo bản vẽ + dòng → bóc lại N lần vẫn chỉ 1 bộ (reducer upsert theo id).
+    const engineTakeoffId = (key: string) => `tk_engine_${input.drawingId}_${key}`;
+    const newEngineIds = new Set(rows.map((r) => engineTakeoffId(r.key)));
+    // Dọn bộ bóc cũ (engine/LLM đã nhân bản trước fix): item có token [nhóm:
+    // mà không thuộc bộ id engine mới → delete để bộ MỚI NHẤT thay thế trọn.
+    const staleTakeoffs = (state.takeoff ?? []).filter(
+      (t) => typeof t.note === 'string' && t.note.includes('[nhóm:') && !newEngineIds.has(t.id),
+    );
+    const cleanupActions: Action[] = staleTakeoffs.map((t) => ({ type: 'delete_takeoff', id: t.id }));
+
     const takeoffActions: Action[] = rows.map((r) => ({
       type: 'upsert_takeoff',
+      id: engineTakeoffId(r.key),
       group: r.group,
       code: r.code,
       name: r.name,
@@ -556,6 +567,7 @@ export class TakeoffEngineService {
     );
     // format_sheet đi SAU block update_cells: widths + header + border + căn số + chú thích italic.
     const actions: Action[] = [
+      ...cleanupActions,
       ...takeoffActions,
       ...(mirror?.actions ?? []),
       ...(mirror ? [mirror.formatAction] : []),
@@ -658,6 +670,7 @@ export class TakeoffEngineService {
         `Đo hình học (polyline/shoelace/bbox) × ${input.unitsPerDrawingUnit} m/đơn vị.`,
         `Áp công thức cố định (tường/cột/dầm/cửa) với giả định người dùng.`,
         `Tra mã định mức trong norm_items: ${rows.length - missingCode.length - webCode.length}/${rows.length} dòng có mã DB.`,
+        ...(staleTakeoffs.length > 0 ? [`Thay thế ${staleTakeoffs.length} dòng bóc cũ.`] : []),
         ...(webLookedUp > 0
           ? [
               `Tra mã từ web (grounded search) cho ${webLookedUp} công tác thiếu mã DB: ${webHitCount} mã tìm thấy (đã qua 3 rào chống bịa — grounding, regex format, khớp nguyên văn).`,

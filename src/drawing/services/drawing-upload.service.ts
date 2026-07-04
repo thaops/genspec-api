@@ -80,7 +80,9 @@ export class DrawingUploadService {
     return docs.map((d: any) => ({ ...d, id: d._id.toString() }));
   }
 
-  async getWithObjects(estimateId: string, drawingId: string) {
+  // Explicit return type: mongoose lean() unions blow past TS's declaration
+  // serialization limit (TS7056) when inferred.
+  async getWithObjects(estimateId: string, drawingId: string): Promise<Record<string, any>> {
     const drawing = await this.drawingModel.findOne({ _id: drawingId, estimateId }).lean();
     if (!drawing) throw new NotFoundException('Drawing not found');
     const objects = await this.objectModel.find({ drawingId }).lean();

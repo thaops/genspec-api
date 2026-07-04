@@ -200,6 +200,7 @@ export type Action =
       /** Style object Univer gắn inline vào cell.s (giữ nguyên v/f hiện có). */
       cells?: { cell: string; s: Record<string, any> }[];
     }
+  | { type: 'set_sheets'; sheets: Sheet[] }
   | { type: 'clear' };
 
 // ===== Computed (DTO only) =====
