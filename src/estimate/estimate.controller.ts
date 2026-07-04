@@ -19,8 +19,9 @@ import { CatalogService } from '../catalog/catalog.service';
 import { CurrentUser } from '../common/current-user.decorator';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import { CopilotService } from './copilot.service';
-import { ActionsDto, CopilotDto, CreateEstimateDto } from './dto';
+import { ActionsDto, CopilotDto, CreateEstimateDto, TakeoffEngineDto } from './dto';
 import { EstimateService } from './estimate.service';
+import { TakeoffEngineService } from './takeoff-engine.service';
 import { ExportF1Service } from './export-f1.service';
 import { ExportThdtService } from './export-thdt.service';
 
@@ -33,6 +34,7 @@ export class EstimateController {
     private readonly exporter: ExportF1Service,
     private readonly thdtExporter: ExportThdtService,
     private readonly catalog: CatalogService,
+    private readonly takeoffEngine: TakeoffEngineService,
   ) {}
 
   @Get('catalog')
@@ -74,6 +76,16 @@ export class EstimateController {
   @Post('estimates/:id/actions')
   apply(@CurrentUser('userId') userId: string, @Param('id') id: string, @Body() dto: ActionsDto) {
     return this.estimates.applyActions(userId, id, dto.actions ?? [], dto.source ?? 'manual');
+  }
+
+  /** Deterministic takeoff: khối lượng tính bằng code từ hình học bản vẽ (KHÔNG LLM, KHÔNG apply — trả proposal). */
+  @Post('estimates/:id/takeoff-engine')
+  takeoffEngineRun(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Body() dto: TakeoffEngineDto,
+  ) {
+    return this.takeoffEngine.run(userId, id, dto);
   }
 
   /** Streaming copilot (SSE): live `step` events then a `proposal` (NOT applied). */

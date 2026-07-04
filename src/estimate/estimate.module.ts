@@ -15,6 +15,8 @@ import { EditModeHandler } from './modes/edit.handler';
 import { CitationEngineService } from './sources/citation-engine';
 import { Drawing, DrawingSchema } from '../drawing/schemas/drawing.schema';
 import { DrawingObject, DrawingObjectSchema } from '../drawing/schemas/drawing-object.schema';
+import { NormItem, NormItemSchema } from '../catalog/catalog-db.schemas';
+import { TakeoffEngineService } from './takeoff-engine.service';
 
 @Module({
   imports: [
@@ -22,6 +24,7 @@ import { DrawingObject, DrawingObjectSchema } from '../drawing/schemas/drawing-o
       { name: Estimate.name, schema: EstimateSchema },
       { name: Drawing.name, schema: DrawingSchema },
       { name: DrawingObject.name, schema: DrawingObjectSchema },
+      { name: NormItem.name, schema: NormItemSchema },
     ]),
     AiModule,
     CatalogModule,
@@ -37,6 +40,7 @@ import { DrawingObject, DrawingObjectSchema } from '../drawing/schemas/drawing-o
     ReviewModeHandler,
     EditModeHandler,
     CitationEngineService,
+    TakeoffEngineService,
   ],
   exports: [EstimateService],
 })

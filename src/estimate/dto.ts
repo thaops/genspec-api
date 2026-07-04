@@ -1,5 +1,15 @@
-import { Transform } from 'class-transformer';
-import { IsArray, IsBoolean, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 import { Action } from './estimate.types';
 
 /** Safely JSON.parse multipart string fields; invalid JSON → undefined. */
@@ -26,6 +36,39 @@ export class ActionsDto {
   @IsOptional()
   @IsIn(['ai', 'manual'])
   source?: 'ai' | 'manual';
+}
+
+export class TakeoffAssumptionsDto {
+  @IsNumber()
+  @IsPositive()
+  floorHeight: number;
+
+  @IsNumber()
+  @IsPositive()
+  wallThickness: number;
+
+  @IsNumber()
+  @IsPositive()
+  beamDepth: number;
+}
+
+export class TakeoffEngineDto {
+  @IsString()
+  @MinLength(1)
+  drawingId: string;
+
+  @IsNumber()
+  @IsPositive()
+  unitsPerDrawingUnit: number;
+
+  @ValidateNested()
+  @Type(() => TakeoffAssumptionsDto)
+  assumptions: TakeoffAssumptionsDto;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  rejectedObjectIds?: string[];
 }
 
 export class CopilotDto {
