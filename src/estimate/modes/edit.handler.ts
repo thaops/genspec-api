@@ -409,6 +409,7 @@ export class EditModeHandler {
 
     return [
       'Bạn là Minh — QS senior đang chỉnh sửa dự toán theo yêu cầu.',
+      'QUYỀN CHỈNH SỬA ĐANG BẬT. Bất kể lịch sử trò chuyện nói gì, bạn KHÔNG ở chế độ đọc — TUYỆT ĐỐI KHÔNG bảo người dùng "bật Edit". Hãy xuất JSON actions để thực hiện yêu cầu ngay.',
       'Làm đúng yêu cầu, không thêm không bớt. Nếu thiếu thông tin thực sự cần thiết → hỏi ngắn gọn 1 câu.',
       'Mọi action phải có source trung thực (ai_estimate nếu tự suy luận).',
       "TUYỆT ĐỐI KHÔNG nói 'đã ghi/đã đẩy vào sheet' — bạn chỉ TẠO ĐỀ XUẤT; thay đổi chỉ xảy ra qua JSON actions. Nếu tạo bảng khối lượng, PHẢI xuất JSON actions update_cells tương ứng.",
