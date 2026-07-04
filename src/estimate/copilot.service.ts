@@ -317,6 +317,11 @@ Trả về 6-8 kết quả chính xác nhất, mới nhất. trustScore từ 70-
   }
 
   private detectMode(message: string, hasSelection: boolean): CopilotMode {
+    // Structured agent tasks (⚡ full takeoff, generate-takeoff…) carry an
+    // explicit [ACTION:*] tag — always edit intent. Without this, the prompt's
+    // own vocabulary ("định mức", "đơn giá") trips WEB_LEGAL_INTENT below and
+    // silently downgrades the task to read mode.
+    if (/\[ACTION:/i.test(message)) return 'edit';
     const norm = normalizeVi(message);
     // Web/legal questions always go to read — even if message contains "kiểm tra"
     if (WEB_LEGAL_INTENT.test(message) || WEB_LEGAL_INTENT.test(norm)) return 'read';
