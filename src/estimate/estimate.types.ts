@@ -191,6 +191,15 @@ export type Action =
       newValue: string;
       entityId?: string;
     }
+  | {
+      // Định dạng trình bày sheet (độ rộng cột + style ô inline theo shape Univer).
+      type: 'format_sheet';
+      sheetId: string;
+      /** colIndex ("0"-based, dạng string) → độ rộng px. */
+      columnWidths?: Record<string, number>;
+      /** Style object Univer gắn inline vào cell.s (giữ nguyên v/f hiện có). */
+      cells?: { cell: string; s: Record<string, any> }[];
+    }
   | { type: 'clear' };
 
 // ===== Computed (DTO only) =====

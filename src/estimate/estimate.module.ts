@@ -17,6 +17,7 @@ import { Drawing, DrawingSchema } from '../drawing/schemas/drawing.schema';
 import { DrawingObject, DrawingObjectSchema } from '../drawing/schemas/drawing-object.schema';
 import { DrawingSceneEntity, DrawingSceneSchema } from '../drawing/schemas/drawing-scene.schema';
 import { NormItem, NormItemSchema } from '../catalog/catalog-db.schemas';
+import { NormWebLookupService, WebNormCache, WebNormCacheSchema } from './norm-web-lookup.service';
 import { TakeoffEngineService } from './takeoff-engine.service';
 
 @Module({
@@ -27,6 +28,7 @@ import { TakeoffEngineService } from './takeoff-engine.service';
       { name: DrawingObject.name, schema: DrawingObjectSchema },
       { name: DrawingSceneEntity.name, schema: DrawingSceneSchema },
       { name: NormItem.name, schema: NormItemSchema },
+      { name: WebNormCache.name, schema: WebNormCacheSchema },
     ]),
     AiModule,
     CatalogModule,
@@ -42,6 +44,7 @@ import { TakeoffEngineService } from './takeoff-engine.service';
     ReviewModeHandler,
     EditModeHandler,
     CitationEngineService,
+    NormWebLookupService,
     TakeoffEngineService,
   ],
   exports: [EstimateService],

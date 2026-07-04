@@ -1,36 +1,71 @@
 // Rescue layer: khi model trả bảng markdown khối lượng thay vì JSON actions,
 // chuyển bảng thành update_cells để đề xuất vẫn ghi được vào sheet.
+// Đồng thời là nơi định nghĩa layout 9 cột chuẩn của sheet Khối lượng + format_sheet.
 import { Action, EstimateState, Sheet } from './estimate.types';
 import { parseExcelCell } from './reducer';
 
-const COLUMN_ORDER = ['stt', 'code', 'name', 'unit', 'quantity', 'note'] as const;
+// Layout chuẩn 9 cột: A=STT B=Mã hiệu C=Tên công tác D=Đơn vị E=Khối lượng
+// F=Đơn giá G=Thành tiền H=Nguồn I=Diễn giải. Ô thiếu giá trị → "".
+const COLUMN_ORDER = [
+  'stt',
+  'code',
+  'name',
+  'unit',
+  'quantity',
+  'unitPrice',
+  'total',
+  'source',
+  'note',
+] as const;
 type ColumnKey = (typeof COLUMN_ORDER)[number];
 
 const HEADER_LABELS: Record<ColumnKey, string> = {
   stt: 'STT',
-  code: 'Mã hiệu định mức',
+  code: 'Mã hiệu',
   name: 'Tên công tác',
   unit: 'Đơn vị',
   quantity: 'Khối lượng',
-  note: 'Ghi chú',
-};
-
-// Cột giá optional (G/H) — chỉ ghi khi có ít nhất 1 dòng có giá (backward compat 6 cột).
-const PRICE_COLUMNS = ['unitPrice', 'total'] as const;
-type PriceColumnKey = (typeof PRICE_COLUMNS)[number];
-const PRICE_HEADER_LABELS: Record<PriceColumnKey, string> = {
   unitPrice: 'Đơn giá',
   total: 'Thành tiền',
+  source: 'Nguồn',
+  note: 'Diễn giải',
 };
 
-/** Dòng chuẩn 6 cột + 2 cột giá optional. */
-export type RescueRow = Record<ColumnKey, string> & Partial<Record<PriceColumnKey, string>>;
+const COL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'] as const;
+
+/** Độ rộng cột (px) theo thứ tự A→I. */
+export const TAKEOFF_COL_WIDTHS_PX = [40, 110, 320, 60, 90, 110, 130, 170, 420] as const;
+
+/** Chỉ số cột số (E/F/G) — căn phải. */
+const NUMERIC_COL_INDEXES = [4, 5, 6];
+
+const THIN_BORDER = { s: 1, cl: { rgb: '#d0d0d0' } };
+const CELL_BORDER = { t: THIN_BORDER, b: THIN_BORDER, l: THIN_BORDER, r: THIN_BORDER };
+
+/** Header: đậm, nền xanh đậm, chữ trắng, căn giữa, khung mảnh. */
+export const TAKEOFF_HEADER_STYLE = {
+  bl: 1,
+  bg: { rgb: '#1e3a5f' },
+  cl: { rgb: '#ffffff' },
+  ht: 2,
+  vt: 2,
+  bd: CELL_BORDER,
+};
+
+/** Dòng chú thích giả định: italic, xám. */
+export const TAKEOFF_FOOTNOTE_STYLE = { it: 1, cl: { rgb: '#8a8f98' } };
+
+const REQUIRED_KEYS = ['stt', 'code', 'name', 'unit', 'quantity', 'note'] as const;
+
+/** Dòng chuẩn — 6 cột lõi + 3 cột optional (giá/nguồn). */
+export type RescueRow = Record<(typeof REQUIRED_KEYS)[number], string> &
+  Partial<Record<'unitPrice' | 'total' | 'source', string>>;
 
 /** Bỏ dấu tiếng Việt + lowercase để so khớp fuzzy. */
 function normalize(s: string): string {
   return s
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/đ/gi, 'd')
     .toLowerCase()
     .trim();
@@ -41,8 +76,11 @@ function detectColumn(header: string): ColumnKey | null {
   if (!h) return null;
   if (h === 'stt' || h === 'tt' || h.includes('stt')) return 'stt';
   if (h.includes('ma hieu') || h.includes('ma dinh muc') || h === 'ma') return 'code';
-  if (h.includes('ten cong tac') || h.includes('noi dung') || h.includes('cong tac') || h.includes('ten')) return 'name';
   if (h.includes('don vi') || h === 'dvt' || h === 'dv') return 'unit';
+  if (h.includes('don gia')) return 'unitPrice';
+  if (h.includes('thanh tien')) return 'total';
+  if (h.includes('nguon')) return 'source';
+  if (h.includes('ten cong tac') || h.includes('noi dung') || h.includes('cong tac') || h.includes('ten')) return 'name';
   if (h.includes('khoi luong') || h === 'kl' || h.includes('so luong')) return 'quantity';
   if (h.includes('ghi chu') || h.includes('dien giai')) return 'note';
   return null;
@@ -140,19 +178,56 @@ export interface TableRescueResult {
   actions: Action[];
   sheetName: string;
   startRow: number;
-  endRow: number;
+  endRow: number; // dòng dữ liệu cuối (không tính chú thích)
+  /** format_sheet cho vùng vừa ghi (widths + header + border + căn số). */
+  formatAction: Action;
+  /** Dòng chú thích giả định (nếu có). */
+  footnoteRow?: number;
+}
+
+/**
+ * format_sheet cho layout 9 cột chuẩn: widths A→I, header style (nếu có header),
+ * border mảnh 4 cạnh mọi ô dữ liệu, cột E/F/G căn phải, chú thích italic xám.
+ * Không zebra — nền sáng cứng chói trên dark mode (FE remap zinc).
+ */
+export function buildTakeoffFormatAction(
+  sheetId: string,
+  headerRow: number | null,
+  dataStartRow: number,
+  dataEndRow: number,
+  footnoteRow?: number,
+): Action {
+  const columnWidths: Record<string, number> = {};
+  TAKEOFF_COL_WIDTHS_PX.forEach((w, i) => (columnWidths[String(i)] = w));
+
+  const cells: { cell: string; s: Record<string, any> }[] = [];
+  if (headerRow != null) {
+    COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${headerRow}`, s: TAKEOFF_HEADER_STYLE }));
+  }
+  for (let r = dataStartRow; r <= dataEndRow; r++) {
+    COL_LETTERS.forEach((letter, i) => {
+      const s: Record<string, any> = { bd: CELL_BORDER, vt: 2 };
+      if (NUMERIC_COL_INDEXES.includes(i)) s.ht = 3; // số căn phải
+      cells.push({ cell: `${letter}${r}`, s });
+    });
+  }
+  if (footnoteRow != null) cells.push({ cell: `B${footnoteRow}`, s: TAKEOFF_FOOTNOTE_STYLE });
+
+  return { type: 'format_sheet', sheetId, columnWidths, cells };
 }
 
 /**
  * Parse bảng markdown khối lượng trong message → update_cells ghi vào dòng trống
- * đầu tiên của sheet khối lượng. Trả [] nếu không có bảng hợp lệ / không có sheet.
+ * đầu tiên của sheet khối lượng (kèm format_sheet cuối). Trả [] nếu không có
+ * bảng hợp lệ / không có sheet.
  */
 export function tableToUpdateCells(
   message: string,
   state: EstimateState,
   sheetNameHint?: string,
 ): Action[] {
-  return tableToUpdateCellsDetailed(message, state, sheetNameHint)?.actions ?? [];
+  const r = tableToUpdateCellsDetailed(message, state, sheetNameHint);
+  return r ? [...r.actions, r.formatAction] : [];
 }
 
 export function tableToUpdateCellsDetailed(
@@ -168,27 +243,26 @@ export function tableToUpdateCellsDetailed(
       const idx = table.columnMap[key];
       record[key] = idx !== undefined ? (cells[idx] ?? '') : '';
     });
-    return record as Record<ColumnKey, string>;
+    return record as RescueRow;
   });
   return rowsToUpdateCells(rows, state, sheetNameHint);
 }
 
-/** Ghi một dãy dòng (đã map theo cột chuẩn) vào dòng trống đầu tiên của sheet khối lượng. */
+/**
+ * Ghi một dãy dòng (đã map theo layout 9 cột chuẩn) vào dòng trống đầu tiên
+ * của sheet khối lượng. opts.footnote → 1 dòng chú thích giả định (cột B,
+ * cách dòng dữ liệu cuối 1 dòng trống).
+ */
 export function rowsToUpdateCells(
   rows: RescueRow[],
   state: EstimateState,
   sheetNameHint?: string,
+  opts?: { footnote?: string },
 ): TableRescueResult | null {
   if (rows.length === 0) return null;
   const sheet = pickTargetSheet(state.sheets ?? [], sheetNameHint);
   if (!sheet) return null;
 
-  const hasPrice = rows.some((r) => (r.unitPrice ?? '') !== '' || (r.total ?? '') !== '');
-  const columns: readonly (ColumnKey | PriceColumnKey)[] = hasPrice
-    ? [...COLUMN_ORDER, ...PRICE_COLUMNS]
-    : COLUMN_ORDER;
-  const headerLabels: Record<string, string> = { ...HEADER_LABELS, ...PRICE_HEADER_LABELS };
-  const colLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
   const actions: Action[] = [];
   const last = lastOccupiedRow(sheet);
   let row = last === 0 ? 1 : last + 2; // sheet trống → dòng 1; ngược lại sau dòng occupied cuối + 1
@@ -204,17 +278,28 @@ export function rowsToUpdateCells(
     });
   };
 
+  let headerRow: number | null = null;
   if (last === 0) {
-    columns.forEach((key, i) => push(`${colLetters[i]}${row}`, headerLabels[key]));
+    headerRow = row;
+    COLUMN_ORDER.forEach((key, i) => push(`${COL_LETTERS[i]}${row}`, HEADER_LABELS[key]));
     row++;
   }
 
+  const dataStartRow = row;
   for (const record of rows) {
-    columns.forEach((key, i) => push(`${colLetters[i]}${row}`, record[key] ?? ''));
+    COLUMN_ORDER.forEach((key, i) => push(`${COL_LETTERS[i]}${row}`, record[key] ?? ''));
     row++;
   }
+  const endRow = row - 1;
 
-  return { actions, sheetName: sheet.name, startRow, endRow: row - 1 };
+  let footnoteRow: number | undefined;
+  if (opts?.footnote) {
+    footnoteRow = endRow + 2; // cách 1 dòng trống
+    push(`B${footnoteRow}`, opts.footnote);
+  }
+
+  const formatAction = buildTakeoffFormatAction(sheet.id, headerRow, dataStartRow, endRow, footnoteRow);
+  return { actions, sheetName: sheet.name, startRow, endRow, formatAction, footnoteRow };
 }
 
 /**

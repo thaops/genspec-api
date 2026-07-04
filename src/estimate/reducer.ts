@@ -194,6 +194,36 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
       };
     }
 
+    case 'format_sheet': {
+      if (!state.sheets) return state;
+      const nextSheets = state.sheets.map((s) => {
+        if (s.id !== a.sheetId) return s;
+        const data = { ...s.data };
+        if (a.columnWidths && Object.keys(a.columnWidths).length) {
+          const columnData = { ...data.columnData };
+          for (const [idx, w] of Object.entries(a.columnWidths)) {
+            columnData[idx] = { ...columnData[idx], w: num(w) };
+          }
+          data.columnData = columnData;
+        }
+        if (a.cells?.length) {
+          const cellData = { ...data.cellData };
+          for (const { cell, s: style } of a.cells) {
+            const { row, col } = parseExcelCell(cell);
+            const rKey = String(row);
+            const cKey = String(col);
+            const rowData = { ...cellData[rKey] };
+            // Style object inline trong cell.s (Univer chấp nhận) — giữ nguyên v/f hiện có.
+            rowData[cKey] = { ...rowData[cKey], s: style };
+            cellData[rKey] = rowData;
+          }
+          data.cellData = cellData;
+        }
+        return { ...s, data };
+      });
+      return { ...state, sheets: nextSheets };
+    }
+
     case 'clear':
       return {
         projectInfo: state.projectInfo,

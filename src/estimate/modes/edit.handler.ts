@@ -265,7 +265,7 @@ export class EditModeHandler {
         reply = {
           ...reply,
           message: messageWithTable || reply.message,
-          actions: rescue.actions,
+          actions: [...rescue.actions, rescue.formatAction],
           thinking: [...reply.thinking, note],
         };
         yield { event: 'step', data: { text: note } };
@@ -301,7 +301,7 @@ export class EditModeHandler {
     // thấy được trên sheet "Khối lượng" để user thấy kết quả ngay trên grid.
     const mirror = takeoffActionsToUpdateCells(reply.actions, state);
     if (mirror && mirror.actions.length > 0) {
-      reply = { ...reply, actions: [...reply.actions, ...mirror.actions] };
+      reply = { ...reply, actions: [...reply.actions, ...mirror.actions, mirror.formatAction] };
       yield {
         event: 'step',
         data: { text: `Ghi ${mirror.actions.length} ô vào sheet ${mirror.sheetName} (dòng ${mirror.startRow}-${mirror.endRow})` },

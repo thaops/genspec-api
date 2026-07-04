@@ -187,6 +187,7 @@ export function generatePatch(before: EstimateState, actions: Action[], actor: '
   const description = actions
     .map((act) => {
       if (act.type === 'update_cells') return `Sửa ô ${act.cell} thành ${act.newValue}`;
+      if (act.type === 'format_sheet') return 'Định dạng sheet';
       if (act.type === 'upsert_material') return `Sửa vật tư ${act.name || act.code}`;
       return act.type;
     })

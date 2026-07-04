@@ -144,6 +144,10 @@ export function buildActivity(before: EstimateState, actions: Action[], at: stri
         detail = `${a.oldValue} → ${a.newValue}`;
         break;
       }
+      case 'format_sheet':
+        label = 'Định dạng sheet';
+        detail = `${a.cells?.length ?? 0} ô, ${Object.keys(a.columnWidths ?? {}).length} cột`;
+        break;
       case 'clear': label = 'Xóa toàn bộ dữ liệu'; break;
       default: break;
     }
