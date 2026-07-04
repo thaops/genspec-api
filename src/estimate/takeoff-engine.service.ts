@@ -1,6 +1,6 @@
 // Deterministic Takeoff Engine — khối lượng tính bằng CODE từ hình học bản vẽ,
 // mã hiệu tra từ DB norm_items thật. KHÔNG có LLM call nào ở đây.
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { NormComponent, NormItem } from '../catalog/catalog-db.schemas';
@@ -395,6 +395,39 @@ export class TakeoffEngineService {
       (o) => !rejected.has(String((o as any)._id)) && !rejected.has(o.stableId),
     );
 
+    // Sanity guard: với factor đã cho, kích thước tổng thể công trình phải nằm
+    // trong 2m–5km. Factor sai (calibration rác, header khai láo) → tự thử
+    // mm/m/inch; có factor hợp lý → dùng + cảnh báo; không có → từ chối tính
+    // thay vì nhả ra "119 km tường".
+    let factor = input.unitsPerDrawingUnit;
+    let factorOverridden = false;
+    {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const o of objects) {
+        const b = (o as any).boundingBox ?? {};
+        const x = Number(b.x ?? 0), y = Number(b.y ?? 0);
+        const w = Number(b.w ?? 0), h = Number(b.h ?? 0);
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x + w > maxX) maxX = x + w;
+        if (y + h > maxY) maxY = y + h;
+      }
+      const span = Math.max(maxX - minX, maxY - minY);
+      const plausible = (f: number) => span * f >= 2 && span * f <= 5000;
+      if (isFinite(span) && span > 0 && !plausible(factor)) {
+        const guess = [0.001, 1, 0.0254].find(plausible);
+        if (guess != null) {
+          factor = guess;
+          factorOverridden = true;
+        } else {
+          throw new BadRequestException(
+            `Tỉ lệ bản vẽ không hợp lý (kích thước tổng thể ra ${(span * factor).toFixed(0)}m). Hiệu chỉnh 2 điểm trên một đoạn đã biết kích thước rồi bóc lại.`,
+          );
+        }
+      }
+    }
+    input = { ...input, unitsPerDrawingUnit: factor };
+
     const allKeys = Object.keys(NORM_KEYWORDS) as TakeoffRowKey[];
     const normCandidates = await this.findNormCandidates(allKeys);
 
@@ -517,6 +550,15 @@ export class TakeoffEngineService {
         area: 'unitPrice',
         title: `Đơn giá theo ${priceCtx.sourceDoc} — ${priceCtx.province}`,
         detail: `Toàn bộ ${rows.length} công tác gán đơn giá từ công bố giá ${priceCtx.province}, hiệu lực ${priceCtx.effectiveDate}.`,
+      });
+    }
+    if (factorOverridden) {
+      findings.push({
+        id: 'takeoff-engine-factor-override',
+        severity: 'warn',
+        area: 'quantity',
+        title: 'Tỉ lệ bản vẽ được tự sửa lại',
+        detail: `Tỉ lệ gửi lên cho kích thước công trình không hợp lý — engine đã dùng ${factor} m/đơn vị (suy từ kích thước tổng thể). Hiệu chỉnh 2 điểm để xác nhận.`,
       });
     }
     if (webCode.length > 0) {
