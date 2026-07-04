@@ -52,6 +52,23 @@ export class TakeoffAssumptionsDto {
   beamDepth: number;
 }
 
+/** Vùng bóc (world coords bản vẽ): chỉ đối tượng có tâm bbox trong vùng được tính. */
+export class TakeoffRegionDto {
+  @IsNumber()
+  x: number;
+
+  @IsNumber()
+  y: number;
+
+  @IsNumber()
+  @IsPositive()
+  w: number;
+
+  @IsNumber()
+  @IsPositive()
+  h: number;
+}
+
 export class TakeoffEngineDto {
   @IsString()
   @MinLength(1)
@@ -69,6 +86,11 @@ export class TakeoffEngineDto {
   @IsArray()
   @IsString({ each: true })
   rejectedObjectIds?: string[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TakeoffRegionDto)
+  region?: TakeoffRegionDto;
 }
 
 export class CopilotDto {

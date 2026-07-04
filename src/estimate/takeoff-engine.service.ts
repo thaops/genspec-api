@@ -346,6 +346,8 @@ export interface TakeoffEngineInput {
   unitsPerDrawingUnit: number;
   assumptions: TakeoffAssumptions;
   rejectedObjectIds?: string[];
+  /** Vùng bóc (world coords): chỉ đo đối tượng có tâm bbox nằm trong vùng. */
+  region?: { x: number; y: number; w: number; h: number };
 }
 
 @Injectable()
@@ -391,9 +393,34 @@ export class TakeoffEngineService {
     const rejected = new Set(input.rejectedObjectIds ?? []);
     const rawObjects = await this.drawingObjectModel.find({ drawingId: input.drawingId }).lean();
     if (rawObjects.length === 0) throw new NotFoundException('Bản vẽ chưa có đối tượng nhận diện');
-    const objects = rawObjects.filter(
+    let objects = rawObjects.filter(
       (o) => !rejected.has(String((o as any)._id)) && !rejected.has(o.stableId),
     );
+
+    // Bóc theo vùng: file DWG thực tế chứa nhiều bản vẽ con (mặt bằng các
+    // tầng, mặt đứng, chi tiết) trong cùng model space — đo tất sẽ phồng khối
+    // lượng. Chỉ giữ đối tượng có TÂM bbox nằm trong vùng user kéo chọn.
+    const regionTotal = objects.length;
+    let regionKept: number | null = null;
+    if (input.region) {
+      const r = input.region;
+      objects = objects.filter((o) => {
+        const b = (o as any).boundingBox ?? {};
+        const cx = Number(b.x ?? 0) + Number(b.w ?? 0) / 2;
+        const cy = Number(b.y ?? 0) + Number(b.h ?? 0) / 2;
+        return (
+          isFinite(cx) && isFinite(cy) &&
+          cx >= r.x && cx <= r.x + r.w &&
+          cy >= r.y && cy <= r.y + r.h
+        );
+      });
+      regionKept = objects.length;
+      if (objects.length === 0) {
+        throw new BadRequestException(
+          'Vùng bóc đã chọn không chứa đối tượng nào — kéo chọn lại vùng bao quanh phần bản vẽ cần bóc, hoặc xoá vùng để bóc toàn bộ.',
+        );
+      }
+    }
 
     // Sanity guard: với factor đã cho, kích thước tổng thể công trình phải nằm
     // trong 2m–5km. Factor sai (calibration rác, header khai láo) → tự thử
@@ -468,7 +495,7 @@ export class TakeoffEngineService {
       if (missingKeys.length > 0) {
         webLookedUp = missingKeys.length;
         const hits = await this.webLookup.lookupCodes(
-          missingKeys.map((key) => ({ key, workName: DEFAULT_NAMES[key].toLowerCase() })),
+          missingKeys.map((key) => ({ key, hintKey: key, workName: DEFAULT_NAMES[key].toLowerCase() })),
         );
         for (const key of missingKeys) {
           const hit = hits.get(key);
@@ -540,7 +567,7 @@ export class TakeoffEngineService {
     const missingPrice = rows.filter((r) => r.unitPrice == null);
     const pricedCount = rows.length - missingPrice.length;
     const message = [
-      `Đã bóc khối lượng ${rows.length} dòng từ ${groups.length} nhóm cấu kiện (${groups.join(', ')}) — ${objects.length} đối tượng hình học${rejected.size ? `, đã loại ${rejected.size} đối tượng bị từ chối` : ''}.`,
+      `Đã bóc khối lượng ${rows.length} dòng từ ${groups.length} nhóm cấu kiện (${groups.join(', ')}) — ${objects.length} đối tượng hình học${rejected.size ? `, đã loại ${rejected.size} đối tượng bị từ chối` : ''}${regionKept != null ? `. Bóc TRONG VÙNG CHỌN: chỉ tính ${regionKept}/${regionTotal} đối tượng nằm trong vùng` : ''}.`,
       `Giả định: cao tầng ${a.floorHeight}m, dày tường ${a.wallThickness}m, cao dầm ${a.beamDepth}m, bề rộng dầm ${ASSUMED_BEAM_WIDTH}m, tỷ lệ ${input.unitsPerDrawingUnit} m/đơn vị vẽ.`,
       `Khối lượng do máy tính từ hình học bản vẽ — không phải AI ước lượng.`,
       ...(webCode.length > 0
@@ -625,6 +652,9 @@ export class TakeoffEngineService {
     return {
       thinking: [
         `Đọc ${rawObjects.length} đối tượng của bản vẽ, giữ ${objects.length} sau khi loại từ chối/không đo được.`,
+        ...(regionKept != null
+          ? [`Bóc trong vùng chọn: giữ ${regionKept}/${regionTotal} đối tượng có tâm nằm trong vùng.`]
+          : []),
         `Đo hình học (polyline/shoelace/bbox) × ${input.unitsPerDrawingUnit} m/đơn vị.`,
         `Áp công thức cố định (tường/cột/dầm/cửa) với giả định người dùng.`,
         `Tra mã định mức trong norm_items: ${rows.length - missingCode.length - webCode.length}/${rows.length} dòng có mã DB.`,
