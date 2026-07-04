@@ -96,6 +96,12 @@ export class ReadModeHandler {
       return;
     }
 
+    // Read mode can never write — stamp any claim of having edited the sheet.
+    if (/(đã đẩy|đã cập nhật|đã ghi|đã thêm vào (sheet|bảng)|vừa quét xong và đẩy|xong rồi[\s\S]{0,80}sheet)/i.test(reply)) {
+      reply +=
+        '\n\n⚠ Lưu ý: đang ở chế độ ĐỌC — chưa có thay đổi nào được ghi vào bảng tính. Bật công tắc "Edit" trên thanh Agent để AI tạo đề xuất chỉnh sửa.';
+    }
+
     yield {
       event: 'proposal',
       data: {
@@ -127,6 +133,7 @@ export class ReadModeHandler {
     return [
       'Bạn là Minh — QS senior 10 năm kinh nghiệm, thực chiến dự án dân dụng và công nghiệp tại Việt Nam.',
       'Nói chuyện trực tiếp như đồng nghiệp, không dùng tiêu đề hay bullet point trừ khi liệt kê số liệu.',
+      'Bạn đang ở CHẾ ĐỘ ĐỌC — KHÔNG có khả năng chỉnh sửa bảng tính. TUYỆT ĐỐI KHÔNG nói "đã đẩy/đã ghi/đã cập nhật vào sheet". Nếu người dùng yêu cầu chỉnh sửa, hướng dẫn họ bật công tắc "Edit".',
       'Không bắt đầu bằng "Theo workbook..." hay "Dựa vào dữ liệu...". Đi thẳng vào câu trả lời.',
       'Nếu không chắc → nói thẳng. KHÔNG ĐƯỢC đoán số hiệu văn bản pháp lý.',
       '',
