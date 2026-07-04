@@ -12,6 +12,7 @@ import { buildTrace } from '../trace';
 import { previewActions } from '../transparency';
 import { validate } from '../validation';
 import { CitationEngineService } from '../sources/citation-engine';
+import { tableToUpdateCellsDetailed } from '../markdown-table-actions';
 import { CONCRETE_NORMS, STEEL_NORMS } from '../knowledge/qs-standards';
 import { getChecklistForBuilding } from '../knowledge/work-checklist';
 
@@ -27,6 +28,110 @@ type EditScope = 'price_update' | 'item_add' | 'item_delete' | 'markup' | 'gener
 
 const TRUST_TARGET = 75;
 const TRUST_MAX_ROUNDS = 4;
+
+// Gemini responseSchema (OpenAPI subset). responseSchema is exhaustive — fields
+// not listed get dropped from the output — so action items enumerate the FULL
+// union field set (all optional except `type`). parse() still validates after.
+const SOURCE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    name: { type: 'STRING' },
+    date: { type: 'STRING' },
+    region: { type: 'STRING' },
+    type: { type: 'STRING' },
+    url: { type: 'STRING' },
+  },
+};
+
+const EDIT_REPLY_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    thinking: { type: 'ARRAY', items: { type: 'STRING' } },
+    message: { type: 'STRING' },
+    confidence: {
+      type: 'OBJECT',
+      properties: {
+        boq: { type: 'NUMBER' },
+        materials: { type: 'NUMBER' },
+        labor: { type: 'NUMBER' },
+        equipment: { type: 'NUMBER' },
+        overall: { type: 'NUMBER' },
+        uncertaintyPct: { type: 'NUMBER' },
+        reasons: { type: 'ARRAY', items: { type: 'STRING' } },
+        missing: { type: 'ARRAY', items: { type: 'STRING' } },
+      },
+    },
+    actions: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          type: { type: 'STRING' },
+          // set_project_info / set_markups
+          patch: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+              location: { type: 'STRING' },
+              investor: { type: 'STRING' },
+              dateCreated: { type: 'STRING' },
+              preparedBy: { type: 'STRING' },
+              normVersion: { type: 'STRING' },
+              priceVersion: { type: 'STRING' },
+              buildingType: { type: 'STRING' },
+              floors: { type: 'NUMBER' },
+              area: { type: 'STRING' },
+              note: { type: 'STRING' },
+              overheadPct: { type: 'NUMBER' },
+              profitPct: { type: 'NUMBER' },
+              vatPct: { type: 'NUMBER' },
+              contingencyPct: { type: 'NUMBER' },
+            },
+          },
+          // upsert_* / delete_*
+          id: { type: 'STRING' },
+          code: { type: 'STRING' },
+          name: { type: 'STRING' },
+          unit: { type: 'STRING' },
+          price: { type: 'NUMBER' },
+          grade: { type: 'STRING' },
+          dayRate: { type: 'NUMBER' },
+          shiftRate: { type: 'NUMBER' },
+          source: SOURCE_SCHEMA,
+          components: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                kind: { type: 'STRING' },
+                ref: { type: 'STRING' },
+                norm: { type: 'NUMBER' },
+                unit: { type: 'STRING' },
+              },
+            },
+          },
+          // upsert_takeoff
+          group: { type: 'STRING' },
+          length: { type: 'NUMBER' },
+          width: { type: 'NUMBER' },
+          height: { type: 'NUMBER' },
+          count: { type: 'NUMBER' },
+          formula: { type: 'STRING' },
+          note: { type: 'STRING' },
+          quantity: { type: 'NUMBER' },
+          // update_cells
+          sheetId: { type: 'STRING' },
+          cell: { type: 'STRING' },
+          oldValue: { type: 'STRING' },
+          newValue: { type: 'STRING' },
+          entityId: { type: 'STRING' },
+        },
+        required: ['type'],
+      },
+    },
+  },
+  required: ['message', 'actions'],
+};
 
 @Injectable()
 export class EditModeHandler {
@@ -122,6 +227,7 @@ export class EditModeHandler {
     }
 
     let reply = this.parse(jsonBuf);
+    let fallbackRaw = '';
     if (streamErr || reply.actions.length === 0) {
       yield { event: 'step', data: { text: 'Tổng hợp kết quả…' } };
       try {
@@ -129,11 +235,66 @@ export class EditModeHandler {
           ...visualParts,
           { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, normRef, false, history) },
         ];
-        reply = this.parse(await this.ai.generate(fbParts));
+        // JSON mode + responseSchema: the model can't wrap the payload in prose,
+        // so the "nói mà không làm" failure mode disappears at the source.
+        try {
+          fallbackRaw = await this.ai.generateJson(fbParts, EDIT_REPLY_SCHEMA);
+        } catch (jsonErr) {
+          this.logger.warn(`generateJson fallback failed, using generate(): ${(jsonErr as Error).message}`);
+          fallbackRaw = await this.ai.generate(fbParts);
+        }
+        reply = this.parse(fallbackRaw);
       } catch (err) {
         yield { event: 'error', data: { message: `Lỗi AI: ${(err as Error).message}` } };
         return;
       }
+    }
+
+    // Markdown-table rescue: model "nói mà không làm" — trả bảng khối lượng dạng
+    // markdown thay vì JSON actions → chuyển bảng thành update_cells.
+    if (reply.actions.length === 0) {
+      const candidates = [reply.message, fullText, fallbackRaw].filter((t) => t && t.includes('|'));
+      for (const text of candidates) {
+        const rescue = tableToUpdateCellsDetailed(text, state);
+        if (!rescue || rescue.actions.length === 0) continue;
+        const note = `Chuyển bảng markdown thành ${rescue.actions.length} thay đổi ô (sheet ${rescue.sheetName}, dòng ${rescue.startRow}-${rescue.endRow}).`;
+        const messageWithTable =
+          reply.message && reply.message.includes('|')
+            ? reply.message
+            : text.replace(/^\s*STEP:.*$/gim, '').replace(/JSON:[\s\S]*$/i, '').trim();
+        reply = {
+          ...reply,
+          message: messageWithTable || reply.message,
+          actions: rescue.actions,
+          thinking: [...reply.thinking, note],
+        };
+        yield { event: 'step', data: { text: note } };
+        break;
+      }
+    }
+
+    // parse() failure replaces the model's prose with a generic apology — surface
+    // the actual prose instead (better answer for the user AND lets the
+    // brag-guard below see what the model really claimed).
+    if (reply.actions.length === 0 && /^Xin lỗi/.test(reply.message)) {
+      const prose = (fullText || fallbackRaw)
+        .replace(/^\s*STEP:.*$/gim, '')
+        .replace(/JSON:[\s\S]*$/i, '')
+        .trim();
+      if (prose) reply = { ...reply, message: prose };
+    }
+
+    // Chống "chém đã làm": actions rỗng nhưng message khẳng định đã ghi vào sheet.
+    if (
+      reply.actions.length === 0 &&
+      /(đã đẩy|đã cập nhật|đã ghi|đã thêm vào (sheet|bảng)|vừa quét xong và đẩy|xong rồi[\s\S]{0,80}sheet)/i.test(reply.message)
+    ) {
+      reply = {
+        ...reply,
+        message:
+          reply.message +
+          '\n\n⚠ Lưu ý: chưa có thay đổi nào được ghi vào bảng tính — hãy bấm Apply trên đề xuất (nếu có) hoặc yêu cầu lại cụ thể.',
+      };
     }
 
     let nextState = applyActions(state, reply.actions).state;
@@ -250,6 +411,7 @@ export class EditModeHandler {
       'Bạn là Minh — QS senior đang chỉnh sửa dự toán theo yêu cầu.',
       'Làm đúng yêu cầu, không thêm không bớt. Nếu thiếu thông tin thực sự cần thiết → hỏi ngắn gọn 1 câu.',
       'Mọi action phải có source trung thực (ai_estimate nếu tự suy luận).',
+      "TUYỆT ĐỐI KHÔNG nói 'đã ghi/đã đẩy vào sheet' — bạn chỉ TẠO ĐỀ XUẤT; thay đổi chỉ xảy ra qua JSON actions. Nếu tạo bảng khối lượng, PHẢI xuất JSON actions update_cells tương ứng.",
       '',
       history ? `LỊCH SỬ:\n${history}` : '',
       '',
@@ -324,7 +486,7 @@ export class EditModeHandler {
             'message: viết như đang báo cáo với đồng nghiệp, tự nhiên, không dùng "Đã thực hiện..." hay "Đề xuất...".',
             'Không markdown. JSON phải hợp lệ.',
           ].join('\n')
-        : 'Chỉ trả về JSON: {"thinking":string[],"message":string,"confidence":{...},"actions":Action[]}. Không markdown.',
+        : 'Trả về đúng một object {"thinking":string[],"message":string,"confidence":{...},"actions":Action[]}. actions PHẢI chứa các thay đổi cụ thể — không được để rỗng nếu yêu cầu là chỉnh sửa.',
     ]
       .filter(Boolean)
       .join('\n');

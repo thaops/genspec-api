@@ -237,6 +237,42 @@ export class AiService {
     return null;
   }
 
+  /**
+   * Non-stream JSON-mode generation: forces `application/json` output and,
+   * when given, an OpenAPI-style responseSchema so the model cannot wrap the
+   * payload in prose/markdown. Same model-fallback + transient-retry chain
+   * as generate(). Returns the raw JSON text.
+   */
+  async generateJson(parts: GeminiPart[], schema?: object): Promise<string> {
+    if (!this.gemini) {
+      throw new Error('No AI backend available');
+    }
+    for (const modelName of this.geminiEstimateModels) {
+      const model = this.gemini.getGenerativeModel({ model: modelName });
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const r = await model.generateContent({
+            contents: [{ role: 'user', parts: parts as unknown as never }],
+            generationConfig: {
+              temperature: 0.2,
+              responseMimeType: 'application/json',
+              ...(schema && { responseSchema: schema }),
+              thinkingConfig: { thinkingBudget: 0 },
+            } as unknown as never,
+          });
+          return r.response.text();
+        } catch (err) {
+          if (!this.isTransient(err)) {
+            this.logger.warn(`Gemini generateJson (${modelName}) failed: ${(err as Error).message}`);
+            break;
+          }
+          await this.sleep(Math.min(1500 * attempt * attempt, 8000));
+        }
+      }
+    }
+    throw new Error('Gemini generateJson failed on all models');
+  }
+
   private sleep(ms: number) {
     return new Promise((r) => setTimeout(r, ms));
   }
