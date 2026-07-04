@@ -8,6 +8,35 @@ import type {
   RawEntity,
 } from './drawing-parser.interface';
 
+/**
+ * Coerce a libredwg text field to a plain string.
+ * libredwg-web sometimes returns text as an object ({ text } / { value }) —
+ * without this, downstream renders "[object Object]".
+ * Also strips MTEXT inline format codes (\P, {\fArial;...}, %%c...).
+ */
+export function coerceDwgText(raw: unknown): string {
+  let s: unknown = raw;
+  if (s !== null && typeof s === 'object') {
+    s = (s as any).text ?? (s as any).value ?? '';
+  }
+  if (typeof s !== 'string') s = s === null || s === undefined ? '' : String(s);
+  return (s as string)
+    .replace(/\\P/g, ' ')                  // paragraph break
+    .replace(/\\[A-Za-z][^;{}\\]*;/g, '')  // format codes: \fArial|b0;, \H2.5x;, \C1;
+    .replace(/[{}]/g, '')
+    .replace(/%%[cC]/g, 'Ø')
+    .replace(/%%[dD]/g, '°')
+    .replace(/%%[pP]/g, '±')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/** Block definition extracted from db.tables.BLOCK_RECORD — entities are block-local. */
+export interface DwgBlockDef {
+  basePoint: { x: number; y: number };
+  entities: RawEntity[];
+}
+
 @Injectable()
 export class DwgParserService implements DrawingParserInterface {
   readonly supportedExtensions = ['dwg'];
@@ -94,6 +123,8 @@ export class DwgParserService implements DrawingParserInterface {
     if (db?.layouts) this.logger.log(`[DwgParser] layouts: ${JSON.stringify(Object.keys(db.layouts))}`);
 
     const entities = this.extractEntities(db);
+    const blocks = this.extractBlocks(db);
+    this.logger.log(`[DwgParser] block defs (BLOCK_RECORD): ${Object.keys(blocks).length}`);
     const { extMin, extMax } = this.extractExtents(db, entities);
     this.logger.log(`[DwgParser] extracted: layers=${layers.length}, entities=${entities.length}, extents=(${extMin.x.toFixed(1)},${extMin.y.toFixed(1)})→(${extMax.x.toFixed(1)},${extMax.y.toFixed(1)})`);
 
@@ -112,7 +143,12 @@ export class DwgParserService implements DrawingParserInterface {
       layers,
       extMin,
       extMax,
-      metadata: { version: (db.header as any)?.version ?? 'unknown', fileSize },
+      metadata: {
+        version: (db.header as any)?.version ?? 'unknown',
+        fileSize,
+        insunits: (db.header as any)?.INSUNITS,
+        blocks,
+      },
       parserVersion: 'libredwg-web@wasm',
     };
   }
@@ -124,6 +160,33 @@ export class DwgParserService implements DrawingParserInterface {
       color:   l.colorIndex,
       visible: !l.off,
     }));
+  }
+
+  /**
+   * Block definitions live in db.tables.BLOCK_RECORD.entries (NOT db.blocks).
+   * Skips system blocks (*Model_Space, *Paper_Space, anonymous *X/*D).
+   */
+  private extractBlocks(db: any): Record<string, DwgBlockDef> {
+    const entries: any[] = db?.tables?.BLOCK_RECORD?.entries ?? [];
+    const blocks: Record<string, DwgBlockDef> = {};
+    for (const rec of entries) {
+      const name: string = rec?.name ?? '';
+      if (!name || name.startsWith('*')) continue;
+      const raw: any[] = rec?.entities ?? [];
+      if (!raw.length) continue;
+      const mapped: RawEntity[] = [];
+      for (const e of raw) {
+        const m = this.mapEntity(e);
+        if (m) mapped.push(m);
+      }
+      if (mapped.length) {
+        blocks[name] = {
+          basePoint: { x: rec?.basePoint?.x ?? 0, y: rec?.basePoint?.y ?? 0 },
+          entities: mapped,
+        };
+      }
+    }
+    return blocks;
   }
 
   private extractEntities(db: any): RawEntity[] {
@@ -206,7 +269,7 @@ export class DwgParserService implements DrawingParserInterface {
       case 'TEXT': {
         return { ...base, type: 'TEXT',
           x: e.startPoint?.x ?? 0, y: e.startPoint?.y ?? 0,
-          text: e.text ?? '',
+          text: coerceDwgText(e.text),
           properties: { ...base.properties,
             textHeight: e.textHeight ?? 0,
             rotation:   e.rotation ?? 0,
@@ -220,7 +283,7 @@ export class DwgParserService implements DrawingParserInterface {
         return { ...base, type: 'TEXT',
           x: e.insertionPoint?.x ?? e.startPoint?.x ?? 0,
           y: e.insertionPoint?.y ?? e.startPoint?.y ?? 0,
-          text: e.text ?? '',
+          text: coerceDwgText(e.text),
           properties: { ...base.properties,
             textHeight: e.textHeight ?? 0,
             rotation:   e.rotation ?? 0,
@@ -229,8 +292,7 @@ export class DwgParserService implements DrawingParserInterface {
       }
 
       case 'MTEXT': {
-        const rawText = e.text ?? '';
-        const cleanText = rawText.replace(/\\[A-Za-z][^;]*;|[{}]/g, '').trim();
+        const cleanText = coerceDwgText(e.text);
         return { ...base, type: 'MTEXT',
           x: e.insertionPoint?.x ?? 0, y: e.insertionPoint?.y ?? 0,
           text: cleanText,
@@ -296,7 +358,7 @@ export class DwgParserService implements DrawingParserInterface {
         if (p2) dimPts.push([p2.x, p2.y]);
         if (pD && pD.x !== 0) dimPts.push([pD.x, pD.y]);
         const measurement = e.measurement ?? 0;
-        const text = e.text || (measurement > 0 ? String(Math.round(measurement)) : '');
+        const text = coerceDwgText(e.text) || (measurement > 0 ? String(Math.round(measurement)) : '');
         return { ...base, type: 'DIMENSION',
           x: pTx?.x ?? (p1?.x ?? 0),
           y: pTx?.y ?? (p1?.y ?? 0),

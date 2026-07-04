@@ -56,9 +56,17 @@ export class SceneBuilderService {
         case 'circle':
           secondary.push({ t: 'circle', layer: e.layer, color, cx: e.cx, cy: e.cy, r: e.r });
           break;
-        case 'text':
-          secondary.push({ t: 'text', layer: e.layer, color, x: e.x, y: e.y, h: e.h, rot: e.rot, s: e.text });
+        case 'text': {
+          // Defensive: never let a non-string reach FE ("[object Object]")
+          const raw: unknown = e.text;
+          const s = typeof raw === 'string'
+            ? raw
+            : raw !== null && typeof raw === 'object'
+              ? String((raw as any).text ?? (raw as any).value ?? '')
+              : raw === null || raw === undefined ? '' : String(raw);
+          if (s) secondary.push({ t: 'text', layer: e.layer, color, x: e.x, y: e.y, h: e.h, rot: e.rot, s });
           break;
+        }
       }
     }
 

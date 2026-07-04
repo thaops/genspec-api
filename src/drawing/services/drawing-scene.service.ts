@@ -7,7 +7,10 @@ import * as path from 'path';
 import * as zlib from 'zlib';
 import { Drawing, DrawingDocument } from '../schemas/drawing.schema';
 import { DrawingSceneEntity, DrawingSceneDocument } from '../schemas/drawing-scene.schema';
-import { DxfParserService } from '../parsers/dxf-parser.service';
+import { DxfParserService, DxfDocument } from '../parsers/dxf-parser.service';
+import { DwgParserService } from '../parsers/dwg-parser.service';
+import { DrawingParseResult } from '../parsers/drawing-parser.interface';
+import { adaptDwgToDxfDocument } from './dwg-scene-adapter';
 import { SceneBuilderService, DrawingScene } from './scene-builder.service';
 import { DwgConverterService } from '../converters/dwg-converter.service';
 import { CloudinaryService } from '../../storage/cloudinary.service';
@@ -25,6 +28,7 @@ export class DrawingSceneService {
     @InjectModel(Drawing.name) private drawingModel: Model<DrawingDocument>,
     @InjectModel(DrawingSceneEntity.name) private sceneModel: Model<DrawingSceneDocument>,
     private readonly dxfParser: DxfParserService,
+    private readonly dwgParser: DwgParserService,
     private readonly builder: SceneBuilderService,
     private readonly dwgConverter: DwgConverterService,
     private readonly cloudinary: CloudinaryService,
@@ -40,8 +44,29 @@ export class DrawingSceneService {
     }
   }
 
+  /**
+   * Build scene for a DWG from an ALREADY-PARSED libredwg result — used by the
+   * upload pipeline right after DwgParserService.parse() so the file is not
+   * parsed twice. Never throws (logs instead).
+   */
+  async buildAndPersistFromDwgResult(drawingId: string, result: DrawingParseResult): Promise<void> {
+    try {
+      const { doc, dropped } = adaptDwgToDxfDocument(result);
+      if (Object.keys(dropped).length) {
+        this.logger.log(`[Scene] dwg adapter dropped: ${JSON.stringify(dropped)}`);
+      }
+      await this.buildAndPersistFromDoc(drawingId, doc);
+    } catch (err: any) {
+      this.logger.warn(`[Scene] dwg scene build failed for drawing ${drawingId}: ${err.message}`);
+    }
+  }
+
   private async buildAndPersistFromContent(drawingId: string, dxfContent: string): Promise<DrawingScene> {
     const doc = this.dxfParser.parseContent(dxfContent);
+    return this.buildAndPersistFromDoc(drawingId, doc);
+  }
+
+  private async buildAndPersistFromDoc(drawingId: string, doc: DxfDocument): Promise<DrawingScene> {
     let scene = this.builder.build(doc);
     let json = JSON.stringify(scene);
     let gz = zlib.gzipSync(Buffer.from(json, 'utf-8'));
@@ -104,6 +129,18 @@ export class DrawingSceneService {
         const srcPath = await this.materialize(drawing.url, drawing.type, tmpFiles);
         if (!srcPath) throw new NotFoundException('Không tìm thấy file gốc của bản vẽ');
         if (drawing.type === 'dwg') {
+          // Primary: libredwg WASM parse (no CLI dependency — works on Railway)
+          try {
+            const result = await this.dwgParser.parse(srcPath);
+            const { doc, dropped } = adaptDwgToDxfDocument(result);
+            if (Object.keys(dropped).length) {
+              this.logger.log(`[Scene] dwg adapter dropped: ${JSON.stringify(dropped)}`);
+            }
+            return await this.buildAndPersistFromDoc(drawingId, doc);
+          } catch (wasmErr: any) {
+            this.logger.warn(`[Scene] WASM dwg parse failed (${wasmErr.message}) — trying CLI converter`);
+          }
+          // Fallback: CLI converter (ODA/dwg2dxf) if installed
           try {
             dxfPath = await this.dwgConverter.convert(srcPath);
             tmpFiles.push(dxfPath);

@@ -79,6 +79,10 @@ export class DrawingParserService {
       if (ext === 'dxf') {
         await this.scene.buildAndPersistFromDxfFile(drawingId, filePath);
         await this.log(drawingId, `[scene] built and persisted`);
+      } else if (ext === 'dwg') {
+        // Reuse the libredwg parse result — no second parse, no CLI converter
+        await this.scene.buildAndPersistFromDwgResult(drawingId, result);
+        await this.log(drawingId, `[scene] built from DWG parse result and persisted`);
       }
 
       // 2. Normalize
