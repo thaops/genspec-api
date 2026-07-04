@@ -402,20 +402,47 @@ export class TakeoffEngineService {
     let factor = input.unitsPerDrawingUnit;
     let factorOverridden = false;
     {
+      // Robust span: only the object types we actually measure, with
+      // median+MAD outlier rejection — DWG files routinely contain stray
+      // hatches/dimensions parked hundreds of km from the building, which
+      // would otherwise inflate the span and wrongly reject a good factor.
+      const measured = objects.filter((o: any) =>
+        (MEASURED_TYPES as readonly string[]).includes(o.type),
+      );
+      const pool = measured.length >= 4 ? measured : objects;
+      const centers = pool
+        .map((o: any) => {
+          const b = o.boundingBox ?? {};
+          return {
+            cx: Number(b.x ?? 0) + Number(b.w ?? 0) / 2,
+            cy: Number(b.y ?? 0) + Number(b.h ?? 0) / 2,
+          };
+        })
+        .filter((c) => isFinite(c.cx) && isFinite(c.cy));
+      const median = (vals: number[]) => {
+        const s = [...vals].sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)] ?? 0;
+      };
+      const mx = median(centers.map((c) => c.cx));
+      const my = median(centers.map((c) => c.cy));
+      const mad =
+        median(centers.map((c) => Math.max(Math.abs(c.cx - mx), Math.abs(c.cy - my)))) || 1;
+      const kept = centers.filter(
+        (c) => Math.abs(c.cx - mx) <= 12 * mad && Math.abs(c.cy - my) <= 12 * mad,
+      );
+      const use = kept.length >= centers.length * 0.5 ? kept : centers;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const o of objects) {
-        const b = (o as any).boundingBox ?? {};
-        const x = Number(b.x ?? 0), y = Number(b.y ?? 0);
-        const w = Number(b.w ?? 0), h = Number(b.h ?? 0);
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x + w > maxX) maxX = x + w;
-        if (y + h > maxY) maxY = y + h;
+      for (const c of use) {
+        if (c.cx < minX) minX = c.cx;
+        if (c.cx > maxX) maxX = c.cx;
+        if (c.cy < minY) minY = c.cy;
+        if (c.cy > maxY) maxY = c.cy;
       }
       const span = Math.max(maxX - minX, maxY - minY);
       const plausible = (f: number) => span * f >= 2 && span * f <= 5000;
       if (isFinite(span) && span > 0 && !plausible(factor)) {
-        const guess = [0.001, 1, 0.0254].find(plausible);
+        // mm, m, cm, inch, ft — thứ tự phổ biến với bản vẽ VN
+        const guess = [0.001, 1, 0.01, 0.0254, 0.3048].find(plausible);
         if (guess != null) {
           factor = guess;
           factorOverridden = true;
