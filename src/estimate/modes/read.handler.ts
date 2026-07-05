@@ -12,7 +12,7 @@ const WEB_INTENT = /(thông tư|nghị định|quyết định|quy định|pháp
 export class ReadModeHandler {
   constructor(private readonly ai: AiService) {}
 
-  async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = ''): AsyncGenerator<StreamEvent> {
+  async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = '', editPermission = false): AsyncGenerator<StreamEvent> {
     yield { event: 'step', data: { text: 'Đọc cấu trúc Workbook…' } };
 
     let searchContext = '';
@@ -60,7 +60,7 @@ export class ReadModeHandler {
       }
     }
 
-    const prompt = this.buildPrompt(context, message, searchContext, webContext, webSearchFailed, history);
+    const prompt = this.buildPrompt(context, message, searchContext, webContext, webSearchFailed, history, editPermission);
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
@@ -99,7 +99,9 @@ export class ReadModeHandler {
     // Read mode can never write — stamp any claim of having edited the sheet.
     if (/(đã đẩy|đã cập nhật|đã ghi|đã thêm vào (sheet|bảng)|vừa quét xong và đẩy|xong rồi[\s\S]{0,80}sheet)/i.test(reply)) {
       reply +=
-        '\n\n⚠ Lưu ý: đang ở chế độ ĐỌC — chưa có thay đổi nào được ghi vào bảng tính. Bật công tắc "Edit" trên thanh Agent để AI tạo đề xuất chỉnh sửa.';
+        (editPermission
+          ? '\n\n⚠ Lưu ý: chưa có thay đổi nào được ghi vào bảng tính — ra lệnh cụ thể (vd "cập nhật giá thép dòng 5") để AI thực hiện.'
+          : '\n\n⚠ Lưu ý: đang ở chế độ ĐỌC — chưa có thay đổi nào được ghi vào bảng tính. Bật công tắc "Edit" trên thanh Agent để AI tạo đề xuất chỉnh sửa.');
     }
 
     yield {
@@ -125,7 +127,7 @@ export class ReadModeHandler {
     return words.slice(-2).join(' ');
   }
 
-  private buildPrompt(context: WorkbookContext, message: string, searchContext: string, webContext: string, webSearchFailed: boolean, history: string): string {
+  private buildPrompt(context: WorkbookContext, message: string, searchContext: string, webContext: string, webSearchFailed: boolean, history: string, editPermission = false): string {
     const searchFailedNote = webSearchFailed
       ? 'CẢNH BÁO: Tra cứu mạng thất bại. TUYỆT ĐỐI KHÔNG tự bịa thông tin pháp lý. Nếu câu hỏi liên quan đến thông tư/nghị định → nói thẳng không tra cứu được, hướng dẫn người dùng vào moc.gov.vn hoặc vbpl.vn để kiểm tra.'
       : '';
@@ -133,7 +135,9 @@ export class ReadModeHandler {
     return [
       'Bạn là Minh — QS senior 10 năm kinh nghiệm, thực chiến dự án dân dụng và công nghiệp tại Việt Nam.',
       'Nói chuyện trực tiếp như đồng nghiệp, không dùng tiêu đề hay bullet point trừ khi liệt kê số liệu.',
-      'Bạn đang ở CHẾ ĐỘ ĐỌC — KHÔNG có khả năng chỉnh sửa bảng tính. TUYỆT ĐỐI KHÔNG nói "đã đẩy/đã ghi/đã cập nhật vào sheet". Nếu người dùng yêu cầu chỉnh sửa, hướng dẫn họ bật công tắc "Edit".',
+      editPermission
+        ? 'Đây là câu hỏi ĐỌC/tra cứu — trả lời trực tiếp. TUYỆT ĐỐI KHÔNG nói "đã đẩy/đã ghi vào sheet" và KHÔNG bảo người dùng bật Edit (quyền chỉnh sửa ĐANG BẬT — muốn sửa gì họ chỉ cần ra lệnh cụ thể).'
+        : 'Bạn đang ở CHẾ ĐỘ ĐỌC — KHÔNG có khả năng chỉnh sửa bảng tính. TUYỆT ĐỐI KHÔNG nói "đã đẩy/đã ghi/đã cập nhật vào sheet". Nếu người dùng yêu cầu chỉnh sửa, hướng dẫn họ bật công tắc "Edit".',
       'Không bắt đầu bằng "Theo workbook..." hay "Dựa vào dữ liệu...". Đi thẳng vào câu trả lời.',
       'Nếu không chắc → nói thẳng. KHÔNG ĐƯỢC đoán số hiệu văn bản pháp lý.',
       '',

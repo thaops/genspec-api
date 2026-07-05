@@ -123,7 +123,7 @@ export class CopilotService {
       return;
     }
 
-    const rawMode = this.detectMode(message, !!selectedRange);
+    const rawMode = this.detectMode(message, !!selectedRange, editPermission);
     // In safe mode (no editPermission) downgrade edit intent to read
     const mode: CopilotMode = !editPermission && rawMode === 'edit' ? 'read' : rawMode;
     this.logger.log(`Copilot mode: ${mode} (raw=${rawMode}, editPermission=${editPermission})`);
@@ -133,7 +133,7 @@ export class CopilotService {
     }
 
     if (mode === 'read') {
-      yield* this.readHandler.handle(doc as any, context, message, history);
+      yield* this.readHandler.handle(doc as any, context, message, history, editPermission);
       return;
     }
 
@@ -439,13 +439,18 @@ Trả về 6-8 kết quả chính xác nhất, mới nhất. trustScore từ 70-
     }
   }
 
-  private detectMode(message: string, hasSelection: boolean): CopilotMode {
+  private detectMode(message: string, hasSelection: boolean, editPermission = false): CopilotMode {
     // Structured agent tasks (⚡ full takeoff, generate-takeoff…) carry an
     // explicit [ACTION:*] tag — always edit intent. Without this, the prompt's
     // own vocabulary ("định mức", "đơn giá") trips WEB_LEGAL_INTENT below and
     // silently downgrades the task to read mode.
     if (/\[ACTION:/i.test(message)) return 'edit';
     const norm = normalizeVi(message);
+    // Edit ON + edit verb ("cập nhật giá theo định mức…") → edit wins even when
+    // the message also mentions định mức/thông tư — those are the OBJECT of the
+    // edit, not a research question. Without this the WEB_LEGAL check below
+    // hijacks the request into read mode and the model nags "bật Edit".
+    if (editPermission && (EDIT_INTENT.test(message) || EDIT_INTENT.test(norm))) return 'edit';
     // Web/legal questions always go to read — even if message contains "kiểm tra"
     if (WEB_LEGAL_INTENT.test(message) || WEB_LEGAL_INTENT.test(norm)) return 'read';
     // If user has a cell selected, treat as focused read unless edit action is explicit
