@@ -62,6 +62,10 @@ export class Estimate {
 
   @Prop({ type: [Object], default: [] })
   conversationMessages: any[];
+
+  /** Phiên chat độc lập: [{id, title, createdAt, updatedAt, messages}] — thay conversationMessages (giữ field cũ để migration mềm). */
+  @Prop({ type: [Object], default: [] })
+  chatSessions: any[];
 }
 
 export const EstimateSchema = SchemaFactory.createForClass(Estimate);

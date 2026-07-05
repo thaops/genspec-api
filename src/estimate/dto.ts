@@ -121,6 +121,11 @@ export class CopilotDto {
   @IsBoolean()
   editPermission?: boolean;
 
+  /** Phiên chat để lấy history — không có → session mới nhất (hành vi cũ). */
+  @IsOptional()
+  @IsString()
+  chatSessionId?: string;
+
   @IsOptional()
   @IsString()
   drawingId?: string;

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   UploadedFile,
@@ -109,7 +110,7 @@ export class EstimateController {
     (res.socket as any)?.setNoDelay?.(true);
     res.flushHeaders?.();
     try {
-      for await (const ev of this.copilot.streamChat(userId, id, dto.message ?? '', files ?? [], dto.activeSheetId, dto.selectedRange, dto.editPermission ?? false, dto.drawingId, dto.objectId, dto.drawingContext, dto.calibrationFactor)) {
+      for await (const ev of this.copilot.streamChat(userId, id, dto.message ?? '', files ?? [], dto.activeSheetId, dto.selectedRange, dto.editPermission ?? false, dto.drawingId, dto.objectId, dto.drawingContext, dto.calibrationFactor, dto.chatSessionId)) {
         res.write(`event: ${ev.event}\ndata: ${JSON.stringify(ev.data)}\n\n`);
         (res as any).flush?.();
       }
@@ -144,6 +145,46 @@ export class EstimateController {
     return this.copilot.generateInsights(userId, id);
   }
 
+  // ── Chat sessions (phiên chat độc lập) ──────────────────────────────────
+  @Get('estimates/:id/chat-sessions')
+  listChatSessions(@CurrentUser('userId') userId: string, @Param('id') id: string) {
+    return this.estimates.listChatSessions(userId, id);
+  }
+
+  @Post('estimates/:id/chat-sessions')
+  createChatSession(@CurrentUser('userId') userId: string, @Param('id') id: string) {
+    return this.estimates.createChatSession(userId, id);
+  }
+
+  @Get('estimates/:id/chat-sessions/:sid')
+  getChatSession(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Param('sid') sid: string,
+  ) {
+    return this.estimates.getChatSession(userId, id, sid);
+  }
+
+  @Put('estimates/:id/chat-sessions/:sid')
+  saveChatSession(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Param('sid') sid: string,
+    @Body('messages') messages: any[],
+  ) {
+    return this.estimates.saveChatSession(userId, id, sid, messages ?? []);
+  }
+
+  @Delete('estimates/:id/chat-sessions/:sid')
+  deleteChatSession(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Param('sid') sid: string,
+  ) {
+    return this.estimates.deleteChatSession(userId, id, sid);
+  }
+
+  // Endpoint cũ — proxy sang session mới nhất (FE cũ không vỡ)
   @Get('estimates/:id/conversation')
   getConversation(@CurrentUser('userId') userId: string, @Param('id') id: string) {
     return this.estimates.getConversation(userId, id);

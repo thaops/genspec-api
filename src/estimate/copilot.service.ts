@@ -94,6 +94,7 @@ export class CopilotService {
     objectId?: string,
     drawingContext?: { page?: number; scale?: number; activeTool?: string; layer?: string; objectType?: string },
     calibrationFactor?: number,
+    chatSessionId?: string,
   ): AsyncGenerator<StreamEvent> {
     if (!message?.trim() && files.length === 0) {
       yield { event: 'error', data: { message: 'Cần nhập yêu cầu hoặc đính kèm tệp.' } };
@@ -106,7 +107,7 @@ export class CopilotService {
 
     const [doc, rawConvo] = await Promise.all([
       this.estimates.getOwned(userId, id),
-      this.estimates.getConversation(userId, id).catch(() => [] as any[]),
+      this.estimates.getSessionMessages(userId, id, chatSessionId).catch(() => [] as any[]),
     ]);
     const context = this.contextBuilder.buildContext(doc as any, activeSheetId, selectedRange);
     if (drawingId) {

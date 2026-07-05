@@ -13,6 +13,17 @@ import { validate } from './validation';
 import { generatePatch, applyRollback } from './patch-history';
 import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
 import { excelToUniverSheets } from './excel-to-univer';
+import {
+  ChatSession,
+  ChatSessionMeta,
+  capSessions,
+  deriveTitle,
+  latestSession,
+  newChatSession,
+  toSessionMeta,
+  wrapLegacyConversation,
+  MAX_SESSION_MESSAGES,
+} from './chat-sessions';
 
 function stateOf(doc: EstimateDocument): EstimateState {
   return {
@@ -56,16 +67,96 @@ export class EstimateService {
     @InjectModel(Drawing.name) private readonly drawingModel: Model<DrawingDocument>,
   ) {}
 
-  async getConversation(userId: string, id: string): Promise<any[]> {
+  // ── Chat sessions ────────────────────────────────────────────────────────
+  // Mỗi estimate có nhiều phiên chat; endpoint /conversation cũ proxy vào
+  // session MỚI NHẤT. Migration mềm: doc chỉ có conversationMessages cũ →
+  // lần đọc đầu bọc thành session {id:'legacy', title:'Hội thoại cũ'}.
+
+  /** Đọc sessions + lazy-migrate conversation cũ (auth qua getOwned). */
+  private async loadSessions(userId: string, id: string): Promise<ChatSession[]> {
     const doc = await this.getOwned(userId, id);
-    return (doc as any).conversationMessages ?? [];
+    const existing = (doc as any).chatSessions as ChatSession[] | undefined;
+    if (existing?.length) return existing;
+    const legacy = (doc as any).conversationMessages as any[] | undefined;
+    if (legacy?.length) {
+      const sessions = [wrapLegacyConversation(legacy)];
+      await this.model.findByIdAndUpdate(id, { $set: { chatSessions: sessions } });
+      return sessions;
+    }
+    return [];
   }
 
+  private async persistSessions(id: string, sessions: ChatSession[]): Promise<void> {
+    await this.model.findByIdAndUpdate(id, { $set: { chatSessions: capSessions(sessions) } });
+  }
+
+  async listChatSessions(userId: string, id: string): Promise<ChatSessionMeta[]> {
+    const sessions = await this.loadSessions(userId, id);
+    return sessions
+      .map(toSessionMeta)
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  }
+
+  async createChatSession(userId: string, id: string): Promise<ChatSessionMeta> {
+    const sessions = await this.loadSessions(userId, id);
+    const session = newChatSession(sessions.length);
+    await this.persistSessions(id, [...sessions, session]);
+    return toSessionMeta(session);
+  }
+
+  async getChatSession(userId: string, id: string, sid: string): Promise<any[]> {
+    const sessions = await this.loadSessions(userId, id);
+    const session = sessions.find((s) => s.id === sid);
+    if (!session) throw new NotFoundException('Không tìm thấy phiên chat');
+    return session.messages ?? [];
+  }
+
+  async saveChatSession(
+    userId: string,
+    id: string,
+    sid: string,
+    messages: any[],
+  ): Promise<{ ok: true }> {
+    const sessions = await this.loadSessions(userId, id);
+    const session = sessions.find((s) => s.id === sid);
+    if (!session) throw new NotFoundException('Không tìm thấy phiên chat');
+    session.messages = (messages ?? []).slice(-MAX_SESSION_MESSAGES);
+    session.title = deriveTitle(session.title, session.messages);
+    session.updatedAt = new Date().toISOString();
+    await this.persistSessions(id, sessions);
+    return { ok: true };
+  }
+
+  async deleteChatSession(userId: string, id: string, sid: string): Promise<{ ok: true }> {
+    const sessions = await this.loadSessions(userId, id);
+    await this.persistSessions(id, sessions.filter((s) => s.id !== sid));
+    return { ok: true };
+  }
+
+  /** History cho copilot: sid chỉ định → session đó; không → session mới nhất. */
+  async getSessionMessages(userId: string, id: string, sid?: string): Promise<any[]> {
+    const sessions = await this.loadSessions(userId, id);
+    const session = sid ? sessions.find((s) => s.id === sid) : latestSession(sessions);
+    return session?.messages ?? [];
+  }
+
+  /** Endpoint cũ — đọc session mới nhất (FE cũ không vỡ). */
+  async getConversation(userId: string, id: string): Promise<any[]> {
+    return this.getSessionMessages(userId, id);
+  }
+
+  /** Endpoint cũ — lưu vào session mới nhất (tạo nếu chưa có). */
   async saveConversation(userId: string, id: string, messages: any[]): Promise<{ ok: true }> {
-    await this.getOwned(userId, id); // auth check
-    await this.model.findByIdAndUpdate(id, {
-      $set: { conversationMessages: messages.slice(-100) },
-    });
+    const sessions = await this.loadSessions(userId, id);
+    let session = latestSession(sessions);
+    if (!session) {
+      session = newChatSession(sessions.length);
+      sessions.push(session);
+    }
+    session.messages = (messages ?? []).slice(-MAX_SESSION_MESSAGES);
+    session.title = deriveTitle(session.title, session.messages);
+    session.updatedAt = new Date().toISOString();
+    await this.persistSessions(id, sessions);
     return { ok: true };
   }
 
