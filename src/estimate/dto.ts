@@ -96,6 +96,11 @@ export class TakeoffEngineDto {
   @IsOptional()
   @IsBoolean()
   editPermission?: boolean;
+
+  /** Bộ môn bản vẽ (KT/KC/DIEN/NUOC/KHAC) — FE tuỳ chọn gửi kèm; BE tự đọc từ drawing doc là chuẩn. */
+  @IsOptional()
+  @IsString()
+  discipline?: string;
 }
 
 export class CopilotDto {

@@ -6,6 +6,8 @@ import { Model } from 'mongoose';
 import { NormComponent, NormItem } from '../catalog/catalog-db.schemas';
 import { CatalogService, lookupComponentPrice } from '../catalog/catalog.service';
 import { DrawingObject, DrawingObjectDocument } from '../drawing/schemas/drawing-object.schema';
+import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
+import { Discipline, isDiscipline } from '../drawing/discipline';
 import { EstimateService } from './estimate.service';
 import { Action, EstimateState, ValidationFinding, ValidationReport } from './estimate.types';
 import { rowsToUpdateCells } from './markdown-table-actions';
@@ -72,6 +74,37 @@ export type TakeoffRowKey =
   | 'floor_finish';
 
 export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
+
+/**
+ * Định tuyến bộ môn → tập TakeoffRowKey được phép sinh. GĐ2 "1 BOQ tổng xuyên
+ * bộ môn, KHÔNG đếm trùng do thiết kế": mỗi bản vẽ theo bộ môn chỉ sinh nhóm
+ * công tác của bộ môn đó, tất cả ghi vào cùng sheet "Khối lượng".
+ *
+ * Phân vai wall_* (lý do QS): trong dân dụng tường bao/ngăn là công tác KIẾN
+ * TRÚC (xây + trát + bả/sơn) → wall_area/wall_volume/wall_paint gán KT. KC chỉ
+ * cấu kiện chịu lực: cột/dầm/sàn (cột/dầm/sàn BT + ván khuôn). slab (bê tông
+ * sàn) là kết cấu → KC; floor_finish (lát nền) là hoàn thiện → KT. Cửa đi/sổ là
+ * hoàn thiện kiến trúc → KT. DIEN/NUOC: chưa có rowKey chuyên ngành → rỗng
+ * (chỉ checklist, KHÔNG bịa). KHAC/undefined → null = giữ TẤT CẢ (hành vi cũ,
+ * không vỡ bản vẽ đơn chưa gắn bộ môn).
+ */
+export const DISCIPLINE_ROWKEYS: Record<Discipline, TakeoffRowKey[] | null> = {
+  KT: ['wall_area', 'wall_volume', 'wall_paint', 'door', 'window', 'floor_finish'],
+  KC: ['column_concrete', 'column_formwork', 'beam_concrete', 'beam_formwork', 'slab'],
+  DIEN: [],
+  NUOC: [],
+  KHAC: null,
+};
+
+/**
+ * Tập rowKey được phép cho 1 bộ môn. null = không giới hạn (giữ tất cả — dùng
+ * cho KHAC / bản vẽ chưa gắn bộ môn). PURE.
+ */
+export function rowKeysForDiscipline(discipline?: string): Set<TakeoffRowKey> | null {
+  if (!discipline || !isDiscipline(discipline)) return null;
+  const keys = DISCIPLINE_ROWKEYS[discipline];
+  return keys == null ? null : new Set(keys);
+}
 
 export interface TakeoffEngineRow {
   key: TakeoffRowKey;
@@ -226,16 +259,51 @@ export function standardDisplayName(key: TakeoffRowKey, raw: string | undefined)
  * Các đầu việc QS chuẩn KHÔNG bóc được từ bản KIẾN TRÚC — danh sách TĨNH, không
  * phụ thuộc LLM. Chỉ để ghi chú minh bạch "cần bổ sung", KHÔNG sinh action/số.
  */
-export const CHECKLIST_QS: { name: string; reason: string }[] = [
-  { name: 'Cốt thép cột/dầm/sàn/móng', reason: 'cần bản KẾT CẤU (KT.dwg là bản kiến trúc, không có thông tin thép)' },
-  { name: 'Đào đất, bê tông lót, móng', reason: 'cần bản kết cấu móng' },
-  { name: 'Điện, nước, PCCC', reason: 'cần bản MEP' },
+/**
+ * `need`: các bộ môn mà — NẾU estimate đã có bản vẽ của một trong số đó — nguồn
+ * dữ liệu đã tồn tại (chỉ là chưa detect ra), nên message đổi sang `haveReason`
+ * thay vì "cần bản …". Item không có `need` = luôn cần bổ sung thủ công.
+ */
+export const CHECKLIST_QS: {
+  name: string;
+  reason: string;
+  need?: Discipline[];
+  haveReason?: string;
+}[] = [
+  {
+    name: 'Cốt thép cột/dầm/sàn/móng',
+    reason: 'cần bản KẾT CẤU (KT.dwg là bản kiến trúc, không có thông tin thép)',
+    need: ['KC'],
+    haveReason: 'đã có bản KẾT CẤU — chưa nhận diện được thép/móng, cần khoanh vùng/gán loại',
+  },
+  {
+    name: 'Đào đất, bê tông lót, móng',
+    reason: 'cần bản kết cấu móng',
+    need: ['KC'],
+    haveReason: 'đã có bản KẾT CẤU — chưa nhận diện được móng, cần khoanh vùng/gán loại',
+  },
+  {
+    name: 'Điện, nước, PCCC',
+    reason: 'cần bản MEP',
+    need: ['DIEN', 'NUOC'],
+    haveReason: 'đã có bản Điện/Nước — chưa nhận diện được công tác MEP, cần khoanh vùng/gán loại',
+  },
   { name: 'Cầu thang, lanh tô, mái, chống thấm', reason: 'cần bản chi tiết / khoanh vùng thủ công' },
 ];
 
-/** Khối ghi chú "CẦN BỔ SUNG" — text thuần, KHÔNG phải công tác, KHÔNG có số. */
-export function renderChecklistQs(): string {
-  const lines = CHECKLIST_QS.map((c, i) => `${i + 1}. ${c.name} — ${c.reason}`);
+/** Reason phản ánh ĐÚNG cái còn thiếu theo bộ môn đã có trong estimate. */
+function checklistReason(c: (typeof CHECKLIST_QS)[number], existing?: Set<string>): string {
+  if (c.need && c.haveReason && existing && c.need.some((d) => existing.has(d))) return c.haveReason;
+  return c.reason;
+}
+
+/**
+ * Khối ghi chú "CẦN BỔ SUNG" — text thuần, KHÔNG phải công tác, KHÔNG có số.
+ * `existing` = tập bộ môn đã có bản vẽ trong estimate → message phản ánh đúng
+ * cái còn thiếu (có bản KC/MEP thì đổi "cần bản …" → "đã có, chưa detect").
+ */
+export function renderChecklistQs(existing?: Set<string>): string {
+  const lines = CHECKLIST_QS.map((c, i) => `${i + 1}. ${c.name} — ${checklistReason(c, existing)}`);
   return `CẦN BỔ SUNG (chưa bóc được từ bản kiến trúc — KHÔNG tạo số khống):\n${lines.join('\n')}`;
 }
 
@@ -362,6 +430,8 @@ export function computeTakeoffRows(
   factor: number,
   assumptions: TakeoffAssumptions,
   normCandidates: NormCandidateMap,
+  /** Lọc theo bộ môn: chỉ sinh rowKey trong tập này. null/undefined = tất cả. */
+  allowedKeys?: Set<TakeoffRowKey> | null,
 ): TakeoffEngineRow[] {
   const totals = new Map<string, GroupTotals>();
   for (const obj of objects) {
@@ -379,6 +449,7 @@ export function computeTakeoffRows(
   const rows: TakeoffEngineRow[] = [];
 
   const push = (key: TakeoffRowKey, group: string, unit: string, quantity: number, formula: string) => {
+    if (allowedKeys && !allowedKeys.has(key)) return;
     const q = round3(quantity);
     if (q <= 0) return;
     const cand = normCandidates[key];
@@ -539,6 +610,7 @@ export interface TakeoffEngineInput {
 export class TakeoffEngineService {
   constructor(
     @InjectModel(DrawingObject.name) private readonly drawingObjectModel: Model<DrawingObjectDocument>,
+    @InjectModel(Drawing.name) private readonly drawingModel: Model<DrawingDocument>,
     @InjectModel(NormItem.name) private readonly normModel: Model<NormItem>,
     private readonly estimates: EstimateService,
     private readonly catalog: CatalogService,
@@ -574,6 +646,14 @@ export class TakeoffEngineService {
   async run(userId: string, estimateId: string, input: TakeoffEngineInput) {
     const doc = await this.estimates.getOwned(userId, estimateId);
     const state: EstimateState = this.estimates.stateForPrompt(doc);
+
+    // Bộ môn của bản vẽ đang bóc → lọc rowKey; và tập bộ môn đã có trong
+    // estimate → checklist phản ánh đúng cái còn thiếu thật.
+    const drawingDoc = await this.drawingModel.findById(input.drawingId).select('discipline').lean();
+    const discipline = drawingDoc?.discipline;
+    const allowedKeys = rowKeysForDiscipline(discipline);
+    const estDrawings = await this.drawingModel.find({ estimateId }).select('discipline').lean();
+    const existingDisciplines = new Set(estDrawings.map((d) => d.discipline).filter(Boolean) as string[]);
 
     const rejected = new Set(input.rejectedObjectIds ?? []);
     const rawObjects = await this.drawingObjectModel.find({ drawingId: input.drawingId }).lean();
@@ -675,7 +755,7 @@ export class TakeoffEngineService {
     // lạc nhóm (vd web trả AF.12400 "BÊ TÔNG SÀN MÁI" cho slab chung). KHÔNG bịa giá.
     let fallbackCount = 0;
     if (input.editPermission) {
-      const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates);
+      const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys);
       for (const r of probe.filter((row) => !row.code)) {
         const fb = COMMON_FALLBACK_CODES[r.key];
         if (!fb) continue;
@@ -689,7 +769,7 @@ export class TakeoffEngineService {
     let webLookedUp = 0;
     let webHitCount = 0;
     if (this.webLookup.enabled) {
-      const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates);
+      const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys);
       const missingKeys = probe.filter((r) => !r.code).map((r) => r.key);
       if (missingKeys.length > 0) {
         webLookedUp = missingKeys.length;
@@ -711,7 +791,7 @@ export class TakeoffEngineService {
       }
     }
 
-    const bareRows = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates);
+    const bareRows = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys);
 
     // Giá THẬT từ price_set tỉnh mới nhất khớp projectInfo.location — không có thì cột giá trống.
     const priceCtxRaw = await this.catalog
@@ -799,7 +879,7 @@ export class TakeoffEngineService {
       '',
       rowsToMarkdownTable(rows),
       '',
-      renderChecklistQs(),
+      renderChecklistQs(existingDisciplines),
       '',
       summarizeDetectedObjects(objects as unknown as EngineDrawingObject[]),
     ].join('\n');
@@ -837,7 +917,7 @@ export class TakeoffEngineService {
       severity: 'info',
       area: 'missing',
       title: `BOQ chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm cần bản vẽ kết cấu/MEP`,
-      detail: `${renderChecklistQs()}`,
+      detail: `${renderChecklistQs(existingDisciplines)}`,
     });
     if (factorOverridden) {
       findings.push({
@@ -912,6 +992,9 @@ export class TakeoffEngineService {
     return {
       thinking: [
         `Đọc ${rawObjects.length} đối tượng của bản vẽ, giữ ${objects.length} sau khi loại từ chối/không đo được.`,
+        ...(allowedKeys
+          ? [`Bộ môn bản vẽ = ${discipline} → chỉ sinh nhóm công tác của bộ môn này (${[...allowedKeys].join(', ') || 'không có rowKey — chỉ checklist'}); tất cả ghi chung sheet Khối lượng.`]
+          : [`Bản vẽ chưa gắn bộ môn (hoặc KHÁC) → giữ toàn bộ nhóm công tác.`]),
         ...(regionKept != null
           ? [`Bóc trong vùng chọn: giữ ${regionKept}/${regionTotal} đối tượng có tâm nằm trong vùng.`]
           : []),
