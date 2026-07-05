@@ -51,21 +51,25 @@ export const COMMON_FALLBACK_CODES: Record<TakeoffRowKey, { code: string; name: 
   column_formwork: { code: 'AF.86411', name: 'Ván khuôn cột' },
   beam_concrete: { code: 'AF.61620', name: 'Bê tông dầm đá 1x2 M250' },
   beam_formwork: { code: 'AF.86511', name: 'Ván khuôn dầm' },
+  wall_paint: { code: 'AK.84210', name: 'Bả + sơn tường' },
   door: { code: 'AH.11120', name: 'Cửa đi' },
   window: { code: 'AH.12110', name: 'Cửa sổ' },
   slab: { code: 'AF.61720', name: 'Bê tông sàn đá 1x2 M250' },
+  floor_finish: { code: 'AK.51110', name: 'Lát nền gạch' },
 };
 
 export type TakeoffRowKey =
   | 'wall_area'
   | 'wall_volume'
+  | 'wall_paint'
   | 'column_concrete'
   | 'column_formwork'
   | 'beam_concrete'
   | 'beam_formwork'
   | 'door'
   | 'window'
-  | 'slab';
+  | 'slab'
+  | 'floor_finish';
 
 export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
 
@@ -154,12 +158,21 @@ export function applyPricingToRows(
 /** Bề rộng dầm giả định cố định (m) — ghi rõ trong Ghi chú mỗi dòng dầm. */
 export const ASSUMED_BEAM_WIDTH = 0.2;
 
-const MEASURED_TYPES = ['wall', 'column', 'beam', 'door', 'window', 'slab'] as const;
+// Hatch KHÔNG nằm trong MEASURED_TYPES: nó được bóc riêng (lọc outlier) thành
+// slab/floor_finish, và bị loại khỏi pool tính span của factor guard (hatch
+// rác thường bị parked xa công trình).
+const MEASURED_TYPES = ['wall', 'column', 'beam', 'door', 'window'] as const;
+
+/** Ngưỡng lọc hatch: mảng < 0.5 m² là pattern ký hiệu, không phải nền. */
+export const HATCH_MIN_AREA = 0.5;
+/** Mảng hatch chiếm > tỉ lệ này của TỔNG diện tích hatch = biên/khối lớn bất thường → loại. */
+export const HATCH_MAX_SHARE = 0.9;
 
 /** Keyword tra norm_items theo từng dòng khối lượng (regex, thử theo thứ tự). */
 export const NORM_KEYWORDS: Record<TakeoffRowKey, string[]> = {
   wall_area: ['trát tường', 'xây tường'],
   wall_volume: ['xây tường', 'xây.*gạch'],
+  wall_paint: ['sơn.*tường', 'bả.*tường', 'sơn'],
   column_concrete: ['bê tông.*cột'],
   column_formwork: ['ván khuôn.*cột'],
   beam_concrete: ['bê tông.*dầm'],
@@ -167,18 +180,21 @@ export const NORM_KEYWORDS: Record<TakeoffRowKey, string[]> = {
   door: ['cửa đi', 'cửa'],
   window: ['cửa sổ', 'cửa'],
   slab: ['bê tông.*sàn'],
+  floor_finish: ['lát nền', 'lát.*gạch', 'lát'],
 };
 
 const DEFAULT_NAMES: Record<TakeoffRowKey, string> = {
   wall_area: 'Xây/trát tường',
   wall_volume: 'Xây tường',
+  wall_paint: 'Bả + sơn tường',
   column_concrete: 'Bê tông cột',
   column_formwork: 'Ván khuôn cột',
   beam_concrete: 'Bê tông dầm',
   beam_formwork: 'Ván khuôn dầm',
   door: 'Cửa đi',
   window: 'Cửa sổ',
-  slab: 'Sàn (diện tích)',
+  slab: 'Sàn (bê tông)',
+  floor_finish: 'Lát nền',
 };
 
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -218,6 +234,67 @@ interface GroupTotals {
   length: number;
   area: number;
   perimeter: number;
+}
+
+export interface HatchSlabStats {
+  /** Số hatch có diện tích > 0. */
+  count: number;
+  /** Số hatch đủ tin cậy (qua lọc ngưỡng) → dùng bóc sàn. */
+  used: number;
+  /** Số hatch bị loại (quá nhỏ / quá lớn). */
+  dropped: number;
+  /** Tổng diện tích các hatch đủ tin cậy (m²). */
+  area: number;
+}
+
+/**
+ * Bóc diện tích sàn/nền từ hatch — ĐO THẬT bằng shoelace, không bịa.
+ * Lọc outlier: bỏ mảng < HATCH_MIN_AREA (pattern ký hiệu) và mảng
+ * > HATCH_MAX_SHARE tổng (biên/khối bất thường). Trả về Σ diện tích qualified.
+ */
+export function hatchSlabStats(objects: EngineDrawingObject[], factor: number): HatchSlabStats {
+  const areas: number[] = [];
+  for (const o of objects) {
+    if (o.type !== 'hatch') continue;
+    const a = measure(o, factor).area;
+    if (a > 0) areas.push(a);
+  }
+  const total = areas.reduce((s, a) => s + a, 0);
+  const cap = HATCH_MAX_SHARE * total;
+  const qualified = areas.filter((a) => a >= HATCH_MIN_AREA && a <= cap);
+  return {
+    count: areas.length,
+    used: qualified.length,
+    dropped: areas.length - qualified.length,
+    area: round3(qualified.reduce((s, a) => s + a, 0)),
+  };
+}
+
+const TYPE_LABELS_VI: Record<string, string> = {
+  wall: 'tường', column: 'cột', beam: 'dầm', door: 'cửa', window: 'cửa sổ',
+  slab: 'sàn', hatch: 'hatch', text: 'text', block: 'block',
+  dimension: 'dimension', unknown: 'chưa phân loại',
+};
+
+/** Các loại đã bóc được (trực tiếp hoặc qua hatch→sàn). */
+const TAKEN_TYPES = new Set<string>([...MEASURED_TYPES, 'hatch']);
+
+/**
+ * 1 dòng thống kê (KHÔNG phải công tác) để user biết bản vẽ còn gì chưa bóc,
+ * thay vì tưởng chỉ có mấy nhóm ít ỏi trong bảng.
+ */
+export function summarizeDetectedObjects(objects: EngineDrawingObject[]): string {
+  const counts: Record<string, number> = {};
+  for (const o of objects) counts[o.type] = (counts[o.type] ?? 0) + 1;
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const parts = entries.map(([t, n]) => `${n} ${TYPE_LABELS_VI[t] ?? t}`);
+  const notTaken = entries
+    .filter(([t]) => !TAKEN_TYPES.has(t))
+    .map(([t, n]) => `${n} ${TYPE_LABELS_VI[t] ?? t}`);
+  const suffix = notTaken.length
+    ? ` Chưa bóc: ${notTaken.join(', ')} — cần khoanh vùng/gán loại thủ công.`
+    : '';
+  return `Đối tượng nhận diện: ${parts.join(', ')}.${suffix}`;
 }
 
 /**
@@ -291,6 +368,14 @@ export function computeTakeoffRows(
       m2 * T,
       `${f3(m2)} m² × ${f3(T)}m = ${f3(m2 * T)} m³`,
     );
+    // Bả + sơn: cùng diện tích bề mặt trát (hệ số 1:1 ghi rõ, không nhân khống).
+    push(
+      'wall_paint',
+      'wall',
+      'm2',
+      m2,
+      `bả+sơn theo diện tích trát: ${f3(m2)} m² × 1 (hệ số 1:1) = ${f3(m2)} m²`,
+    );
   }
 
   const column = totals.get('column');
@@ -341,9 +426,13 @@ export function computeTakeoffRows(
     push('window', 'window', 'm2', window.area, `tổng diện tích ${window.count} cửa sổ = ${f3(window.area)} m²`);
   }
 
-  const slab = totals.get('slab');
-  if (slab) {
-    push('slab', 'slab', 'm2', slab.area, `tổng diện tích ${slab.count} sàn = ${f3(slab.area)} m²`);
+  // Sàn/nền bóc từ hatch (đo thật, lọc outlier). Chỉ sinh dòng khi có ≥1 hatch
+  // đủ tin cậy — không có → không thêm dòng (finding riêng ở service).
+  const hs = hatchSlabStats(objects, factor);
+  if (hs.used >= 1 && hs.area > 0) {
+    const note = `${hs.used} mảng hatch (bỏ ${hs.dropped} ngoài ngưỡng ${HATCH_MIN_AREA}m²–${HATCH_MAX_SHARE * 100}%), tổng diện tích = ${f3(hs.area)} m²`;
+    push('slab', 'slab', 'm2', hs.area, note);
+    push('floor_finish', 'slab', 'm2', hs.area, note);
   }
 
   return rows;
@@ -643,7 +732,11 @@ export class TakeoffEngineService {
         : `Đơn giá: chưa có công bố giá tỉnh khớp địa điểm dự án — cột giá để trống (import tại /settings).`,
       '',
       rowsToMarkdownTable(rows),
+      '',
+      summarizeDetectedObjects(objects as unknown as EngineDrawingObject[]),
     ].join('\n');
+
+    const hs = hatchSlabStats(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit);
 
     const findings: ValidationFinding[] = missingCode.map((r, i) => ({
       id: `takeoff-engine-code-${i + 1}`,
@@ -696,6 +789,23 @@ export class TakeoffEngineService {
         detail: `${fallbackRows.length} công tác dùng mã phổ thông mặc định (TT12/2021) do chưa import định mức — cần kiểm chứng theo chỉ dẫn kỹ thuật; chưa có đơn giá.`,
       });
     }
+    if (hs.count > 0 && hs.used === 0) {
+      findings.push({
+        id: 'takeoff-engine-hatch-untrusted',
+        severity: 'warn',
+        area: 'quantity',
+        title: `Phát hiện ${hs.count} hatch nhưng không đủ tin cậy để bóc diện tích sàn`,
+        detail: `${hs.count} hatch đều bị loại (quá nhỏ < ${HATCH_MIN_AREA}m² là pattern ký hiệu, hoặc chiếm > ${HATCH_MAX_SHARE * 100}% tổng) — cần khoanh vùng nền thủ công rồi bóc lại. Engine KHÔNG bịa diện tích sàn.`,
+      });
+    } else if (hs.used > 0) {
+      findings.push({
+        id: 'takeoff-engine-hatch-slab',
+        severity: 'info',
+        area: 'quantity',
+        title: `Bóc diện tích sàn/nền từ ${hs.used} mảng hatch`,
+        detail: `Dùng ${hs.used}/${hs.count} hatch (bỏ ${hs.dropped} ngoài ngưỡng), tổng diện tích ${hs.area} m² — đo bằng shoelace từ hình học, không ước lượng.`,
+      });
+    }
     // đủ mã DB + đủ giá → 90; có mã web/mã phổ thông → 70; đủ mã DB thiếu giá → 75; thiếu mã hẳn → 55
     const softCode = webCode.length + fallbackRows.length;
     const score =
@@ -730,6 +840,9 @@ export class TakeoffEngineService {
           : []),
         `Đo hình học (polyline/shoelace/bbox) × ${input.unitsPerDrawingUnit} m/đơn vị.`,
         `Áp công thức cố định (tường/cột/dầm/cửa) với giả định người dùng.`,
+        ...(hs.count > 0
+          ? [`Hatch: ${hs.used}/${hs.count} mảng đủ tin cậy → diện tích sàn/nền ${hs.area} m² (bỏ ${hs.dropped} ngoài ngưỡng).`]
+          : []),
         `Tra mã định mức trong norm_items: ${rows.length - missingCode.length - webCode.length}/${rows.length} dòng có mã DB.`,
         ...(staleTakeoffs.length > 0 ? [`Thay thế ${staleTakeoffs.length} dòng bóc cũ.`] : []),
         ...(webLookedUp > 0
