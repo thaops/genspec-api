@@ -75,7 +75,9 @@ export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
 
 export interface TakeoffEngineRow {
   key: TakeoffRowKey;
-  group: string; // wall | column | beam | door | window | slab
+  group: string; // nhóm HÌNH HỌC: wall | column | beam | door | window | slab (dùng cho token [nhóm:x] + cleanup)
+  /** Nhóm công tác BOQ chuẩn TT13 để hiển thị header phân nhóm (upsert_takeoff.group). */
+  boqGroup: string;
   code: string;
   name: string;
   unit: string;
@@ -182,6 +184,60 @@ export const NORM_KEYWORDS: Record<TakeoffRowKey, string[]> = {
   slab: ['bê tông.*sàn'],
   floor_finish: ['lát nền', 'lát.*gạch', 'lát'],
 };
+
+/** Nhóm công tác BOQ chuẩn TT13/2021 cho mỗi dòng đo được. */
+export const BOQ_GROUP_THO = 'PHẦN THÔ - KẾT CẤU';
+export const BOQ_GROUP_FINISH = 'PHẦN HOÀN THIỆN';
+export const BOQ_GROUP_OTHER = 'PHẦN KHÁC';
+
+const BOQ_GROUP: Record<TakeoffRowKey, string> = {
+  wall_volume: BOQ_GROUP_THO,
+  column_concrete: BOQ_GROUP_THO,
+  column_formwork: BOQ_GROUP_THO,
+  beam_concrete: BOQ_GROUP_THO,
+  beam_formwork: BOQ_GROUP_THO,
+  slab: BOQ_GROUP_THO,
+  wall_area: BOQ_GROUP_FINISH,
+  wall_paint: BOQ_GROUP_FINISH,
+  floor_finish: BOQ_GROUP_FINISH,
+  door: BOQ_GROUP_FINISH,
+  window: BOQ_GROUP_FINISH,
+};
+
+/** Thứ tự trình bày nhóm BOQ (thô trước, hoàn thiện sau, khác cuối). */
+const BOQ_GROUP_ORDER = [BOQ_GROUP_THO, BOQ_GROUP_FINISH, BOQ_GROUP_OTHER];
+
+/**
+ * Tên hiển thị cột "Tên công tác": web/fallback LUÔN dùng tên chuẩn engine; tên DB
+ * chỉ dùng khi gọn (≤60 ký tự và ≤50% chữ viết hoa) — ngược lại rơi về tên chuẩn.
+ * Chống tên web "SB.82510 SƠN DẦM, TRẦN, CỘT, TƯỜNG TRONG NHÀ...". PURE.
+ */
+export function standardDisplayName(key: TakeoffRowKey, raw: string | undefined): string {
+  const std = DEFAULT_NAMES[key];
+  if (!raw) return std;
+  const letters = [...raw].filter((c) => c.toLowerCase() !== c.toUpperCase());
+  const uppers = letters.filter((c) => c === c.toUpperCase());
+  const upperRatio = letters.length ? uppers.length / letters.length : 0;
+  if (raw.length > 60 || upperRatio > 0.5) return std;
+  return raw;
+}
+
+/**
+ * Các đầu việc QS chuẩn KHÔNG bóc được từ bản KIẾN TRÚC — danh sách TĨNH, không
+ * phụ thuộc LLM. Chỉ để ghi chú minh bạch "cần bổ sung", KHÔNG sinh action/số.
+ */
+export const CHECKLIST_QS: { name: string; reason: string }[] = [
+  { name: 'Cốt thép cột/dầm/sàn/móng', reason: 'cần bản KẾT CẤU (KT.dwg là bản kiến trúc, không có thông tin thép)' },
+  { name: 'Đào đất, bê tông lót, móng', reason: 'cần bản kết cấu móng' },
+  { name: 'Điện, nước, PCCC', reason: 'cần bản MEP' },
+  { name: 'Cầu thang, lanh tô, mái, chống thấm', reason: 'cần bản chi tiết / khoanh vùng thủ công' },
+];
+
+/** Khối ghi chú "CẦN BỔ SUNG" — text thuần, KHÔNG phải công tác, KHÔNG có số. */
+export function renderChecklistQs(): string {
+  const lines = CHECKLIST_QS.map((c, i) => `${i + 1}. ${c.name} — ${c.reason}`);
+  return `CẦN BỔ SUNG (chưa bóc được từ bản kiến trúc — KHÔNG tạo số khống):\n${lines.join('\n')}`;
+}
 
 const DEFAULT_NAMES: Record<TakeoffRowKey, string> = {
   wall_area: 'Xây/trát tường',
@@ -334,27 +390,30 @@ export function computeTakeoffRows(
     let fallback: boolean | undefined;
     if (cand && cand.code && cand.fallback) {
       // Mã phổ thông mặc định (Edit bật) — badge vàng như web, KHÔNG có giá, KHÔNG 'government'.
+      // Tên hiển thị LUÔN dùng tên chuẩn engine (không lấy tên web dài/viết hoa).
       code = cand.code;
-      name = cand.name || name;
+      name = DEFAULT_NAMES[key];
       source = 'AI đề xuất mã phổ thông — cần kiểm chứng';
       note += ' ⚠ mã phổ thông mặc định — cần kiểm chứng';
       webSourced = true;
       fallback = true;
     } else if (cand && cand.code && cand.webSource) {
-      // Mã tra từ web: giữ tên chuẩn nếu web không có tên tốt hơn; nguồn "Web: …" — KHÔNG BAO GIỜ 'government'.
+      // Mã tra từ web: tên hiển thị LUÔN dùng tên chuẩn engine; tên web chỉ để đối
+      // chiếu (ghi ngắn trong Nguồn). Nguồn "Web: …" — KHÔNG BAO GIỜ 'government'.
       code = cand.code;
-      name = cand.name || name;
+      name = DEFAULT_NAMES[key];
       source = `Web: ${cand.webSource.title ?? cand.webSource.uri ?? 'nguồn web'}`;
       note += ' ⚠ mã tra từ web — cần kiểm chứng';
       webSourced = true;
     } else if (cand && cand.code) {
+      // Mã DB: giữ tên DB nếu gọn, chuẩn hoá về tên engine nếu lộn xộn/viết hoa dài.
       code = cand.code;
-      name = cand.name || name;
+      name = standardDisplayName(key, cand.name);
       source = cand.sourceDoc || 'định mức import';
     } else {
       note += ' ⚠ cần chọn mã — chưa import định mức';
     }
-    rows.push({ key, group, code, name, unit, quantity: q, note, source, ...(webSourced && { webSourced }), ...(fallback && { fallback }) });
+    rows.push({ key, group, boqGroup: BOQ_GROUP[key], code, name, unit, quantity: q, note, source, ...(webSourced && { webSourced }), ...(fallback && { fallback }) });
   };
 
   const wall = totals.get('wall');
@@ -430,10 +489,15 @@ export function computeTakeoffRows(
   // đủ tin cậy — không có → không thêm dòng (finding riêng ở service).
   const hs = hatchSlabStats(objects, factor);
   if (hs.used >= 1 && hs.area > 0) {
-    const note = `${hs.used} mảng hatch (bỏ ${hs.dropped} ngoài ngưỡng ${HATCH_MIN_AREA}m²–${HATCH_MAX_SHARE * 100}%), tổng diện tích = ${f3(hs.area)} m²`;
-    push('slab', 'slab', 'm2', hs.area, note);
-    push('floor_finish', 'slab', 'm2', hs.area, note);
+    const dropInfo = `${hs.used} mảng hatch (bỏ ${hs.dropped} ngoài ngưỡng ${HATCH_MIN_AREA}m²–${HATCH_MAX_SHARE * 100}%)`;
+    // Hai dòng bản chất khác nhau → diễn giải RIÊNG, không lặp nguyên văn.
+    push('slab', 'slab', 'm2', hs.area, `Diện tích sàn từ ${dropInfo} = ${f3(hs.area)} m² (BT sàn/mái)`);
+    push('floor_finish', 'slab', 'm2', hs.area, `Lát nền theo diện tích sàn = ${f3(hs.area)} m²`);
   }
+
+  // Sắp theo nhóm BOQ (thô → hoàn thiện → khác) để reducer/sheet hiển thị header
+  // phân nhóm; trong nhóm giữ nguyên thứ tự phát sinh (ổn định để STT phân cấp).
+  rows.sort((x, y) => BOQ_GROUP_ORDER.indexOf(x.boqGroup) - BOQ_GROUP_ORDER.indexOf(y.boqGroup));
 
   return rows;
 }
@@ -606,8 +670,22 @@ export class TakeoffEngineService {
     const allKeys = Object.keys(NORM_KEYWORDS) as TakeoffRowKey[];
     const normCandidates = await this.findNormCandidates(allKeys);
 
-    // Tầng fallback: dòng thiếu mã DB → tra web (grounded search, chống bịa 3 rào).
-    // Chỉ tra cho key thực sự sinh ra dòng (tính thử 1 lượt) — tránh đốt quota vô ích.
+    // Edit bật ("hoàn thiện bảng" 1 lệnh): dòng thiếu mã DB → gán mã phổ thông
+    // chuẩn (COMMON_FALLBACK_CODES) TRƯỚC web — mã chuẩn của engine thắng mã web
+    // lạc nhóm (vd web trả AF.12400 "BÊ TÔNG SÀN MÁI" cho slab chung). KHÔNG bịa giá.
+    let fallbackCount = 0;
+    if (input.editPermission) {
+      const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates);
+      for (const r of probe.filter((row) => !row.code)) {
+        const fb = COMMON_FALLBACK_CODES[r.key];
+        if (!fb) continue;
+        normCandidates[r.key] = { code: fb.code, name: fb.name, unit: '', fallback: true };
+        fallbackCount++;
+      }
+    }
+
+    // Tầng web: CHỈ tra cho dòng VẪN thiếu mã sau DB + fallback (nhóm chuẩn đã có
+    // fallback thắng ở trên) → grounded search, chống bịa 3 rào. Tránh đốt quota.
     let webLookedUp = 0;
     let webHitCount = 0;
     if (this.webLookup.enabled) {
@@ -630,19 +708,6 @@ export class TakeoffEngineService {
             };
           }
         }
-      }
-    }
-
-    // Edit bật ("hoàn thiện bảng" 1 lệnh): dòng VẪN thiếu mã sau DB + web → gán
-    // mã phổ thông mặc định (COMMON_FALLBACK_CODES). KHÔNG bịa giá. Badge vàng.
-    let fallbackCount = 0;
-    if (input.editPermission) {
-      const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates);
-      for (const r of probe.filter((row) => !row.code)) {
-        const fb = COMMON_FALLBACK_CODES[r.key];
-        if (!fb) continue;
-        normCandidates[r.key] = { code: fb.code, name: fb.name, unit: '', fallback: true };
-        fallbackCount++;
       }
     }
 
@@ -675,7 +740,7 @@ export class TakeoffEngineService {
     const takeoffActions: Action[] = rows.map((r) => ({
       type: 'upsert_takeoff',
       id: engineTakeoffId(r.key),
-      group: r.group,
+      group: r.boqGroup,
       code: r.code,
       name: r.name,
       unit: r.unit,
@@ -730,8 +795,11 @@ export class TakeoffEngineService {
       priceCtx
         ? `Đơn giá: ${pricedCount}/${rows.length} công tác gán từ công bố giá ${priceCtx.province} (${priceCtx.sourceDoc}, hiệu lực ${priceCtx.effectiveDate})${missingPrice.length ? `; ${missingPrice.length} công tác chưa có giá — cột giá để trống` : ''}.`
         : `Đơn giá: chưa có công bố giá tỉnh khớp địa điểm dự án — cột giá để trống (import tại /settings).`,
+      `BOQ hiện chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm công tác cần bản vẽ kết cấu/MEP để bóc đầy đủ.`,
       '',
       rowsToMarkdownTable(rows),
+      '',
+      renderChecklistQs(),
       '',
       summarizeDetectedObjects(objects as unknown as EngineDrawingObject[]),
     ].join('\n');
@@ -762,6 +830,15 @@ export class TakeoffEngineService {
         detail: `Toàn bộ ${rows.length} công tác gán đơn giá từ công bố giá ${priceCtx.province}, hiệu lực ${priceCtx.effectiveDate}.`,
       });
     }
+    // Minh bạch phạm vi: bản kiến trúc chỉ bóc được 1 phần BOQ — liệt kê nhóm còn thiếu.
+    // Đây là ghi chú (info), KHÔNG sinh action/số cho các mục cần bổ sung.
+    findings.push({
+      id: 'takeoff-engine-checklist-qs',
+      severity: 'info',
+      area: 'missing',
+      title: `BOQ chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm cần bản vẽ kết cấu/MEP`,
+      detail: `${renderChecklistQs()}`,
+    });
     if (factorOverridden) {
       findings.push({
         id: 'takeoff-engine-factor-override',

@@ -9,6 +9,7 @@ import { DrawingObject, DrawingObjectDocument } from '../schemas/drawing-object.
 import { CloudinaryService } from '../../storage/cloudinary.service';
 import { DrawingUploadedEvent } from '../../events/domain-events';
 import { DwgConverterService } from '../converters/dwg-converter.service';
+import { detectDiscipline, isDiscipline, Discipline } from '../discipline';
 
 // Queue is optional — only injected when REDIS_URL is set
 let Queue: typeof import('bullmq').Queue | undefined;
@@ -32,8 +33,11 @@ export class DrawingUploadService {
     private readonly dwgConverter: DwgConverterService,
   ) {}
 
-  async upload(estimateId: string, file: Express.Multer.File) {
+  async upload(estimateId: string, file: Express.Multer.File, discipline?: string) {
     const fileType = this.detectFileType(file.buffer, file.originalname);
+    const disc: Discipline = isDiscipline(discipline)
+      ? discipline
+      : detectDiscipline(file.originalname);
 
     // 1. Save buffer to tmp (parser needs filesystem access)
     const tmpPath = this.saveTmp(estimateId, file);
@@ -57,6 +61,7 @@ export class DrawingUploadService {
       estimateId,
       name: file.originalname,
       type: fileType,
+      discipline: disc,
       url: storageUrl,
       cloudinaryPublicId,
       parseStatus: 'pending',
@@ -69,6 +74,29 @@ export class DrawingUploadService {
     const jobId = await this.tryEnqueue(drawingId, estimateId, fileType, storageUrl, tmpPath);
 
     return { ...drawing.toObject(), id: drawingId, ...(jobId ? { jobId } : {}) };
+  }
+
+  /** Upload nhiều file tuần tự — mỗi file 1 record + 1 job. Trả mảng kết quả. */
+  async uploadMany(estimateId: string, files: Express.Multer.File[]) {
+    const results: any[] = [];
+    for (const file of files ?? []) {
+      results.push(await this.upload(estimateId, file));
+    }
+    return results;
+  }
+
+  /** User chỉnh tay bộ môn của một bản vẽ. */
+  async setDiscipline(estimateId: string, drawingId: string, discipline: string) {
+    if (!isDiscipline(discipline)) {
+      throw new NotFoundException(`Bộ môn không hợp lệ: ${discipline}`);
+    }
+    const result = await this.drawingModel.findOneAndUpdate(
+      { _id: drawingId, estimateId },
+      { discipline },
+      { new: true },
+    ).lean() as any;
+    if (!result) throw new NotFoundException('Drawing not found');
+    return { ...result, id: result._id.toString() };
   }
 
   async list(estimateId: string) {

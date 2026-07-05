@@ -1,9 +1,9 @@
 import {
-  Controller, Get, Post, Delete, Param, UploadedFile, UseGuards,
+  Controller, Get, Post, Patch, Delete, Param, UploadedFile, UploadedFiles, UseGuards,
   UseInterceptors, Body, Query, Res, InternalServerErrorException, NotFoundException,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import { DrawingSceneService } from './services/drawing-scene.service';
 import { DrawingUploadService } from './services/drawing-upload.service';
@@ -32,8 +32,29 @@ export class DrawingController {
   uploadDrawing(
     @Param('estimateId') estimateId: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body('discipline') discipline?: string,
   ) {
-    return this.upload.upload(estimateId, file);
+    return this.upload.upload(estimateId, file, discipline);
+  }
+
+  // Upload nhiều bản vẽ cùng lúc — tạo tuần tự, trả mảng drawing.
+  @Post('batch')
+  @UseInterceptors(FilesInterceptor('files'))
+  uploadDrawings(
+    @Param('estimateId') estimateId: string,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    return this.upload.uploadMany(estimateId, files);
+  }
+
+  // User chỉnh tay bộ môn của bản vẽ.
+  @Patch(':drawingId/discipline')
+  setDiscipline(
+    @Param('estimateId') estimateId: string,
+    @Param('drawingId') drawingId: string,
+    @Body('discipline') discipline: string,
+  ) {
+    return this.upload.setDiscipline(estimateId, drawingId, discipline);
   }
 
   @Get()

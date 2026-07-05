@@ -14,6 +14,9 @@ export class Drawing {
   @Prop({ required: true, enum: ['pdf', 'dwg', 'dxf', 'image'] })
   type: string;
 
+  @Prop({ enum: ['KT', 'KC', 'DIEN', 'NUOC', 'KHAC'], default: 'KHAC' })
+  discipline: string;
+
   @Prop({ required: true })
   url: string;
 
