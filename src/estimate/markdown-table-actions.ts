@@ -323,6 +323,165 @@ export function rowsToUpdateCells(
   return { actions, sheetName: sheet.name, startRow, endRow, formatAction, footnoteRow };
 }
 
+// ===== Code-assignment rescue =====
+// Model (edit mode) trả lời VĂN XUÔI dạng "1. Trát tường trong: AK.21214 (…)"
+// thay vì JSON actions → parse các cặp (tên, mã) và điền vào cột B của sheet.
+
+const CODE_RE = /[A-Z]{2}\.\d{4,5}[a-z]?/;
+const ASSIGNMENT_LINE_RE = new RegExp(
+  `^\\s*(?:\\d+[.)]\\s*|[-*•+]\\s+)?(.{2,80}?)\\s*:\\s*(?:\\*\\*)?(${CODE_RE.source})\\b`,
+);
+const NAME_STOPWORDS = new Set(['trong', 'ngoai', 'cac', 'loai']);
+const NHOM_TOKEN_RE = /\[nhóm:[^\]]+\]/;
+const WARN_CODE_RE = /⚠\s*cần chọn mã[^\[]*/g;
+
+/** Từ khoá chính của tên công tác: normalize, bỏ ngoặc, bỏ stopwords. */
+function nameKeywords(s: string): string[] {
+  return normalize(s.replace(/\([^)]*\)/g, ''))
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !NAME_STOPWORDS.has(w));
+}
+
+/**
+ * Điểm fuzzy-match 2 tên công tác: contains 2 chiều (sau normalize + bỏ
+ * stopwords) → 100 + số từ trùng; ngược lại số từ trùng nếu ≥2; else 0.
+ */
+function nameMatchScore(a: string, b: string): number {
+  const wa = nameKeywords(a);
+  const wb = nameKeywords(b);
+  if (wa.length === 0 || wb.length === 0) return 0;
+  const sa = wa.join(' ');
+  const sb = wb.join(' ');
+  const setB = new Set(wb);
+  const common = wa.filter((w) => setB.has(w)).length;
+  if (sa.includes(sb) || sb.includes(sa)) return 100 + common;
+  return common >= 2 ? common : 0;
+}
+
+export interface CodeAssignmentRescueResult {
+  actions: Action[];
+  matched: { name: string; code: string; row: number }[];
+  unmatched: { name: string; code: string }[];
+}
+
+/**
+ * Parse các dòng "N. <Tên công tác>: <MÃ>" trong văn xuôi của model → điền mã
+ * vào ô B (Mã hiệu) của dòng sheet khối lượng có tên (cột C) fuzzy-match,
+ * dọn cảnh báo "⚠ cần chọn mã" ở cột I, set Nguồn (H) và đồng bộ kho takeoff
+ * (upsert_takeoff giữ nguyên item, chỉ gắn code). Trả null nếu không parse
+ * được cặp nào / không có sheet.
+ */
+export function codeAssignmentsToUpdateCells(
+  message: string,
+  state: EstimateState,
+  sheetNameHint?: string,
+): CodeAssignmentRescueResult | null {
+  if (!message) return null;
+  // 1) Parse (tên, mã) từ văn xuôi
+  const assignments: { name: string; code: string }[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of message.split(/\r?\n/)) {
+    const line = rawLine.replace(/[`]/g, '');
+    const m = line.match(ASSIGNMENT_LINE_RE);
+    if (!m) continue;
+    const name = m[1].replace(/\([^)]*\)/g, '').replace(/[*_#]/g, '').trim();
+    const code = m[2];
+    if (!name || nameKeywords(name).length === 0) continue;
+    const key = `${normalize(name)}|${code}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    assignments.push({ name, code });
+  }
+  if (assignments.length === 0) return null;
+
+  const sheet = pickTargetSheet(state.sheets ?? [], sheetNameHint);
+  if (!sheet) return null;
+
+  // 2) Dòng dữ liệu sheet: cột C = tên công tác, B = mã hiện có
+  const last = lastOccupiedRow(sheet);
+  const rows: { row: number; name: string; code: string }[] = [];
+  for (let r = 2; r <= last; r++) {
+    const name = currentValueAt(sheet, `C${r}`);
+    if (!name.trim()) continue;
+    rows.push({ row: r, name, code: currentValueAt(sheet, `B${r}`).trim() });
+  }
+
+  const actions: Action[] = [];
+  const matched: { name: string; code: string; row: number }[] = [];
+  const unmatched: { name: string; code: string }[] = [];
+  const usedRows = new Set<number>();
+  const usedTakeoffIds = new Set<string>();
+
+  for (const { name, code } of assignments) {
+    // Ứng viên: dòng chưa có mã (B trống), chưa dùng, tên fuzzy-match
+    let best: { row: number; score: number } | null = null;
+    for (const row of rows) {
+      if (row.code !== '' || usedRows.has(row.row)) continue;
+      const score = nameMatchScore(name, row.name);
+      if (score > 0 && (!best || score > best.score)) best = { row: row.row, score };
+    }
+    if (!best) {
+      unmatched.push({ name, code });
+      continue;
+    }
+    const r = best.row;
+    usedRows.add(r);
+    matched.push({ name, code, row: r });
+
+    // Ô B: mã hiệu
+    actions.push({
+      type: 'update_cells',
+      sheetId: sheet.id,
+      cell: `B${r}`,
+      oldValue: currentValueAt(sheet, `B${r}`),
+      newValue: code,
+    });
+
+    // Ô I: xoá "⚠ cần chọn mã…" (giữ công thức + token [nhóm:])
+    const oldNote = currentValueAt(sheet, `I${r}`);
+    const cleanedNote = oldNote.replace(WARN_CODE_RE, '').replace(/\s{2,}/g, ' ').trim();
+    if (cleanedNote !== oldNote) {
+      actions.push({
+        type: 'update_cells',
+        sheetId: sheet.id,
+        cell: `I${r}`,
+        oldValue: oldNote,
+        newValue: cleanedNote,
+      });
+    }
+
+    // Ô H: nguồn "—" → "AI đề xuất — cần kiểm chứng"
+    const oldSource = currentValueAt(sheet, `H${r}`);
+    if (oldSource.trim() === '—' || oldSource.trim() === '') {
+      actions.push({
+        type: 'update_cells',
+        sheetId: sheet.id,
+        cell: `H${r}`,
+        oldValue: oldSource,
+        newValue: 'AI đề xuất — cần kiểm chứng',
+      });
+    }
+
+    // Đồng bộ kho takeoff: item có note chứa cùng token [nhóm:] + tên khớp
+    const token = NHOM_TOKEN_RE.exec(oldNote)?.[0];
+    if (token) {
+      const item = (state.takeoff ?? []).find(
+        (t) =>
+          !usedTakeoffIds.has(t.id) &&
+          (t.note ?? '').includes(token) &&
+          nameMatchScore(name, t.name) > 0,
+      );
+      if (item) {
+        usedTakeoffIds.add(item.id);
+        actions.push({ type: 'upsert_takeoff', ...item, code });
+      }
+    }
+  }
+
+  if (matched.length === 0 && unmatched.length === 0) return null;
+  return { actions, matched, unmatched };
+}
+
 /**
  * upsert_takeoff ghi vào kho takeoff có cấu trúc (nguồn cho F1 export) nhưng
  * KHÔNG hiển thị trên sheet Univer — mirror mỗi item thành các ô nhìn thấy

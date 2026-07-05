@@ -59,6 +59,8 @@ const PRICE_INTENT = /(gia|don gia|vat lieu|vat tu|dinh muc|du toan|lap|boc|khoi
 const TAKEOFF_INTENT = /(bóc|boc)\s*(tách|tach)?\s*(khối lượng|khoi luong)|\btakeoff\b/i;
 // Prompt cấu trúc ⚡ từ FE — cũng route engine cho an toàn (dù FE đã có đường REST riêng).
 const TAKEOFF_ACTION = /\[ACTION:\s*generate[_-]?takeoff/i;
+// Câu xác nhận ngắn — với Edit bật là lệnh thực thi, không phải câu hỏi đọc.
+const CONFIRM_INTENT = /(lam di|lam luon|ap dung|dong y|chot|duyet|\bok(e)?\b|\byes\b|confirm)/i;
 
 // Quy đổi đơn vị bản vẽ ($INSUNITS) → mét — port từ FE DrawingWorkspace.
 const INSUNITS_TO_METERS: Record<string, number> = { mm: 0.001, m: 1, inch: 0.0254 };
@@ -466,6 +468,9 @@ Trả về 6-8 kết quả chính xác nhất, mới nhất. trustScore từ 70-
     // edit, not a research question. Without this the WEB_LEGAL check below
     // hijacks the request into read mode and the model nags "bật Edit".
     if (editPermission && (EDIT_INTENT.test(message) || EDIT_INTENT.test(norm))) return 'edit';
+    // Short confirmations ("oke làm đi", "áp dụng", "chốt") with edit ON are
+    // orders to execute the agent's own last suggestion — never read questions.
+    if (editPermission && message.trim().length <= 40 && CONFIRM_INTENT.test(norm)) return 'edit';
     // Web/legal questions always go to read — even if message contains "kiểm tra"
     if (WEB_LEGAL_INTENT.test(message) || WEB_LEGAL_INTENT.test(norm)) return 'read';
     // If user has a cell selected, treat as focused read unless edit action is explicit

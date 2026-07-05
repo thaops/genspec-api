@@ -12,7 +12,7 @@ import { buildTrace } from '../trace';
 import { previewActions } from '../transparency';
 import { validate } from '../validation';
 import { CitationEngineService } from '../sources/citation-engine';
-import { tableToUpdateCellsDetailed, takeoffActionsToUpdateCells } from '../markdown-table-actions';
+import { codeAssignmentsToUpdateCells, tableToUpdateCellsDetailed, takeoffActionsToUpdateCells } from '../markdown-table-actions';
 import { CONCRETE_NORMS, STEEL_NORMS } from '../knowledge/qs-standards';
 import { getChecklistForBuilding } from '../knowledge/work-checklist';
 
@@ -273,6 +273,29 @@ export class EditModeHandler {
       }
     }
 
+    // Code-assignment rescue: model trả văn xuôi "1. Tên công tác: MÃ (…)" thay
+    // vì JSON actions → điền mã vào cột B của sheet + đồng bộ kho takeoff.
+    if (reply.actions.length === 0) {
+      const candidates = [reply.message, fullText, fallbackRaw].filter(Boolean);
+      for (const text of candidates) {
+        const rescue = codeAssignmentsToUpdateCells(text, state);
+        if (!rescue || rescue.actions.length === 0) continue;
+        const n = rescue.matched.length;
+        const note = `Điền ${n} mã hiệu từ đề xuất của AI vào sheet`;
+        const baseMessage =
+          reply.message ||
+          text.replace(/^\s*STEP:.*$/gim, '').replace(/JSON:[\s\S]*$/i, '').trim();
+        reply = {
+          ...reply,
+          message: `${baseMessage}\n\n✏️ Đã điền ${n} mã vào cột Mã hiệu (nguồn: AI đề xuất — cần kiểm chứng).`,
+          actions: rescue.actions,
+          thinking: [...reply.thinking, note],
+        };
+        yield { event: 'step', data: { text: note } };
+        break;
+      }
+    }
+
     // parse() failure replaces the model's prose with a generic apology — surface
     // the actual prose instead (better answer for the user AND lets the
     // brag-guard below see what the model really claimed).
@@ -424,6 +447,7 @@ export class EditModeHandler {
       'Làm đúng yêu cầu, không thêm không bớt. Nếu thiếu thông tin thực sự cần thiết → hỏi ngắn gọn 1 câu.',
       'Mọi action phải có source trung thực (ai_estimate nếu tự suy luận).',
       "TUYỆT ĐỐI KHÔNG nói 'đã ghi/đã đẩy vào sheet' — bạn chỉ TẠO ĐỀ XUẤT; thay đổi chỉ xảy ra qua JSON actions. Nếu tạo bảng khối lượng, PHẢI xuất JSON actions update_cells tương ứng.",
+      'Khi user yêu cầu điền/sửa mã hiệu: CHỌN phương án phổ biến nhất và XUẤT JSON actions ngay (update_cells cột Mã hiệu), nêu giả định trong message — KHÔNG dừng lại hỏi trừ khi thật sự không thể chọn.',
       '',
       history ? `LỊCH SỬ:\n${history}` : '',
       '',
