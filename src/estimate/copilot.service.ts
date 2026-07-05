@@ -150,7 +150,22 @@ export class CopilotService {
 
     if (!isNonPriceEdit && (PRICE_INTENT.test(message) || isEmpty)) {
       yield { event: 'step', data: { text: 'Thu thập dữ liệu giá thị trường…' } };
-      research = await this.ai.research(this.researchQuery(state, message));
+      // Heartbeat every 3s so the UI never sits silent during the ~20s
+      // grounded-search wait — the user must see movement within a second.
+      const researchPromise = this.ai.research(this.researchQuery(state, message));
+      const t0 = Date.now();
+      for (;;) {
+        const winner = await Promise.race([
+          researchPromise.then((r) => ({ r })),
+          new Promise<null>((res) => setTimeout(() => res(null), 3000)),
+        ]);
+        if (winner) {
+          research = winner.r;
+          break;
+        }
+        const s = Math.round((Date.now() - t0) / 1000);
+        yield { event: 'step', data: { text: `Đang tra cứu giá thị trường trên web… (${s}s)` } };
+      }
       yield { event: 'step', data: { text: `Tham chiếu ${research.sources.length} nguồn giá` } };
     }
 
