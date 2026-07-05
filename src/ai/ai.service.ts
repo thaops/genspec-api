@@ -18,10 +18,13 @@ export class AiService {
 
   constructor(private readonly config: ConfigService) {
     this.geminiKey = this.config.get<string>('GEMINI_API_KEY');
-    const estimate = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.5-flash';
-    const search = this.config.get<string>('GEMINI_SEARCH_MODEL') ?? 'gemini-2.5-flash';
-    this.geminiEstimateModels = [...new Set([estimate, 'gemini-2.5-flash-lite', 'gemini-flash-latest'])];
-    this.geminiSearchModels = [...new Set([search, 'gemini-2.5-flash-lite', 'gemini-flash-latest'])];
+    // Model mới nhất: Gemini 3 Flash. Nếu tên chưa mở cho tier của key →
+    // fallback tự rơi về gemini-flash-latest (luôn trỏ bản Flash mới nhất) →
+    // gemini-2.5-flash. Override qua env GEMINI_MODEL/GEMINI_SEARCH_MODEL.
+    const estimate = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-3-flash';
+    const search = this.config.get<string>('GEMINI_SEARCH_MODEL') ?? 'gemini-3-flash';
+    this.geminiEstimateModels = [...new Set([estimate, 'gemini-flash-latest', 'gemini-2.5-flash'])];
+    this.geminiSearchModels = [...new Set([search, 'gemini-flash-latest', 'gemini-2.5-flash'])];
     // -1 = dynamic (model decides), 0 = off
     this.thinkingBudget = Number(this.config.get<string>('GEMINI_THINKING_BUDGET') ?? -1);
     if (!this.geminiKey) {

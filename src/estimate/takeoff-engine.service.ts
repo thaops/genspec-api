@@ -35,7 +35,26 @@ export interface NormCandidate {
   components?: { kind?: string; refCode?: string; name: string; unit?: string; norm: number }[];
   /** Có mặt = mã tra từ WEB (grounded search) chứ không phải DB — cần kiểm chứng. */
   webSource?: { title?: string; uri?: string };
+  /** Mã phổ thông mặc định (COMMON_FALLBACK_CODES) khi Edit bật — cần kiểm chứng, KHÔNG có giá. */
+  fallback?: boolean;
 }
+
+/**
+ * Mã phổ thông mặc định theo TT12/2021 — dùng khi Edit bật và dòng vẫn thiếu mã
+ * (không có DB, không tra được web) để "hoàn thiện bảng" 1 lệnh. Chỉ mã + tên
+ * chuẩn, KHÔNG kèm giá; nguồn ghi rõ "AI đề xuất mã phổ thông — cần kiểm chứng".
+ */
+export const COMMON_FALLBACK_CODES: Record<TakeoffRowKey, { code: string; name: string }> = {
+  wall_area: { code: 'AK.21110', name: 'Trát tường' },
+  wall_volume: { code: 'AE.62210', name: 'Xây tường gạch' },
+  column_concrete: { code: 'AF.61520', name: 'Bê tông cột đá 1x2 M250' },
+  column_formwork: { code: 'AF.86411', name: 'Ván khuôn cột' },
+  beam_concrete: { code: 'AF.61620', name: 'Bê tông dầm đá 1x2 M250' },
+  beam_formwork: { code: 'AF.86511', name: 'Ván khuôn dầm' },
+  door: { code: 'AH.11120', name: 'Cửa đi' },
+  window: { code: 'AH.12110', name: 'Cửa sổ' },
+  slab: { code: 'AF.61720', name: 'Bê tông sàn đá 1x2 M250' },
+};
 
 export type TakeoffRowKey =
   | 'wall_area'
@@ -67,6 +86,8 @@ export interface TakeoffEngineRow {
   totalPrice?: number;
   /** true = mã tra từ web (không phải norm_items DB) — không tính là "đủ mã" cho score 90. */
   webSourced?: boolean;
+  /** true = mã phổ thông mặc định (COMMON_FALLBACK_CODES) — cần kiểm chứng, không có giá. */
+  fallback?: boolean;
 }
 
 // ===== Pricing (pure — verify script gọi trực tiếp, không Mongo) =====
@@ -233,7 +254,16 @@ export function computeTakeoffRows(
     let name = DEFAULT_NAMES[key];
     let source = '—';
     let webSourced: boolean | undefined;
-    if (cand && cand.code && cand.webSource) {
+    let fallback: boolean | undefined;
+    if (cand && cand.code && cand.fallback) {
+      // Mã phổ thông mặc định (Edit bật) — badge vàng như web, KHÔNG có giá, KHÔNG 'government'.
+      code = cand.code;
+      name = cand.name || name;
+      source = 'AI đề xuất mã phổ thông — cần kiểm chứng';
+      note += ' ⚠ mã phổ thông mặc định — cần kiểm chứng';
+      webSourced = true;
+      fallback = true;
+    } else if (cand && cand.code && cand.webSource) {
       // Mã tra từ web: giữ tên chuẩn nếu web không có tên tốt hơn; nguồn "Web: …" — KHÔNG BAO GIỜ 'government'.
       code = cand.code;
       name = cand.name || name;
@@ -247,7 +277,7 @@ export function computeTakeoffRows(
     } else {
       note += ' ⚠ cần chọn mã — chưa import định mức';
     }
-    rows.push({ key, group, code, name, unit, quantity: q, note, source, ...(webSourced && { webSourced }) });
+    rows.push({ key, group, code, name, unit, quantity: q, note, source, ...(webSourced && { webSourced }), ...(fallback && { fallback }) });
   };
 
   const wall = totals.get('wall');
@@ -348,6 +378,8 @@ export interface TakeoffEngineInput {
   rejectedObjectIds?: string[];
   /** Vùng bóc (world coords): chỉ đo đối tượng có tâm bbox nằm trong vùng. */
   region?: { x: number; y: number; w: number; h: number };
+  /** Edit bật → dòng vẫn thiếu mã sau web lookup được gán mã phổ thông mặc định. */
+  editPermission?: boolean;
 }
 
 @Injectable()
@@ -512,6 +544,19 @@ export class TakeoffEngineService {
       }
     }
 
+    // Edit bật ("hoàn thiện bảng" 1 lệnh): dòng VẪN thiếu mã sau DB + web → gán
+    // mã phổ thông mặc định (COMMON_FALLBACK_CODES). KHÔNG bịa giá. Badge vàng.
+    let fallbackCount = 0;
+    if (input.editPermission) {
+      const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates);
+      for (const r of probe.filter((row) => !row.code)) {
+        const fb = COMMON_FALLBACK_CODES[r.key];
+        if (!fb) continue;
+        normCandidates[r.key] = { code: fb.code, name: fb.name, unit: '', fallback: true };
+        fallbackCount++;
+      }
+    }
+
     const bareRows = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates);
 
     // Giá THẬT từ price_set tỉnh mới nhất khớp projectInfo.location — không có thì cột giá trống.
@@ -575,7 +620,8 @@ export class TakeoffEngineService {
 
     const groups = [...new Set(rows.map((r) => r.group))];
     const missingCode = rows.filter((r) => !r.code);
-    const webCode = rows.filter((r) => r.webSourced);
+    const fallbackRows = rows.filter((r) => r.fallback);
+    const webCode = rows.filter((r) => r.webSourced && !r.fallback);
     const missingPrice = rows.filter((r) => r.unitPrice == null);
     const pricedCount = rows.length - missingPrice.length;
     const message = [
@@ -585,6 +631,11 @@ export class TakeoffEngineService {
       ...(webCode.length > 0
         ? [
             `Mã hiệu: ${webCode.length} công tác không có trong norm_items — đã tra từ web (grounded search, chậm hơn bình thường); mã web CẦN KIỂM CHỨNG trước khi dùng.`,
+          ]
+        : []),
+      ...(fallbackRows.length > 0
+        ? [
+            `Đã điền mã phổ thông cho ${fallbackRows.length} dòng (cần kiểm chứng theo chỉ dẫn kỹ thuật) — chưa có đơn giá vì chưa import giá tỉnh.`,
           ]
         : []),
       priceCtx
@@ -636,9 +687,19 @@ export class TakeoffEngineService {
         detail: `${webCode.length} mã tra từ web — kiểm chứng trước khi dùng; import bộ định mức để có nguồn chính thống.`,
       });
     }
-    // đủ mã DB + đủ giá → 90; có mã web → 70; đủ mã DB thiếu giá → 75; thiếu mã hẳn → 55
+    if (fallbackRows.length > 0) {
+      findings.push({
+        id: 'takeoff-engine-fallback-code',
+        severity: 'warn',
+        area: 'missing',
+        title: `${fallbackRows.length} mã phổ thông mặc định — cần kiểm chứng`,
+        detail: `${fallbackRows.length} công tác dùng mã phổ thông mặc định (TT12/2021) do chưa import định mức — cần kiểm chứng theo chỉ dẫn kỹ thuật; chưa có đơn giá.`,
+      });
+    }
+    // đủ mã DB + đủ giá → 90; có mã web/mã phổ thông → 70; đủ mã DB thiếu giá → 75; thiếu mã hẳn → 55
+    const softCode = webCode.length + fallbackRows.length;
     const score =
-      missingCode.length > 0 ? 55 : webCode.length > 0 ? 70 : missingPrice.length > 0 ? 75 : 90;
+      missingCode.length > 0 ? 55 : softCode > 0 ? 70 : missingPrice.length > 0 ? 75 : 90;
     const validation: ValidationReport = {
       status: score === 90 ? 'reasonable' : 'warning',
       score,

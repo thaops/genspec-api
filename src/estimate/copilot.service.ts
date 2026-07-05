@@ -122,7 +122,7 @@ export class CopilotService {
     // "Bóc khối lượng" + có bản vẽ → deterministic engine, KHÔNG bao giờ để LLM ước lượng khối lượng.
     const normMsg = normalizeVi(message);
     if (drawingId && (TAKEOFF_INTENT.test(message) || TAKEOFF_INTENT.test(normMsg) || TAKEOFF_ACTION.test(message))) {
-      yield* this.runTakeoffEngine(userId, id, doc, drawingId, calibrationFactor);
+      yield* this.runTakeoffEngine(userId, id, doc, drawingId, calibrationFactor, editPermission);
       return;
     }
 
@@ -187,6 +187,7 @@ export class CopilotService {
     doc: unknown,
     drawingId: string,
     calibrationFactor?: number,
+    editPermission = false,
   ): AsyncGenerator<StreamEvent> {
     yield { event: 'step', data: { text: 'Đo hình học bằng engine (không dùng AI ước lượng)…' } };
 
@@ -240,6 +241,7 @@ export class CopilotService {
         drawingId,
         unitsPerDrawingUnit: factor,
         assumptions: { ...DEFAULT_TAKEOFF_ASSUMPTIONS },
+        editPermission,
       });
       result.thinking.unshift(
         `Chat "bóc khối lượng" route thẳng engine — tỉ lệ ${factor} m/đơn vị (${src}); giả định MẶC ĐỊNH cao tầng 3.3m, dày tường 0.2m, cao dầm 0.4m (chỉnh trong popover ⚡ nếu khác).`,

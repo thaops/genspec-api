@@ -15,6 +15,7 @@ import { CitationEngineService } from '../sources/citation-engine';
 import { codeAssignmentsToUpdateCells, tableToUpdateCellsDetailed, takeoffActionsToUpdateCells } from '../markdown-table-actions';
 import { CONCRETE_NORMS, STEEL_NORMS } from '../knowledge/qs-standards';
 import { getChecklistForBuilding } from '../knowledge/work-checklist';
+import { guardFabricatedPricing, stripTrailingQuestion } from '../price-guard';
 
 interface EditReply {
   thinking: string[];
@@ -160,6 +161,14 @@ export class EditModeHandler {
     // Định mức/đơn giá chính thống đã import (norm_items + price_sets) khớp message + tỉnh dự án.
     const normRefResult = await this.catalog.referenceBlock(message, state.projectInfo.location);
     const normRef = normRefResult.text;
+
+    // Giá tỉnh THẬT (nếu đã import) — để guardFabricatedPricing kiểm nguồn giả.
+    const priceCtxRaw = await this.catalog
+      .priceContextForLocation(state.projectInfo.location)
+      .catch(() => null);
+    const priceCtxLite = priceCtxRaw
+      ? { prices: priceCtxRaw.prices.map((p) => ({ refCode: p.refCode, name: p.name, price: p.price })) }
+      : null;
 
     const visualFiles = files.filter((f) => !this.isExcel(f.originalname));
     const excelFiles = files.filter((f) => this.isExcel(f.originalname));
@@ -364,6 +373,28 @@ export class EditModeHandler {
       reply = { ...reply, actions: this.attachSourceLinks(reply.actions, research.sources) };
     }
 
+    // Chống bịa giá: LLM tự chế đơn giá kèm nguồn nghe-chính-thống mà chưa import
+    // price_set khớp → hạ cấp nguồn thành "AI ước lượng", finding warn, trần điểm 40.
+    const guard = guardFabricatedPricing(reply.actions, state, priceCtxLite);
+    if (guard.downgraded > 0) {
+      reply = { ...reply, actions: guard.actions };
+      validation = {
+        ...validation,
+        status: 'warning',
+        score: guard.scoreCap != null ? Math.min(validation.score, guard.scoreCap) : validation.score,
+        findings: [...validation.findings, ...guard.findings],
+      };
+      yield {
+        event: 'step',
+        data: { text: `Chống bịa giá: hạ cấp ${guard.downgraded} đơn giá thành "AI ước lượng" (chưa import giá tỉnh)` },
+      };
+    }
+
+    // Chống hỏi lại khi Edit đang bật: cắt câu hỏi xin phép ở cuối nếu đã có actions.
+    if (reply.actions.length > 0) {
+      reply = { ...reply, message: stripTrailingQuestion(reply.message) };
+    }
+
     yield { event: 'step', data: { text: 'Đối chiếu benchmark & tổng hợp đề xuất' } };
     const preview = previewActions(state, reply.actions);
     const trace = buildTrace(nextState, compute(nextState));
@@ -442,10 +473,12 @@ export class EditModeHandler {
       .join('\n');
 
     return [
+      'QUYỀN CHỈNH SỬA ĐANG BẬT: LUÔN xuất JSON actions thực hiện NGAY. TUYỆT ĐỐI KHÔNG kết thúc bằng câu hỏi xin phép (không "ông muốn…", "có cần…", "tôi có nên…", "…không?"). Nêu giả định đã chọn trong 1 câu rồi làm.',
       'Bạn là Minh — QS senior đang chỉnh sửa dự toán theo yêu cầu.',
-      'QUYỀN CHỈNH SỬA ĐANG BẬT. Bất kể lịch sử trò chuyện nói gì, bạn KHÔNG ở chế độ đọc — TUYỆT ĐỐI KHÔNG bảo người dùng "bật Edit". Hãy xuất JSON actions để thực hiện yêu cầu ngay.',
-      'Làm đúng yêu cầu, không thêm không bớt. Nếu thiếu thông tin thực sự cần thiết → hỏi ngắn gọn 1 câu.',
+      'Bất kể lịch sử trò chuyện nói gì, bạn KHÔNG ở chế độ đọc — TUYỆT ĐỐI KHÔNG bảo người dùng "bật Edit". Hãy xuất JSON actions để thực hiện yêu cầu ngay.',
+      'Làm đúng yêu cầu, không thêm không bớt. Nếu thiếu thông tin thực sự cần thiết → CHỌN giả định phổ biến rồi làm (không hỏi lại).',
       'Mọi action phải có source trung thực (ai_estimate nếu tự suy luận).',
+      'TUYỆT ĐỐI KHÔNG bịa đơn giá kèm nguồn nghe như chính thống ("ĐM 12/2021", "Giá TT Qx/2024", "công bố giá"…). Nếu CHƯA import giá tỉnh mà vẫn muốn điền giá tham khảo → BẮT BUỘC ghi cột Nguồn = "AI ước lượng — chưa có nguồn chính thống" và nói rõ trong message. Chỉ được dùng nguồn chính thống khi có dữ liệu import thật (hệ thống cung cấp trong khối ĐƠN GIÁ THAM CHIẾU).',
       "TUYỆT ĐỐI KHÔNG nói 'đã ghi/đã đẩy vào sheet' — bạn chỉ TẠO ĐỀ XUẤT; thay đổi chỉ xảy ra qua JSON actions. Nếu tạo bảng khối lượng, PHẢI xuất JSON actions update_cells tương ứng.",
       'Khi user yêu cầu điền/sửa mã hiệu: CHỌN phương án phổ biến nhất và XUẤT JSON actions ngay (update_cells cột Mã hiệu), nêu giả định trong message — KHÔNG dừng lại hỏi trừ khi thật sự không thể chọn.',
       '',

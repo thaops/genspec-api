@@ -91,6 +91,11 @@ export class TakeoffEngineDto {
   @ValidateNested()
   @Type(() => TakeoffRegionDto)
   region?: TakeoffRegionDto;
+
+  /** ⚡ là hành động chỉnh sửa → dòng thiếu mã được gán mã phổ thông mặc định. */
+  @IsOptional()
+  @IsBoolean()
+  editPermission?: boolean;
 }
 
 export class CopilotDto {

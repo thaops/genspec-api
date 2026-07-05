@@ -86,7 +86,8 @@ export class EstimateController {
     @Param('id') id: string,
     @Body() dto: TakeoffEngineDto,
   ) {
-    return this.takeoffEngine.run(userId, id, dto);
+    // ⚡ là hành động chỉnh sửa (chỉ trả proposal, không tự apply) → bật fallback mã phổ thông mặc định trừ khi FE tắt.
+    return this.takeoffEngine.run(userId, id, { ...dto, editPermission: dto.editPermission ?? true });
   }
 
   /** Streaming copilot (SSE): live `step` events then a `proposal` (NOT applied). */
