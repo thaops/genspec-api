@@ -115,7 +115,12 @@ export class PriceWebLookupService {
     return this.config.get<string>('PRICE_WEB_LOOKUP') !== 'off' && this.ai.available;
   }
 
-  /** Tra song song đơn giá cho nhiều công tác. Lỗi → null (không throw). */
+  /**
+   * Tra đơn giá cho nhiều công tác với CONCURRENCY GIỚI HẠN (không burst) — key
+   * Gemini free tier hết quota (429) nếu bắn 9 lookup×2 call cùng lúc. Chạy pool
+   * nhỏ + cache: mỗi lần bóc điền được vài dòng, cache lại → lần sau đỡ tốn quota,
+   * dần dần đủ. Bật billing thì tăng POOL lên cho nhanh. Lỗi → null (không throw).
+   */
   async lookupPrices(
     queries: WebPriceQuery[],
     province?: string,
@@ -125,15 +130,21 @@ export class PriceWebLookupService {
       queries.forEach((q) => out.set(q.key, null));
       return out;
     }
-    const settled = await Promise.allSettled(
-      queries.map((q) =>
-        Promise.race([
-          this.lookupOne(q, province),
+    const POOL = Number(this.config.get<string>('PRICE_WEB_CONCURRENCY') ?? 2);
+    let idx = 0;
+    const worker = async () => {
+      for (;;) {
+        const i = idx++;
+        if (i >= queries.length) return;
+        const q = queries[i];
+        const v = await Promise.race([
+          this.lookupOne(q, province).catch(() => null),
           new Promise<WebPriceHit | null>((r) => setTimeout(() => r(null), LOOKUP_TIMEOUT_MS)),
-        ]),
-      ),
-    );
-    settled.forEach((s, i) => out.set(queries[i].key, s.status === 'fulfilled' ? s.value : null));
+        ]);
+        out.set(q.key, v);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, POOL) }, () => worker()));
     return out;
   }
 
@@ -182,14 +193,20 @@ export class PriceWebLookupService {
       `[WebPrice] "${q.workName}" (${province ?? '-'}) → sources=${sources.length}, price=${hit?.unitPrice ?? '-'}, fail=${hit ? 'none' : reason}`,
     );
 
-    const expireAt = new Date(Date.now() + (hit ? HIT_TTL_MS : MISS_TTL_MS));
-    await this.cacheModel
-      .updateOne(
-        { key: cacheKey },
-        { $set: { hit, sources, expireAt }, $setOnInsert: { createdAt: new Date() } },
-        { upsert: true },
-      )
-      .catch((e) => this.logger.warn(`web_price_cache write failed: ${(e as Error).message}`));
+    // KHÔNG cache khi grounding rỗng (sources=0) — thường do 429 quota/lỗi tạm,
+    // cache miss sẽ chặn retry ở lần bóc sau. Chỉ cache hit, hoặc miss THẬT
+    // (có grounding nhưng web không có giá rõ → not-found/range/literal).
+    const shouldCache = !!hit || sources.length > 0;
+    if (shouldCache) {
+      const expireAt = new Date(Date.now() + (hit ? HIT_TTL_MS : MISS_TTL_MS));
+      await this.cacheModel
+        .updateOne(
+          { key: cacheKey },
+          { $set: { hit, sources, expireAt }, $setOnInsert: { createdAt: new Date() } },
+          { upsert: true },
+        )
+        .catch((e) => this.logger.warn(`web_price_cache write failed: ${(e as Error).message}`));
+    }
     return hit;
   }
 }

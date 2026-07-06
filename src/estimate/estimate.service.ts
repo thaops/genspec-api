@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as ExcelJS from 'exceljs';
@@ -62,6 +62,7 @@ export function toEstimateDto(doc: EstimateDocument) {
 
 @Injectable()
 export class EstimateService {
+  private readonly logger = new Logger(EstimateService.name);
   constructor(
     @InjectModel(Estimate.name) private readonly model: Model<EstimateDocument>,
     @InjectModel(Drawing.name) private readonly drawingModel: Model<DrawingDocument>,
@@ -248,17 +249,30 @@ export class EstimateService {
     return toEstimateDto(doc);
   }
 
-  /** Single mutation path — manual edits and AI-confirmed proposals both flow through here. */
+  /** Single mutation path — manual edits and AI-confirmed proposals both flow through here.
+   *  Retry khi đụng VersionError (2 apply ghi đồng thời vào cùng estimate — vd apply
+   *  proposal + workbook auto-save): reload doc + reduce lại trên state MỚI NHẤT rồi save. */
   async applyActions(userId: string, id: string, actions: Action[], src: 'ai' | 'manual' = 'manual') {
-    const doc = await this.getOwned(userId, id);
-    const before = stateOf(doc);
-    const { state, applied, warnings } = applyActions(before, actions);
-    const patch = generatePatch(before, actions, src);
-    state.patchHistory = [...(before.patchHistory ?? []), patch].slice(-100);
-    const log = buildActivity(before, actions, new Date().toISOString(), src);
-    doc.activityLog = [...(doc.activityLog ?? []), ...log].slice(-200);
-    const estimate = await this.saveState(doc, state);
-    return { estimate, applied, warnings };
+    const MAX_RETRY = 4;
+    for (let attempt = 0; ; attempt++) {
+      const doc = await this.getOwned(userId, id);
+      const before = stateOf(doc);
+      const { state, applied, warnings } = applyActions(before, actions);
+      const patch = generatePatch(before, actions, src);
+      state.patchHistory = [...(before.patchHistory ?? []), patch].slice(-100);
+      const log = buildActivity(before, actions, new Date().toISOString(), src);
+      doc.activityLog = [...(doc.activityLog ?? []), ...log].slice(-200);
+      try {
+        const estimate = await this.saveState(doc, state);
+        return { estimate, applied, warnings };
+      } catch (err) {
+        if ((err as Error)?.name === 'VersionError' && attempt < MAX_RETRY) {
+          this.logger.warn(`applyActions VersionError on ${id} — retry ${attempt + 1}/${MAX_RETRY}`);
+          continue; // doc bị ghi đè giữa chừng → đọc lại state mới nhất rồi apply lại
+        }
+        throw err;
+      }
+    }
   }
 
   /** Dry-run preview of a batch of actions (no persistence) — for the AI change preview. */
