@@ -12,6 +12,7 @@ import { EstimateService } from './estimate.service';
 import { Action, EstimateState, ValidationFinding, ValidationReport } from './estimate.types';
 import { rowsToUpdateCells } from './markdown-table-actions';
 import { NormWebLookupService } from './norm-web-lookup.service';
+import { PriceWebLookupService, WebPriceHit } from './price-web-lookup.service';
 import { previewActions } from './transparency';
 
 // ===== Pure core (không Mongo — verify script gọi trực tiếp từ dist) =====
@@ -144,6 +145,8 @@ export interface TakeoffEngineRow {
   webSourced?: boolean;
   /** true = mã phổ thông mặc định (COMMON_FALLBACK_CODES) — cần kiểm chứng, không có giá. */
   fallback?: boolean;
+  /** true = ĐƠN GIÁ tra từ web (không phải công bố giá tỉnh) — cần kiểm chứng. */
+  pricedFromWeb?: boolean;
 }
 
 // ===== Pricing (pure — verify script gọi trực tiếp, không Mongo) =====
@@ -781,6 +784,7 @@ export class TakeoffEngineService {
     private readonly estimates: EstimateService,
     private readonly catalog: CatalogService,
     private readonly webLookup: NormWebLookupService,
+    private readonly priceWeb: PriceWebLookupService,
   ) {}
 
   /** Tra norm_items theo keyword — KHÔNG hardcode mã; không có DB match → undefined. */
@@ -971,7 +975,36 @@ export class TakeoffEngineService {
           prices: priceCtxRaw.prices.map((p) => ({ refCode: p.refCode, name: p.name, price: p.price })),
         }
       : null;
-    const rows = applyPricingToRows(bareRows, normCandidates, priceCtx);
+    let rows = applyPricingToRows(bareRows, normCandidates, priceCtx);
+
+    // Tra ĐƠN GIÁ từ web cho các dòng CHƯA có giá tỉnh chính thống (grounded search,
+    // chống bịa 3 rào, gắn cờ "cần kiểm chứng" + link nguồn). Chỉ khi Edit bật.
+    let webPricedCount = 0;
+    const webPriceHits: WebPriceHit[] = [];
+    if (input.editPermission && this.priceWeb.enabled) {
+      const need = rows.filter((r) => r.code && r.unitPrice == null);
+      if (need.length > 0) {
+        const hits = await this.priceWeb.lookupPrices(
+          need.map((r) => ({ key: r.key, workName: r.name, unit: r.unit })),
+          state.projectInfo?.location,
+        );
+        rows = rows.map((r) => {
+          const h = r.unitPrice == null ? hits.get(r.key) : null;
+          if (h) {
+            webPricedCount++;
+            webPriceHits.push(h);
+            return {
+              ...r,
+              unitPrice: h.unitPrice,
+              totalPrice: Math.round(h.unitPrice * r.quantity),
+              source: h.sourceTitle ? `Web: ${h.sourceTitle} — cần kiểm chứng` : 'Giá web — cần kiểm chứng',
+              pricedFromWeb: true,
+            };
+          }
+          return r;
+        });
+      }
+    }
 
     // Phát hiện DWG chứa nhiều bản vẽ con (nhiều mặt bằng/mặt đứng/chi tiết cạnh
     // nhau trong 1 model space). Chỉ cảnh báo khi KHÔNG bóc theo vùng — vì lúc đó
@@ -1072,6 +1105,11 @@ export class TakeoffEngineService {
       priceCtx
         ? `Đơn giá: ${pricedCount}/${rows.length} công tác gán từ công bố giá ${priceCtx.province} (${priceCtx.sourceDoc}, hiệu lực ${priceCtx.effectiveDate})${missingPrice.length ? `; ${missingPrice.length} công tác chưa có giá — cột giá để trống` : ''}.`
         : `Đơn giá: chưa có công bố giá tỉnh khớp địa điểm dự án — cột giá để trống (import tại /settings).`,
+      ...(webPricedCount > 0
+        ? [
+            `Đã tra ĐƠN GIÁ từ web (grounded search) cho ${webPricedCount} công tác${state.projectInfo?.location ? ` tại ${state.projectInfo.location}` : ''} — điền cột Đơn giá/Thành tiền kèm link nguồn; giá web CẦN KIỂM CHỨNG, KHÔNG phải giá chính thống.`,
+          ]
+        : []),
       `BOQ hiện chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm công tác cần bản vẽ kết cấu/MEP để bóc đầy đủ.`,
       '',
       rowsToMarkdownTable(rows),
@@ -1116,6 +1154,15 @@ export class TakeoffEngineService {
       title: `BOQ chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm cần bản vẽ kết cấu/MEP`,
       detail: `${renderChecklistQs(existingDisciplines)}`,
     });
+    if (webPricedCount > 0) {
+      findings.push({
+        id: 'takeoff-engine-web-price',
+        severity: 'warn',
+        area: 'unitPrice',
+        title: `${webPricedCount} đơn giá tra từ web — cần kiểm chứng`,
+        detail: `${webPricedCount} công tác được điền đơn giá từ tra cứu web (grounded search)${state.projectInfo?.location ? ` tại ${state.projectInfo.location}` : ''} — có link nguồn ở cột Nguồn. Giá web mang tính tham khảo, CẦN KIỂM CHỨNG/đối chiếu công bố giá tỉnh trước khi dùng chính thức.`,
+      });
+    }
     if (multiDrawing) {
       findings.push({
         id: 'takeoff-engine-multi-drawing',
@@ -1193,6 +1240,13 @@ export class TakeoffEngineService {
       if (seenWeb.has(dedupe)) continue;
       seenWeb.add(dedupe);
       sources.push({ title: ws.title, uri: ws.uri, type: 'web' });
+    }
+    // Nguồn GIÁ web — type 'web', dedupe theo uri/title.
+    for (const h of webPriceHits) {
+      const dedupe = h.sourceUri ?? h.sourceTitle ?? '';
+      if (!dedupe || seenWeb.has(dedupe)) continue;
+      seenWeb.add(dedupe);
+      sources.push({ title: h.sourceTitle, uri: h.sourceUri, type: 'web' });
     }
 
     return {
