@@ -271,14 +271,16 @@ const BOQ_GROUP_ORDER = [BOQ_GROUP_THO, BOQ_GROUP_FINISH, BOQ_GROUP_OTHER];
 export interface BoqSheetDef {
   key: string;
   name: string;
-  /** Màu nền header (rgb). */
-  headerBg: string;
+  /** Nền nhạt cho thanh tiêu đề (đọc được với chữ accent đậm kể cả khi Univer strip nền). */
+  tint: string;
+  /** Màu accent đậm cho chữ tiêu đề + viền — mỗi sheet 1 màu để phân biệt. */
+  accent: string;
 }
 
 export const BOQ_SHEETS: readonly BoqSheetDef[] = [
-  { key: 'structure', name: '1. Kết cấu & bao che', headerBg: '#1e3a5f' }, // xanh dương đậm
-  { key: 'finishing', name: '2. Hoàn thiện bề mặt', headerBg: '#14532d' }, // xanh lá đậm
-  { key: 'openings', name: '3. Cửa & phụ kiện', headerBg: '#713f12' }, // hổ phách đậm
+  { key: 'structure', name: '1. Kết cấu & bao che', tint: '#dbe4f0', accent: '#1e3a5f' }, // xanh dương
+  { key: 'finishing', name: '2. Hoàn thiện bề mặt', tint: '#d7ead9', accent: '#14532d' }, // xanh lá
+  { key: 'openings', name: '3. Cửa & phụ kiện', tint: '#f0e4cf', accent: '#713f12' }, // hổ phách
 ] as const;
 
 /** Tên 3 sheet (thứ tự) — FE dùng để tạo sheet trước khi bóc. */
@@ -1027,7 +1029,11 @@ export class TakeoffEngineService {
         })),
         state,
         sheetDef.name,
-        { title: sheetDef.name.toUpperCase(), ...(isLast ? { footnote: assumptionFootnote(a) } : {}) },
+        {
+          title: sheetDef.name.toUpperCase(),
+          theme: { tint: sheetDef.tint, accent: sheetDef.accent },
+          ...(isLast ? { footnote: assumptionFootnote(a) } : {}),
+        },
       );
       if (mirror) mirrorActions.push(...mirror.actions, mirror.formatAction);
     });

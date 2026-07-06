@@ -221,34 +221,61 @@ export interface TableRescueResult {
  * border mảnh 4 cạnh mọi ô dữ liệu, cột E/F/G căn phải, chú thích italic xám.
  * Không zebra — nền sáng cứng chói trên dark mode (FE remap zinc).
  */
+export interface SheetTheme {
+  /** Nền nhạt thanh tiêu đề. */
+  tint: string;
+  /** Chữ + viền accent đậm. */
+  accent: string;
+}
+
+/** Zebra rất nhạt để dễ dò dòng — nền trắng/tint xen kẽ, không chói. */
+const ZEBRA_BG = '#f4f7fb';
+
 export function buildTakeoffFormatAction(
   sheetId: string,
   headerRow: number | null,
   dataStartRow: number,
   dataEndRow: number,
   footnoteRow?: number,
-  /** Màu nền header (rgb) — mỗi sheet công tác 1 màu để phân biệt trực quan. */
-  headerBg?: string,
+  /** Màu theo sheet (tint nền + accent chữ) cho tiêu đề/header. */
+  theme?: SheetTheme,
   /** Dòng TIÊU ĐỀ SHEET — style thanh tiêu đề trải hết 9 cột. */
   titleRow?: number | null,
 ): Action {
   const columnWidths: Record<string, number> = {};
   TAKEOFF_COL_WIDTHS_PX.forEach((w, i) => (columnWidths[String(i)] = w));
 
-  const headerStyle = headerBg
-    ? { ...TAKEOFF_HEADER_STYLE, bg: { rgb: headerBg } }
+  // Style tiêu đề/header theo màu sheet — chữ accent ĐẬM (đọc được cả khi nền bị strip).
+  const titleStyle = theme
+    ? {
+        bl: 1, fs: 13, vt: 2,
+        bg: { rgb: theme.tint },
+        cl: { rgb: theme.accent },
+        bd: { t: { s: 2, cl: { rgb: theme.accent } }, b: { s: 2, cl: { rgb: theme.accent } } },
+      }
+    : TAKEOFF_TITLE_STYLE;
+  const headerStyle = theme
+    ? {
+        bl: 1, ht: 2, vt: 2,
+        bg: { rgb: '#eef3f9' },
+        cl: { rgb: theme.accent },
+        bd: { ...CELL_BORDER, b: { s: 2, cl: { rgb: theme.accent } } },
+      }
     : TAKEOFF_HEADER_STYLE;
+
   const cells: { cell: string; s: Record<string, any> }[] = [];
   if (titleRow != null) {
     // Style cả 9 cột → thanh tiêu đề trải hết chiều ngang (không cần merge).
-    COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${titleRow}`, s: TAKEOFF_TITLE_STYLE }));
+    COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${titleRow}`, s: titleStyle }));
   }
   if (headerRow != null) {
     COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${headerRow}`, s: headerStyle }));
   }
   for (let r = dataStartRow; r <= dataEndRow; r++) {
+    const zebra = (r - dataStartRow) % 2 === 1;
     COL_LETTERS.forEach((letter, i) => {
       const s: Record<string, any> = { bd: CELL_BORDER, vt: 2 };
+      if (zebra) s.bg = { rgb: ZEBRA_BG };
       if (NUMERIC_COL_INDEXES.includes(i)) s.ht = 3; // số căn phải
       cells.push({ cell: `${letter}${r}`, s });
     });
@@ -299,7 +326,7 @@ export function rowsToUpdateCells(
   rows: RescueRow[],
   state: EstimateState,
   sheetNameHint?: string,
-  opts?: { footnote?: string; headerBg?: string; title?: string },
+  opts?: { footnote?: string; theme?: SheetTheme; title?: string },
 ): TableRescueResult | null {
   if (rows.length === 0) return null;
   const sheet = pickTargetSheet(state.sheets ?? [], sheetNameHint);
@@ -382,7 +409,7 @@ export function rowsToUpdateCells(
   }
 
   const formatAction = buildTakeoffFormatAction(
-    sheet.id, headerRow, dataStartRow, endRow, footnoteRow, opts?.headerBg, titleRow,
+    sheet.id, headerRow, dataStartRow, endRow, footnoteRow, opts?.theme, titleRow,
   );
   return { actions, sheetName: sheet.name, startRow, endRow, formatAction, footnoteRow };
 }
