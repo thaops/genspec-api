@@ -18,12 +18,13 @@ export interface DxfLayer {
   colorIndex?: number;
 }
 
+type CadStyle = { colorIndex?: number; lineType?: string; lineweight?: number };
 export type DxfEntity =
-  | { kind: 'line'; layer: string; colorIndex?: number; x1: number; y1: number; x2: number; y2: number }
-  | { kind: 'pline'; layer: string; colorIndex?: number; closed: boolean; pts: number[] }
-  | { kind: 'arc'; layer: string; colorIndex?: number; cx: number; cy: number; r: number; a0: number; a1: number }
-  | { kind: 'circle'; layer: string; colorIndex?: number; cx: number; cy: number; r: number }
-  | { kind: 'text'; layer: string; colorIndex?: number; x: number; y: number; h: number; rot: number; text: string };
+  | { kind: 'line'; layer: string; x1: number; y1: number; x2: number; y2: number } & CadStyle
+  | { kind: 'pline'; layer: string; closed: boolean; pts: number[] } & CadStyle
+  | { kind: 'arc'; layer: string; cx: number; cy: number; r: number; a0: number; a1: number } & CadStyle
+  | { kind: 'circle'; layer: string; cx: number; cy: number; r: number } & CadStyle
+  | { kind: 'text'; layer: string; x: number; y: number; h: number; rot: number; text: string } & CadStyle;
 
 export interface DxfDocument {
   units: DxfUnits;
@@ -310,17 +311,21 @@ export class DxfParserService implements DrawingParserInterface {
     }
   }
 
-  private common(t: Tag[]): { layer: string; colorIndex?: number } {
+  private common(t: Tag[]): { layer: string; colorIndex?: number; lineType?: string; lineweight?: number } {
     let layer = '0';
     let colorIndex: number | undefined;
+    let lineType: string | undefined;
+    let lineweight: number | undefined;
     for (const tag of t) {
       if (tag.code === 8) layer = tag.value;
       if (tag.code === 62) {
         const n = parseInt(tag.value, 10);
         if (!Number.isNaN(n) && n > 0 && n < 256) colorIndex = n; // 0=BYBLOCK, 256=BYLAYER
       }
+      if (tag.code === 6) { const v = tag.value.trim(); if (v) lineType = v; } // linetype name (ByLayer if absent)
+      if (tag.code === 370) { const n = parseInt(tag.value, 10); if (!Number.isNaN(n) && n >= 0) lineweight = n; } // 1/100 mm
     }
-    return { layer, colorIndex };
+    return { layer, colorIndex, lineType, lineweight };
   }
 
   private num(t: Tag[], code: number, def = 0): number {
@@ -386,7 +391,7 @@ export class DxfParserService implements DrawingParserInterface {
   }
 
   private readLwPolyline(t: Tag[]): DxfEntity | null {
-    const { layer, colorIndex } = this.common(t);
+    const { layer, colorIndex, lineType, lineweight } = this.common(t);
     let closed = false;
     const verts: Array<{ x: number; y: number; bulge: number }> = [];
     for (const tag of t) {
@@ -399,13 +404,13 @@ export class DxfParserService implements DrawingParserInterface {
     }
     if (verts.length < 2) return null;
     const pts = this.tessellate(verts, closed);
-    return { kind: 'pline', layer, colorIndex, closed, pts };
+    return { kind: 'pline', layer, colorIndex, lineType, lineweight, closed, pts };
   }
 
   /** POLYLINE + VERTEX* + SEQEND. Returns index after SEQEND. */
   private readPolyline(tags: Tag[], i: number): { entity: DxfEntity | null; next: number } {
     const { entityTags, next } = this.collectEntityTags(tags, i);
-    const { layer, colorIndex } = this.common(entityTags);
+    const { layer, colorIndex, lineType, lineweight } = this.common(entityTags);
     const flags = this.num(entityTags, 70, 0);
     const closed = (flags & 1) === 1;
     const verts: Array<{ x: number; y: number; bulge: number }> = [];
@@ -421,7 +426,7 @@ export class DxfParserService implements DrawingParserInterface {
       j = after;
     }
     if (verts.length < 2) return { entity: null, next: j };
-    return { entity: { kind: 'pline', layer, colorIndex, closed, pts: this.tessellate(verts, closed) }, next: j };
+    return { entity: { kind: 'pline', layer, colorIndex, lineType, lineweight, closed, pts: this.tessellate(verts, closed) }, next: j };
   }
 
   /** Flatten vertices with bulges into a point list [x,y,x,y,...]. */
@@ -562,9 +567,14 @@ export class DxfParserService implements DrawingParserInterface {
 
   private toRawEntity(e: DxfEntity): RawEntity {
     const color = e.colorIndex !== undefined ? String(e.colorIndex) : '';
+    // CAD fingerprint (colorIndex/lineType/lineweight) enables full layer overrides; omit when absent.
+    const ci: Record<string, string | number> = {};
+    if (e.colorIndex !== undefined) ci.colorIndex = e.colorIndex;
+    if (e.lineType !== undefined) ci.lineType = e.lineType;
+    if (e.lineweight !== undefined) ci.lineweight = e.lineweight;
     switch (e.kind) {
       case 'line':
-        return { type: 'LINE', layer: e.layer, x: e.x1, y: e.y1, x2: e.x2, y2: e.y2, properties: { color } };
+        return { type: 'LINE', layer: e.layer, x: e.x1, y: e.y1, x2: e.x2, y2: e.y2, properties: { color, ...ci } };
       case 'pline': {
         const vertices: number[][] = [];
         for (let k = 0; k + 1 < e.pts.length; k += 2) vertices.push([e.pts[k], e.pts[k + 1]]);
@@ -573,15 +583,15 @@ export class DxfParserService implements DrawingParserInterface {
           x: e.pts[0] ?? 0, y: e.pts[1] ?? 0,
           x2: e.pts[e.pts.length - 2], y2: e.pts[e.pts.length - 1],
           vertices,
-          properties: { color, closed: e.closed ? 1 : 0, vertexCount: vertices.length },
+          properties: { color, ...ci, closed: e.closed ? 1 : 0, vertexCount: vertices.length },
         };
       }
       case 'arc':
-        return { type: 'ARC', layer: e.layer, x: e.cx, y: e.cy, radius: e.r, properties: { color, startAngle: e.a0, endAngle: e.a1 } };
+        return { type: 'ARC', layer: e.layer, x: e.cx, y: e.cy, radius: e.r, properties: { color, ...ci, startAngle: e.a0, endAngle: e.a1 } };
       case 'circle':
-        return { type: 'CIRCLE', layer: e.layer, x: e.cx, y: e.cy, radius: e.r, properties: { color } };
+        return { type: 'CIRCLE', layer: e.layer, x: e.cx, y: e.cy, radius: e.r, properties: { color, ...ci } };
       case 'text':
-        return { type: 'TEXT', layer: e.layer, x: e.x, y: e.y, text: e.text, properties: { color, height: e.h, rotation: e.rot } };
+        return { type: 'TEXT', layer: e.layer, x: e.x, y: e.y, text: e.text, properties: { color, ...ci, height: e.h, rotation: e.rot } };
     }
   }
 

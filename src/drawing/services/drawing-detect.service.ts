@@ -4,6 +4,8 @@ import { Model } from 'mongoose';
 import { DrawingObject, DrawingObjectDocument } from '../schemas/drawing-object.schema';
 import { DrawingDetectorService } from './drawing-detector.service';
 import { DrawingNormalizerService } from './drawing-normalizer.service';
+import { DrawingLayerRuleService } from './drawing-layer-rule.service';
+import { DrawingObjectOverrideService } from './drawing-object-override.service';
 
 @Injectable()
 export class DrawingDetectService {
@@ -11,6 +13,8 @@ export class DrawingDetectService {
     @InjectModel(DrawingObject.name) private objectModel: Model<DrawingObjectDocument>,
     private readonly normalizer: DrawingNormalizerService,
     private readonly detector: DrawingDetectorService,
+    private readonly layerRules: DrawingLayerRuleService,
+    private readonly overrides: DrawingObjectOverrideService,
   ) {}
 
   async detect(estimateId: string, drawingId: string) {
@@ -35,22 +39,31 @@ export class DrawingDetectService {
       };
     });
 
-    const detected = this.detector.detect(normalized);
+    const layerOverrides = await this.layerRules.list(estimateId);
+    const detected = this.detector.detect(normalized, layerOverrides);
+    const userOverrides = await this.overrides.map(drawingId);
 
     await this.objectModel.deleteMany({ drawingId });
     if (detected.length) {
-      const docs = detected.map((obj) => ({
+      const docs = detected.map((obj) => {
+        // Tier 4 — user correction wins over every detector tier.
+        const forced = userOverrides.get(obj.stableId);
+        return {
         drawingId,
         stableId: obj.stableId,
         rawType: obj.rawType,
-        type: obj.objectType,
+        type: forced ?? obj.objectType,
         layer: obj.layer,
         boundingBox: obj.boundingBox,
         geometry: obj.geometry,
-        confidence: obj.confidence,
+        confidence: forced ? 1 : obj.confidence,
+        detectionReason: forced ? 'Người dùng sửa (Tier 4)' : obj.detection?.reason,
+        candidates: forced ? [{ type: forced, prob: 1 }] : obj.detection?.candidates,
+        ambiguous: forced ? false : obj.detection?.ambiguous,
         properties: obj.properties,
         floor: obj.floor,
-      }));
+        };
+      });
       await this.objectModel.insertMany(docs, { ordered: false });
     }
 

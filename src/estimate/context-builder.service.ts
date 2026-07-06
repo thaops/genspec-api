@@ -52,15 +52,22 @@ export class ContextBuilderService {
       ]);
       if (!drawing) return undefined;
 
+      // Chỉ đếm đối tượng đã chốt loại vào inventory cho LLM — object ambiguous
+      // (còn nhiều candidate) đếm riêng, tránh LLM coi là khối lượng thật.
       const byType: Record<string, number> = {};
-      for (const o of objects) byType[o.type] = (byType[o.type] ?? 0) + 1;
+      let ambiguous = 0;
+      for (const o of objects) {
+        if ((o as any).ambiguous) { ambiguous += 1; continue; }
+        byType[o.type] = (byType[o.type] ?? 0) + 1;
+      }
       const typeLine = Object.entries(byType)
         .map(([t, n]) => `${t}: ${n}`)
         .join(', ');
 
       const lines: string[] = [
         `Bản vẽ: "${drawing.name}" (${drawing.type}, ${drawing.pageCount} trang, trạng thái: ${drawing.parseStatus})`,
-        `Tổng ${objects.length} đối tượng${typeLine ? ` — ${typeLine}` : ''}`,
+        `Tổng ${objects.length} đối tượng${typeLine ? ` — ${typeLine}` : ''}` +
+          (ambiguous ? ` (${ambiguous} chưa chốt loại, chưa tính khối lượng)` : ''),
       ];
 
       if (objectId) {

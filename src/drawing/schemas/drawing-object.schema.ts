@@ -34,6 +34,15 @@ export class DrawingObject {
   @Prop()
   detectionReason?: string;
 
+  // Multi-hypothesis output from geometry detection (Tier 1). Empty for deterministic
+  // layer/label matches. `type` may be ambiguous → resolved by Tier 2/2.5/3.
+  @Prop({ type: [Object], default: [] })
+  candidates?: { type: string; prob: number }[];
+
+  // True when top-2 candidates are close: MUST NOT be auto-summed into BOQ until resolved.
+  @Prop({ default: false })
+  ambiguous?: boolean;
+
   @Prop({ required: true })
   layer: string;
 

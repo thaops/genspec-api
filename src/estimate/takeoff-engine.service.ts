@@ -26,6 +26,17 @@ export interface EngineDrawingObject {
   type: string;
   geometry?: number[][];
   boundingBox: { x?: number; y?: number; w: number; h: number };
+  /** Tier 1/2.5: classification unresolved (multi-candidate) — must not be counted. */
+  ambiguous?: boolean;
+}
+
+/**
+ * A detected object may become a real BOQ quantity only when its class is settled.
+ * Excludes: ambiguous (unresolved candidates), 'ignored' (non-plotting/excluded),
+ * 'unknown' (undetected). Keeps every quantity defensible in front of an owner.
+ */
+export function isCountableObject(o: EngineDrawingObject): boolean {
+  return !o.ambiguous && o.type !== 'ignored' && o.type !== 'unknown';
 }
 
 export interface NormCandidate {
@@ -379,7 +390,7 @@ export interface HatchSlabStats {
 export function hatchSlabStats(objects: EngineDrawingObject[], factor: number): HatchSlabStats {
   const areas: number[] = [];
   for (const o of objects) {
-    if (o.type !== 'hatch') continue;
+    if (o.type !== 'hatch' || !isCountableObject(o)) continue;
     const a = measure(o, factor).area;
     if (a > 0) areas.push(a);
   }
@@ -409,16 +420,21 @@ const TAKEN_TYPES = new Set<string>([...MEASURED_TYPES, 'hatch']);
  */
 export function summarizeDetectedObjects(objects: EngineDrawingObject[]): string {
   const counts: Record<string, number> = {};
-  for (const o of objects) counts[o.type] = (counts[o.type] ?? 0) + 1;
+  let ambiguous = 0;
+  for (const o of objects) {
+    if (o.ambiguous) { ambiguous += 1; continue; }
+    counts[o.type] = (counts[o.type] ?? 0) + 1;
+  }
   const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   const parts = entries.map(([t, n]) => `${n} ${TYPE_LABELS_VI[t] ?? t}`);
   const notTaken = entries
-    .filter(([t]) => !TAKEN_TYPES.has(t))
+    .filter(([t]) => !TAKEN_TYPES.has(t) && t !== 'ignored')
     .map(([t, n]) => `${n} ${TYPE_LABELS_VI[t] ?? t}`);
   const suffix = notTaken.length
     ? ` Chưa bóc: ${notTaken.join(', ')} — cần khoanh vùng/gán loại thủ công.`
     : '';
-  return `Đối tượng nhận diện: ${parts.join(', ')}.${suffix}`;
+  const ambSuffix = ambiguous ? ` ${ambiguous} đối tượng chưa chốt loại (không tính khối lượng).` : '';
+  return `Đối tượng nhận diện: ${parts.join(', ')}.${suffix}${ambSuffix}`;
 }
 
 /**
@@ -435,6 +451,7 @@ export function computeTakeoffRows(
 ): TakeoffEngineRow[] {
   const totals = new Map<string, GroupTotals>();
   for (const obj of objects) {
+    if (!isCountableObject(obj)) continue;
     if (!(MEASURED_TYPES as readonly string[]).includes(obj.type)) continue;
     const m = measure(obj, factor);
     const g = totals.get(obj.type) ?? { count: 0, length: 0, area: 0, perimeter: 0 };

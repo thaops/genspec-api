@@ -10,6 +10,10 @@ import { DrawingIndex, DrawingIndexSchema } from '../drawing/schemas/drawing-ind
 import { DrawingRelationship, DrawingRelationshipSchema } from '../drawing/schemas/drawing-relationship.schema';
 import { DrawingNormalizerService } from '../drawing/services/drawing-normalizer.service';
 import { DrawingDetectorService } from '../drawing/services/drawing-detector.service';
+import { DrawingLayerRuleService } from '../drawing/services/drawing-layer-rule.service';
+import { DrawingLayerRule, DrawingLayerRuleSchema } from '../drawing/schemas/drawing-layer-rule.schema';
+import { DrawingObjectOverrideService } from '../drawing/services/drawing-object-override.service';
+import { DrawingObjectOverride, DrawingObjectOverrideSchema } from '../drawing/schemas/drawing-object-override.schema';
 import { DrawingIndexerService } from '../drawing/services/drawing-indexer.service';
 import { DrawingGraphService } from '../drawing/services/drawing-graph.service';
 import { DrawingParserFactory } from '../drawing/parsers/drawing-parser.factory';
@@ -32,12 +36,16 @@ import { DrawingSceneEntity, DrawingSceneSchema } from '../drawing/schemas/drawi
       { name: DrawingIndex.name,        schema: DrawingIndexSchema },
       { name: DrawingRelationship.name, schema: DrawingRelationshipSchema },
       { name: DrawingSceneEntity.name,  schema: DrawingSceneSchema },
+      { name: DrawingLayerRule.name,    schema: DrawingLayerRuleSchema },
+      { name: DrawingObjectOverride.name, schema: DrawingObjectOverrideSchema },
     ]),
   ],
   providers: [
     DrawingJobProcessor,
     DrawingNormalizerService,
     DrawingDetectorService,
+    DrawingLayerRuleService,
+    DrawingObjectOverrideService,
     DrawingIndexerService,
     DrawingGraphService,
     DrawingParserFactory,

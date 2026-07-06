@@ -9,6 +9,9 @@ import { DrawingSceneService } from './services/drawing-scene.service';
 import { DrawingUploadService } from './services/drawing-upload.service';
 import { DrawingSearchService } from './services/drawing-search.service';
 import { DrawingDetectService } from './services/drawing-detect.service';
+import { DrawingLayerRuleService, type LayerRuleInput } from './services/drawing-layer-rule.service';
+import { DrawingLlmClassifierService } from './services/drawing-llm-classifier.service';
+import { DrawingObjectOverrideService } from './services/drawing-object-override.service';
 import { DrawingCompareService } from './services/drawing-compare.service';
 import { DrawingRevisionService } from './services/drawing-revision.service';
 import { DrawingAnnotationService } from './services/drawing-annotation.service';
@@ -20,6 +23,9 @@ export class DrawingController {
     private readonly upload: DrawingUploadService,
     private readonly search: DrawingSearchService,
     private readonly detect: DrawingDetectService,
+    private readonly layerRules: DrawingLayerRuleService,
+    private readonly llmClassifier: DrawingLlmClassifierService,
+    private readonly objectOverride: DrawingObjectOverrideService,
     private readonly compare: DrawingCompareService,
     private readonly revision: DrawingRevisionService,
     private readonly annotation: DrawingAnnotationService,
@@ -60,6 +66,22 @@ export class DrawingController {
   @Get()
   listDrawings(@Param('estimateId') estimateId: string) {
     return this.upload.list(estimateId);
+  }
+
+  // --- Layer overrides (Tier 2, per-project) ---
+  // Declared before ':drawingId' so the literal path is not captured as an id.
+  @Get('layer-rules')
+  getLayerRules(@Param('estimateId') estimateId: string) {
+    return this.layerRules.list(estimateId);
+  }
+
+  // Replace the full rule set; caller then re-runs detect to apply.
+  @Post('layer-rules')
+  saveLayerRules(
+    @Param('estimateId') estimateId: string,
+    @Body() body: { rules: LayerRuleInput[] },
+  ) {
+    return this.layerRules.replace(estimateId, body.rules ?? []);
   }
 
   @Get(':drawingId')
@@ -136,6 +158,23 @@ export class DrawingController {
     @Param('drawingId') drawingId: string,
   ) {
     return this.detect.detect(estimateId, drawingId);
+  }
+
+  // Tier 3 — LLM resolve of the residual ambiguous/unknown objects (on-demand, billed).
+  @Post(':drawingId/detect/ai-resolve')
+  aiResolveObjects(@Param('drawingId') drawingId: string) {
+    return this.llmClassifier.resolve(drawingId);
+  }
+
+  // Tier 4 — user corrects one object's type; persists across re-detect + may auto-promote a layer rule.
+  @Patch(':drawingId/objects/:stableId/type')
+  correctObjectType(
+    @Param('estimateId') estimateId: string,
+    @Param('drawingId') drawingId: string,
+    @Param('stableId') stableId: string,
+    @Body('type') type: string,
+  ) {
+    return this.objectOverride.correct(estimateId, drawingId, stableId, type);
   }
 
   // --- Graph ---

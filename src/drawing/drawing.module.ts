@@ -1,10 +1,14 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AiModule } from '../ai/ai.module';
 import { DrawingController } from './drawing.controller';
 // Pipeline
 import { DrawingParserService } from './services/drawing-parser.service';
 import { DrawingNormalizerService } from './services/drawing-normalizer.service';
 import { DrawingDetectorService } from './services/drawing-detector.service';
+import { DrawingLayerRuleService } from './services/drawing-layer-rule.service';
+import { DrawingObjectOverrideService } from './services/drawing-object-override.service';
+import { DrawingLlmClassifierService } from './services/drawing-llm-classifier.service';
 import { DrawingIndexerService } from './services/drawing-indexer.service';
 // Parsers
 import { DrawingParserFactory } from './parsers/drawing-parser.factory';
@@ -36,9 +40,12 @@ import { DrawingRevision, DrawingRevisionSchema } from './schemas/drawing-revisi
 import { DrawingIndex, DrawingIndexSchema } from './schemas/drawing-index.schema';
 import { DrawingAnnotation, DrawingAnnotationSchema } from './schemas/drawing-annotation.schema';
 import { DrawingSceneEntity, DrawingSceneSchema } from './schemas/drawing-scene.schema';
+import { DrawingLayerRule, DrawingLayerRuleSchema } from './schemas/drawing-layer-rule.schema';
+import { DrawingObjectOverride, DrawingObjectOverrideSchema } from './schemas/drawing-object-override.schema';
 
 @Module({
   imports: [
+    AiModule,
     MongooseModule.forFeature([
       { name: Drawing.name,             schema: DrawingSchema },
       { name: DrawingObject.name,       schema: DrawingObjectSchema },
@@ -47,6 +54,8 @@ import { DrawingSceneEntity, DrawingSceneSchema } from './schemas/drawing-scene.
       { name: DrawingIndex.name,        schema: DrawingIndexSchema },
       { name: DrawingAnnotation.name,   schema: DrawingAnnotationSchema },
       { name: DrawingSceneEntity.name,  schema: DrawingSceneSchema },
+      { name: DrawingLayerRule.name,    schema: DrawingLayerRuleSchema },
+      { name: DrawingObjectOverride.name, schema: DrawingObjectOverrideSchema },
     ]),
   ],
   controllers: [DrawingController],
@@ -55,6 +64,9 @@ import { DrawingSceneEntity, DrawingSceneSchema } from './schemas/drawing-scene.
     DrawingParserService,
     DrawingNormalizerService,
     DrawingDetectorService,
+    DrawingLayerRuleService,
+    DrawingObjectOverrideService,
+    DrawingLlmClassifierService,
     DrawingIndexerService,
     // Parsers
     DrawingParserFactory,

@@ -11,6 +11,8 @@ import { DrawingObject, DrawingObjectDocument } from '../drawing/schemas/drawing
 import { DrawingIndex, DrawingIndexDocument } from '../drawing/schemas/drawing-index.schema';
 import { DrawingNormalizerService } from '../drawing/services/drawing-normalizer.service';
 import { DrawingDetectorService } from '../drawing/services/drawing-detector.service';
+import { DrawingLayerRuleService } from '../drawing/services/drawing-layer-rule.service';
+import { DrawingObjectOverrideService } from '../drawing/services/drawing-object-override.service';
 import { DrawingIndexerService } from '../drawing/services/drawing-indexer.service';
 import { DrawingGraphService } from '../drawing/services/drawing-graph.service';
 import { DrawingParserFactory } from '../drawing/parsers/drawing-parser.factory';
@@ -29,6 +31,8 @@ export class DrawingJobProcessor extends WorkerHost {
     private readonly parserFactory: DrawingParserFactory,
     private readonly normalizer: DrawingNormalizerService,
     private readonly detector: DrawingDetectorService,
+    private readonly layerRules: DrawingLayerRuleService,
+    private readonly objectOverrides: DrawingObjectOverrideService,
     private readonly indexer: DrawingIndexerService,
     private readonly graph: DrawingGraphService,
     private readonly dwgConverter: DwgConverterService,
@@ -90,19 +94,27 @@ export class DrawingJobProcessor extends WorkerHost {
 
       // 4. Normalize + Detect
       await this.progress(job, 'detecting', 'Đang phân tích đối tượng...', 55);
-      const raw      = this.normalizer.fromPages(drawingId, result.pages);
-      const detected = this.detector.detect(raw);
+      const raw       = this.normalizer.fromPages(drawingId, result.pages);
+      const overrides = await this.layerRules.list(estimateId);
+      const detected  = this.detector.detect(raw, overrides);
+      const userOverrides = await this.objectOverrides.map(drawingId);
 
       await this.objectModel.deleteMany({ drawingId });
       if (detected.length) {
         await this.objectModel.insertMany(
-          detected.map((o) => ({
-            drawingId, stableId: o.stableId, rawType: o.rawType,
-            type: o.objectType, layer: o.layer,
-            boundingBox: o.boundingBox, geometry: o.geometry,
-            confidence: o.confidence, detectionReason: o.detection?.reason,
-            properties: o.properties, floor: o.floor,
-          })),
+          detected.map((o) => {
+            const forced = userOverrides.get(o.stableId); // Tier 4 — user correction wins
+            return {
+              drawingId, stableId: o.stableId, rawType: o.rawType,
+              type: forced ?? o.objectType, layer: o.layer,
+              boundingBox: o.boundingBox, geometry: o.geometry,
+              confidence: forced ? 1 : o.confidence,
+              detectionReason: forced ? 'Người dùng sửa (Tier 4)' : o.detection?.reason,
+              candidates: forced ? [{ type: forced, prob: 1 }] : o.detection?.candidates,
+              ambiguous: forced ? false : o.detection?.ambiguous,
+              properties: o.properties, floor: o.floor,
+            };
+          }),
           { ordered: false },
         );
       }
