@@ -444,6 +444,62 @@ export function hatchSlabStats(objects: EngineDrawingObject[], factor: number): 
   };
 }
 
+/**
+ * Đếm số "cụm bản vẽ" trong model space: gom tâm bbox các đối tượng ĐO ĐƯỢC vào
+ * lưới ô cạnh eps (mét thật, quy về đơn vị vẽ qua factor) rồi nối 8-neighbour
+ * (union-find). DWG dân dụng hay đặt nhiều mặt bằng/mặt đứng/chi tiết cạnh nhau
+ * → nhiều cụm; "bóc toàn bộ" sẽ CỘNG DỒN tất cả → khối lượng phồng. eps ~ kích
+ * thước 1 công trình để KHÔNG xé nhỏ 1 mặt bằng thành nhiều cụm. PURE.
+ */
+export function countObjectClusters(
+  objects: EngineDrawingObject[],
+  factor: number,
+  epsMeters = 25,
+): { clusters: number; spanM: number } {
+  const cell = epsMeters / (factor || 1);
+  const centers: [number, number][] = [];
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const o of objects) {
+    if (!isCountableObject(o)) continue;
+    if (!(MEASURED_TYPES as readonly string[]).includes(o.type)) continue;
+    const b = o.boundingBox;
+    const cx = (b.x ?? 0) + (b.w ?? 0) / 2;
+    const cy = (b.y ?? 0) + (b.h ?? 0) / 2;
+    if (!isFinite(cx) || !isFinite(cy)) continue;
+    centers.push([cx, cy]);
+    if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+    if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+  }
+  if (centers.length < 8) return { clusters: centers.length ? 1 : 0, spanM: 0 };
+
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.get(r) !== r) { parent.set(r, parent.get(parent.get(r)!)!); r = parent.get(r)!; }
+    return r;
+  };
+  const key = (ix: number, iy: number) => `${ix}:${iy}`;
+  const cells = new Set<string>();
+  for (const [x, y] of centers) {
+    const k = key(Math.floor(x / cell), Math.floor(y / cell));
+    cells.add(k);
+    if (!parent.has(k)) parent.set(k, k);
+  }
+  for (const c of cells) {
+    const [ix, iy] = c.split(':').map(Number);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const nb = key(ix + dx, iy + dy);
+      if (parent.has(nb)) {
+        const ra = find(c), rb = find(nb);
+        if (ra !== rb) parent.set(ra, rb);
+      }
+    }
+  }
+  const roots = new Set<string>();
+  for (const c of cells) roots.add(find(c));
+  return { clusters: roots.size, spanM: Math.max(maxX - minX, maxY - minY) * factor };
+}
+
 const TYPE_LABELS_VI: Record<string, string> = {
   wall: 'tường', column: 'cột', beam: 'dầm', door: 'cửa', window: 'cửa sổ',
   slab: 'sàn', hatch: 'hatch', text: 'text', block: 'block',
@@ -882,6 +938,14 @@ export class TakeoffEngineService {
       : null;
     const rows = applyPricingToRows(bareRows, normCandidates, priceCtx);
 
+    // Phát hiện DWG chứa nhiều bản vẽ con (nhiều mặt bằng/mặt đứng/chi tiết cạnh
+    // nhau trong 1 model space). Chỉ cảnh báo khi KHÔNG bóc theo vùng — vì lúc đó
+    // "bóc toàn bộ" cộng dồn tất cả cụm → khối lượng phồng.
+    const clusterInfo = input.region
+      ? { clusters: 1, spanM: 0 }
+      : countObjectClusters(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit);
+    const multiDrawing = clusterInfo.clusters >= 2;
+
     // Id deterministic theo bản vẽ + dòng → bóc lại N lần vẫn chỉ 1 bộ (reducer upsert theo id).
     const engineTakeoffId = (key: string) => `tk_engine_${input.drawingId}_${key}`;
     const newEngineIds = new Set(rows.map((r) => engineTakeoffId(r.key)));
@@ -951,6 +1015,11 @@ export class TakeoffEngineService {
       `Đã bóc khối lượng ${rows.length} dòng từ ${groups.length} nhóm cấu kiện (${groups.join(', ')}) — ${objects.length} đối tượng hình học${rejected.size ? `, đã loại ${rejected.size} đối tượng bị từ chối` : ''}${regionKept != null ? `. Bóc TRONG VÙNG CHỌN: chỉ tính ${regionKept}/${regionTotal} đối tượng nằm trong vùng` : ''}.`,
       `Giả định: cao tầng ${a.floorHeight}m, dày tường ${a.wallThickness}m, cao dầm ${a.beamDepth}m, bề rộng dầm ${ASSUMED_BEAM_WIDTH}m, tỷ lệ ${input.unitsPerDrawingUnit} m/đơn vị vẽ.`,
       `Khối lượng do máy tính từ hình học bản vẽ — không phải AI ước lượng.`,
+      ...(multiDrawing
+        ? [
+            `⚠ PHẠM VI: model space có ~${clusterInfo.clusters} cụm bản vẽ (trải ~${Math.round(clusterInfo.spanM)}m) — thường là nhiều mặt bằng/mặt đứng/chi tiết đặt cạnh nhau. Số trên là TỔNG tất cả các cụm. Để bóc riêng 1 mặt bằng, dùng "Bóc trong vùng" (kéo chọn vùng quanh mặt bằng) rồi bóc lại.`,
+          ]
+        : []),
       ...(webCode.length > 0
         ? [
             `Mã hiệu: ${webCode.length} công tác không có trong norm_items — đã tra từ web (grounded search, chậm hơn bình thường); mã web CẦN KIỂM CHỨNG trước khi dùng.`,
@@ -1008,6 +1077,15 @@ export class TakeoffEngineService {
       title: `BOQ chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm cần bản vẽ kết cấu/MEP`,
       detail: `${renderChecklistQs(existingDisciplines)}`,
     });
+    if (multiDrawing) {
+      findings.push({
+        id: 'takeoff-engine-multi-drawing',
+        severity: 'warn',
+        area: 'quantity',
+        title: `Bản vẽ chứa ~${clusterInfo.clusters} cụm — khối lượng là TỔNG tất cả`,
+        detail: `Model space có ~${clusterInfo.clusters} cụm đối tượng cách xa nhau (trải ~${Math.round(clusterInfo.spanM)}m) — thường là nhiều mặt bằng/mặt đứng/chi tiết đặt cạnh nhau trong cùng file. "Bóc toàn bộ" đã cộng dồn TẤT CẢ. Để bóc đúng 1 mặt bằng: dùng "Bóc trong vùng" — kéo chọn vùng bao quanh mặt bằng cần bóc rồi bóc lại.`,
+      });
+    }
     if (factorOverridden) {
       findings.push({
         id: 'takeoff-engine-factor-override',
@@ -1089,6 +1167,9 @@ export class TakeoffEngineService {
           : []),
         `Đo hình học (polyline/shoelace/bbox) × ${input.unitsPerDrawingUnit} m/đơn vị.`,
         `Áp công thức cố định (tường/cột/dầm/cửa) với giả định người dùng.`,
+        ...(multiDrawing
+          ? [`Phát hiện ~${clusterInfo.clusters} cụm bản vẽ trong model space (trải ~${Math.round(clusterInfo.spanM)}m) → cảnh báo khối lượng là TỔNG, nên bóc theo vùng.`]
+          : []),
         ...(hs.count > 0
           ? [`Hatch: ${hs.used}/${hs.count} mảng đủ tin cậy → diện tích sàn/nền ${hs.area} m² (bỏ ${hs.dropped} ngoài ngưỡng).`]
           : []),
