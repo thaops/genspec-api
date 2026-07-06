@@ -47,6 +47,9 @@ export class DrawingJobProcessor extends WorkerHost {
     this.logger.log(`Processing drawing ${drawingId} [${fileType}]`);
 
     try {
+      // Leave 'pending' immediately so the UI reflects work-in-progress during the
+      // download/convert phase (which precedes the later 'parsing' status).
+      await this.setStatus(drawingId, 'parsing');
       // 1. Get file on disk (use existing tmp or download from Cloudinary)
       await this.progress(job, 'downloading', 'Đang tải file...', 5);
       const filePath = await this.ensureLocalFile(drawingId, storageUrl, tmpPath);

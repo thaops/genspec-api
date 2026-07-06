@@ -7,6 +7,14 @@ import type {
   RawEntity,
 } from './drawing-parser.interface';
 
+// Hard ceiling on emitted entities. Structural/MEP drawings reuse detail blocks
+// nested many levels deep; without a cap, INSERT expansion is fan-out^depth and a
+// modest file explodes into millions of entities, freezing every downstream stage
+// (parse ×2, scene gzip, detect, insertMany, graph). Real drawings sit well under
+// this — hitting it means the file is pathological, so we truncate + warn instead
+// of hanging.
+const MAX_ENTITIES = 300_000;
+
 // ---------------------------------------------------------------------------
 // Rich DXF document model — consumed by SceneBuilderService and by parse()
 // ---------------------------------------------------------------------------
@@ -260,6 +268,10 @@ export class DxfParserService implements DrawingParserInterface {
     const extraTypes = new Set(['DIMENSION', 'LEADER', 'MULTILEADER', 'HATCH', 'VIEWPORT', 'SPLINE']);
 
     while (i < tags.length && !(tags[i].code === 0 && tags[i].value === 'ENDSEC')) {
+      if (doc.entities.length >= MAX_ENTITIES) {
+        this.logger.warn(`Entity cap ${MAX_ENTITIES} reached — truncating parse (pathological block nesting?)`);
+        break;
+      }
       if (tags[i].code !== 0) { i++; continue; }
       const type = tags[i].value;
 
@@ -499,6 +511,7 @@ export class DxfParserService implements DrawingParserInterface {
     depth: number,
   ) {
     if (depth > 4 || visiting.has(ins.blockName)) return; // cycle / depth guard
+    if (out.length >= MAX_ENTITIES) return;               // entity-budget guard
     const block = blocks.get(ins.blockName);
     if (!block) return;
     visiting.add(ins.blockName);
@@ -513,6 +526,7 @@ export class DxfParserService implements DrawingParserInterface {
     };
 
     for (const e of block.entities) {
+      if (out.length >= MAX_ENTITIES) break;
       const layer = e.layer === '0' ? ins.layer : e.layer;
       const colorIndex = e.colorIndex ?? ins.colorIndex;
       switch (e.kind) {
@@ -551,6 +565,7 @@ export class DxfParserService implements DrawingParserInterface {
     }
 
     for (const nested of block.inserts) {
+      if (out.length >= MAX_ENTITIES) break;
       // transform nested insert origin into world space, compose scale/rotation
       const [nx, ny] = tx(nested.x, nested.y);
       this.expandInsert(

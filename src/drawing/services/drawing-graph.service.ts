@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -18,6 +18,8 @@ import { DrawingDetectedEvent, DrawingGraphBuiltEvent } from '../../events/domai
  */
 @Injectable()
 export class DrawingGraphService {
+  private readonly logger = new Logger(DrawingGraphService.name);
+
   constructor(
     @InjectModel(DrawingObject.name) private objectModel: Model<DrawingObjectDocument>,
     @InjectModel(DrawingRelationship.name) private relModel: Model<DrawingRelationshipDocument>,
@@ -42,8 +44,20 @@ export class DrawingGraphService {
     const slabs    = objects.filter((o) => o.type === 'slab');
     const walls    = objects.filter((o) => o.type === 'wall');
 
+    // Each pass below is O(|A|·|B|). On dense structural/MEP drawings a type can
+    // hold thousands of objects → tens of millions of iterations that block the
+    // event loop. Skip a pass whose pair count is pathological rather than hang.
+    const MAX_PAIRS = 3_000_000;
+    const tooMany = (a: number, b: number, label: string): boolean => {
+      if (a * b > MAX_PAIRS) {
+        this.logger.warn(`Skip ${label} graph pass — ${a}×${b} pairs exceed ${MAX_PAIRS}`);
+        return true;
+      }
+      return false;
+    };
+
     // beam → column: beam bounding box overlaps column bounding box
-    for (const beam of beams) {
+    if (!tooMany(beams.length, columns.length, 'beam→column')) for (const beam of beams) {
       for (const col of columns) {
         if (this.overlaps(beam.boundingBox, col.boundingBox)) {
           relationships.push({
@@ -58,7 +72,7 @@ export class DrawingGraphService {
     }
 
     // slab → beam: similar overlap + same page
-    for (const slab of slabs) {
+    if (!tooMany(slabs.length, beams.length, 'slab→beam')) for (const slab of slabs) {
       for (const beam of beams) {
         if (
           slab.boundingBox.page === beam.boundingBox.page &&
@@ -76,7 +90,7 @@ export class DrawingGraphService {
     }
 
     // wall → wall: adjacent endpoints (threshold = 5 units)
-    for (let i = 0; i < walls.length; i++) {
+    if (!tooMany(walls.length, walls.length, 'wall↔wall')) for (let i = 0; i < walls.length; i++) {
       for (let j = i + 1; j < walls.length; j++) {
         if (this.isAdjacent(walls[i].boundingBox, walls[j].boundingBox, 5)) {
           relationships.push({
