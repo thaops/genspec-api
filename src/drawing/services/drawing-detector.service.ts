@@ -1,5 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
-import type { RawEntity } from '../parsers/drawing-parser.interface';
+import { Injectable } from '@nestjs/common';
 
 export interface NormalizedObject {
   stableId: string;
@@ -112,8 +111,6 @@ const ENTITY_TYPE_MAP: Record<string, string> = {
 
 @Injectable()
 export class DrawingDetectorService {
-  private readonly logger = new Logger(DrawingDetectorService.name);
-
   detect(objects: NormalizedObject[], overrides: LayerOverride[] = []): DetectedObject[] {
     const stats = this.computeStats(objects);
     const overrideMap = this.buildOverrideMap(overrides);
