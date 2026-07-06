@@ -41,6 +41,10 @@ export class Drawing {
   @Prop()
   parseError?: string;
 
+  // Thời điểm bắt đầu parse — FE dùng để phát hiện "kẹt quá lâu" và hiện nút thử lại.
+  @Prop()
+  parseStartedAt?: Date;
+
   @Prop({ type: [String], default: [] })
   parseLogs: string[];
 

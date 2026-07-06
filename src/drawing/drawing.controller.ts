@@ -111,6 +111,15 @@ export class DrawingController {
     return this.upload.delete(estimateId, drawingId);
   }
 
+  // Bóc lại một bản vẽ bị kẹt/lỗi parse — reset về 'parsing' + chạy lại pipeline.
+  @Post(':drawingId/reparse')
+  reparseDrawing(
+    @Param('estimateId') estimateId: string,
+    @Param('drawingId') drawingId: string,
+  ) {
+    return this.upload.reparse(estimateId, drawingId);
+  }
+
   // --- Search ---
   @Get(':drawingId/search')
   searchDrawing(

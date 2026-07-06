@@ -174,7 +174,12 @@ export class DrawingParserService {
   private async setStatus(drawingId: string, status: string, error?: string) {
     await this.drawingModel.updateOne(
       { _id: drawingId },
-      { parseStatus: status, ...(error ? { parseError: error } : {}) },
+      {
+        parseStatus: status,
+        ...(error ? { parseError: error } : {}),
+        // Mốc bắt đầu xử lý — FE tính "kẹt quá lâu" từ đây.
+        ...(status === 'parsing' || status === 'converting' ? { parseStartedAt: new Date() } : {}),
+      },
     );
   }
 

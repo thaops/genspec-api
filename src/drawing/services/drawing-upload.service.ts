@@ -85,6 +85,32 @@ export class DrawingUploadService {
     return results;
   }
 
+  /**
+   * Bóc lại (retry) một bản vẽ bị kẹt/lỗi parse. Reset trạng thái về 'parsing'
+   * và re-emit DrawingUploadedEvent để chạy lại pipeline. Dùng chính url đã lưu
+   * (Cloudinary hoặc tmp) làm nguồn — parser tự resolve http URL về file.
+   */
+  async reparse(estimateId: string, drawingId: string) {
+    const drawing = await this.drawingModel.findOne({ _id: drawingId, estimateId }).lean() as any;
+    if (!drawing) throw new NotFoundException('Drawing not found');
+
+    const fileType = drawing.type as 'pdf' | 'dwg' | 'dxf' | 'image';
+    const storagePath: string = drawing.convertedUrl || drawing.url;
+
+    await this.drawingModel.updateOne(
+      { _id: drawingId },
+      { parseStatus: 'parsing', parseStartedAt: new Date(), $unset: { parseError: '' } },
+    );
+
+    this.logger.log(`[DrawingUpload] Reparse drawing ${drawingId} (type=${fileType})`);
+    this.events.emit(
+      DrawingUploadedEvent.EVENT,
+      new DrawingUploadedEvent(drawingId, estimateId, fileType, storagePath, 'user'),
+    );
+
+    return { ...drawing, id: drawingId, parseStatus: 'parsing', parseStartedAt: new Date(), parseError: undefined };
+  }
+
   /** User chỉnh tay bộ môn của một bản vẽ. */
   async setDiscipline(estimateId: string, drawingId: string, discipline: string) {
     if (!isDiscipline(discipline)) {
@@ -179,7 +205,7 @@ export class DrawingUploadService {
     // EventEmitter fallback — synchronous pipeline (no Redis)
     this.logger.log(`[DrawingUpload] No Redis queue — EventEmitter fallback for drawing ${drawingId} (type=${fileType})`);
 
-    await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'parsing' });
+    await this.drawingModel.updateOne({ _id: drawingId }, { parseStatus: 'parsing', parseStartedAt: new Date() });
     this.logger.log(`[DrawingUpload] Emitting DrawingUploadedEvent for drawing ${drawingId} (type=${fileType})`);
     this.events.emit(
       DrawingUploadedEvent.EVENT,
