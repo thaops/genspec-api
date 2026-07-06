@@ -13,7 +13,7 @@ import type {
 // (parse ×2, scene gzip, detect, insertMany, graph). Real drawings sit well under
 // this — hitting it means the file is pathological, so we truncate + warn instead
 // of hanging.
-const MAX_ENTITIES = 300_000;
+const MAX_ENTITIES = 120_000;
 
 // ---------------------------------------------------------------------------
 // Rich DXF document model — consumed by SceneBuilderService and by parse()

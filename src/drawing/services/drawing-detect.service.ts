@@ -44,24 +44,26 @@ export class DrawingDetectService {
     const userOverrides = await this.overrides.map(drawingId);
 
     await this.objectModel.deleteMany({ drawingId });
-    if (detected.length) {
-      const docs = detected.map((obj) => {
+    // Batch insert to bound peak memory on dense drawings (giant BSON array → OOM).
+    const CHUNK = 2000;
+    for (let i = 0; i < detected.length; i += CHUNK) {
+      const docs = detected.slice(i, i + CHUNK).map((obj) => {
         // Tier 4 — user correction wins over every detector tier.
         const forced = userOverrides.get(obj.stableId);
         return {
-        drawingId,
-        stableId: obj.stableId,
-        rawType: obj.rawType,
-        type: forced ?? obj.objectType,
-        layer: obj.layer,
-        boundingBox: obj.boundingBox,
-        geometry: obj.geometry,
-        confidence: forced ? 1 : obj.confidence,
-        detectionReason: forced ? 'Người dùng sửa (Tier 4)' : obj.detection?.reason,
-        candidates: forced ? [{ type: forced, prob: 1 }] : obj.detection?.candidates,
-        ambiguous: forced ? false : obj.detection?.ambiguous,
-        properties: obj.properties,
-        floor: obj.floor,
+          drawingId,
+          stableId: obj.stableId,
+          rawType: obj.rawType,
+          type: forced ?? obj.objectType,
+          layer: obj.layer,
+          boundingBox: obj.boundingBox,
+          geometry: obj.geometry,
+          confidence: forced ? 1 : obj.confidence,
+          detectionReason: forced ? 'Người dùng sửa (Tier 4)' : obj.detection?.reason,
+          candidates: forced ? [{ type: forced, prob: 1 }] : obj.detection?.candidates,
+          ambiguous: forced ? false : obj.detection?.ambiguous,
+          properties: obj.properties,
+          floor: obj.floor,
         };
       });
       await this.objectModel.insertMany(docs, { ordered: false });

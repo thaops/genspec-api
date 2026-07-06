@@ -103,23 +103,23 @@ export class DrawingJobProcessor extends WorkerHost {
       const userOverrides = await this.objectOverrides.map(drawingId);
 
       await this.objectModel.deleteMany({ drawingId });
-      if (detected.length) {
-        await this.objectModel.insertMany(
-          detected.map((o) => {
-            const forced = userOverrides.get(o.stableId); // Tier 4 — user correction wins
-            return {
-              drawingId, stableId: o.stableId, rawType: o.rawType,
-              type: forced ?? o.objectType, layer: o.layer,
-              boundingBox: o.boundingBox, geometry: o.geometry,
-              confidence: forced ? 1 : o.confidence,
-              detectionReason: forced ? 'Người dùng sửa (Tier 4)' : o.detection?.reason,
-              candidates: forced ? [{ type: forced, prob: 1 }] : o.detection?.candidates,
-              ambiguous: forced ? false : o.detection?.ambiguous,
-              properties: o.properties, floor: o.floor,
-            };
-          }),
-          { ordered: false },
-        );
+      // Batch insert: on dense drawings one giant BSON array is a real OOM source.
+      const CHUNK = 2000;
+      for (let i = 0; i < detected.length; i += CHUNK) {
+        const docs = detected.slice(i, i + CHUNK).map((o) => {
+          const forced = userOverrides.get(o.stableId); // Tier 4 — user correction wins
+          return {
+            drawingId, stableId: o.stableId, rawType: o.rawType,
+            type: forced ?? o.objectType, layer: o.layer,
+            boundingBox: o.boundingBox, geometry: o.geometry,
+            confidence: forced ? 1 : o.confidence,
+            detectionReason: forced ? 'Người dùng sửa (Tier 4)' : o.detection?.reason,
+            candidates: forced ? [{ type: forced, prob: 1 }] : o.detection?.candidates,
+            ambiguous: forced ? false : o.detection?.ambiguous,
+            properties: o.properties, floor: o.floor,
+          };
+        });
+        await this.objectModel.insertMany(docs, { ordered: false });
       }
 
       // 5. Index
