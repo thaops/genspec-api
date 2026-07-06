@@ -42,18 +42,49 @@ const NUMERIC_COL_INDEXES = [4, 5, 6];
 const THIN_BORDER = { s: 1, cl: { rgb: '#d0d0d0' } };
 const CELL_BORDER = { t: THIN_BORDER, b: THIN_BORDER, l: THIN_BORDER, r: THIN_BORDER };
 
-/** Header: đậm, nền xanh đậm, chữ trắng, căn giữa, khung mảnh. */
+// Viền dưới đậm màu navy — vạch ngăn header/dữ liệu rõ kể cả khi nền bị Univer
+// strip khi save (bug dedup style làm bg → "").
+const HEADER_BORDER = {
+  t: THIN_BORDER,
+  b: { s: 2, cl: { rgb: '#1e3a5f' } },
+  l: THIN_BORDER,
+  r: THIN_BORDER,
+};
+
+/**
+ * Header: đậm, chữ navy đậm trên nền xanh NHẠT + viền dưới đậm, căn giữa.
+ * KHÔNG dùng chữ trắng trên nền tối: Univer strip nền khi save (bg→"") khiến
+ * chữ trắng thành tàng hình ở sheet thứ 2/3 → trông như mất header. Chữ đậm màu
+ * đọc được cả khi mất nền, lại hợp light theme.
+ */
 export const TAKEOFF_HEADER_STYLE = {
   bl: 1,
-  bg: { rgb: '#1e3a5f' },
-  cl: { rgb: '#ffffff' },
+  bg: { rgb: '#e8eef6' },
+  cl: { rgb: '#1e3a5f' },
   ht: 2,
   vt: 2,
-  bd: CELL_BORDER,
+  bd: HEADER_BORDER,
 };
 
 /** Dòng chú thích giả định: italic, xám. */
 export const TAKEOFF_FOOTNOTE_STYLE = { it: 1, cl: { rgb: '#8a8f98' } };
+
+/**
+ * Dòng TIÊU ĐỀ SHEET (trên header cột): tên sheet đang xem — đậm, chữ trắng trên
+ * nền đậm màu (theo sheet). Đây là dòng 1 nên KHÔNG bị Univer strip nền như style
+ * deduped ở giữa; vẫn để border dày để nổi bật kể cả khi mất nền.
+ */
+export const TAKEOFF_TITLE_STYLE = {
+  bl: 1,
+  fs: 13,
+  bg: { rgb: '#dbe4f0' },
+  cl: { rgb: '#12233d' },
+  vt: 2,
+  bd: {
+    t: { s: 2, cl: { rgb: '#1e3a5f' } },
+    b: { s: 2, cl: { rgb: '#1e3a5f' } },
+  },
+};
 
 const REQUIRED_KEYS = ['stt', 'code', 'name', 'unit', 'quantity', 'note'] as const;
 
@@ -198,6 +229,8 @@ export function buildTakeoffFormatAction(
   footnoteRow?: number,
   /** Màu nền header (rgb) — mỗi sheet công tác 1 màu để phân biệt trực quan. */
   headerBg?: string,
+  /** Dòng TIÊU ĐỀ SHEET — style thanh tiêu đề trải hết 9 cột. */
+  titleRow?: number | null,
 ): Action {
   const columnWidths: Record<string, number> = {};
   TAKEOFF_COL_WIDTHS_PX.forEach((w, i) => (columnWidths[String(i)] = w));
@@ -206,6 +239,10 @@ export function buildTakeoffFormatAction(
     ? { ...TAKEOFF_HEADER_STYLE, bg: { rgb: headerBg } }
     : TAKEOFF_HEADER_STYLE;
   const cells: { cell: string; s: Record<string, any> }[] = [];
+  if (titleRow != null) {
+    // Style cả 9 cột → thanh tiêu đề trải hết chiều ngang (không cần merge).
+    COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${titleRow}`, s: TAKEOFF_TITLE_STYLE }));
+  }
   if (headerRow != null) {
     COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${headerRow}`, s: headerStyle }));
   }
@@ -262,7 +299,7 @@ export function rowsToUpdateCells(
   rows: RescueRow[],
   state: EstimateState,
   sheetNameHint?: string,
-  opts?: { footnote?: string; headerBg?: string },
+  opts?: { footnote?: string; headerBg?: string; title?: string },
 ): TableRescueResult | null {
   if (rows.length === 0) return null;
   const sheet = pickTargetSheet(state.sheets ?? [], sheetNameHint);
@@ -270,13 +307,14 @@ export function rowsToUpdateCells(
 
   const actions: Action[] = [];
   const last = lastOccupiedRow(sheet);
-  // Sheet đã có header block của engine ở dòng 1 → GHI ĐÈ từ dòng 2 (idempotent),
-  // không append thêm bảng thứ 2 mỗi lần bóc lại.
+  const hasTitle = !!opts?.title;
+  const titleRows = hasTitle ? 1 : 0;
+  // Header cột nằm ngay dưới title (dòng 2 nếu có title, dòng 1 nếu không).
+  const expectedHeaderRow = titleRows + 1;
+  // Layout engine đã có sẵn (title + header cột) → GHI ĐÈ data (idempotent).
   const hasEngineHeader =
-    currentValueAt(sheet, 'A1') === HEADER_LABELS.stt &&
-    currentValueAt(sheet, 'I1') === HEADER_LABELS.note;
-  let row = hasEngineHeader ? 2 : last === 0 ? 1 : last + 2; // trống → dòng 1; header engine → đè từ dòng 2; ngược lại append sau dòng occupied cuối + 1
-  const startRow = row;
+    currentValueAt(sheet, `A${expectedHeaderRow}`) === HEADER_LABELS.stt &&
+    currentValueAt(sheet, `I${expectedHeaderRow}`) === HEADER_LABELS.note;
 
   const written = new Set<string>();
   const push = (cell: string, newValue: string) => {
@@ -290,13 +328,33 @@ export function rowsToUpdateCells(
     });
   };
 
+  let titleRow: number | null = null;
   let headerRow: number | null = null;
-  if (last === 0) {
+  let row: number;
+
+  if (hasEngineHeader) {
+    // Bóc lại: giữ vị trí title + header, ghi lại text title (tên sheet có thể đổi).
+    if (hasTitle) { titleRow = 1; push(`A1`, opts!.title!); }
+    headerRow = expectedHeaderRow;
+    row = expectedHeaderRow + 1;
+  } else {
+    // Layout chưa khớp: nếu sheet có rác cũ → xoá sạch rồi ghi mới từ dòng 1.
+    if (last > 0) {
+      for (let r = 1; r <= last; r++) {
+        for (const letter of COL_LETTERS) {
+          const cell = `${letter}${r}`;
+          if (currentValueAt(sheet, cell) !== '') push(cell, '');
+        }
+      }
+    }
+    row = 1;
+    if (hasTitle) { titleRow = row; push(`A${row}`, opts!.title!); row++; }
     headerRow = row;
     COLUMN_ORDER.forEach((key, i) => push(`${COL_LETTERS[i]}${row}`, HEADER_LABELS[key]));
     row++;
   }
 
+  const startRow = titleRow ?? headerRow;
   const dataStartRow = row;
   for (const record of rows) {
     COLUMN_ORDER.forEach((key, i) => push(`${COL_LETTERS[i]}${row}`, record[key] ?? ''));
@@ -304,16 +362,16 @@ export function rowsToUpdateCells(
   }
   const endRow = row - 1;
 
+  // Chú thích ngay dưới dòng data cuối (không chừa dòng trống → không trông như bảng bị cắt).
   let footnoteRow: number | undefined;
   if (opts?.footnote) {
-    footnoteRow = endRow + 2; // cách 1 dòng trống
+    footnoteRow = endRow + 1;
     push(`B${footnoteRow}`, opts.footnote);
   }
 
   if (hasEngineHeader) {
-    // Xoá rác cũ thừa ra: mọi ô còn giá trị từ dòng 2 đến dòng occupied cuối cũ
-    // (dòng data cũ dư + footnote cũ) mà lần ghi này không đè lên.
-    for (let r = 2; r <= last; r++) {
+    // Dọn rác data/footnote cũ dư ra dưới vùng vừa ghi.
+    for (let r = dataStartRow; r <= last; r++) {
       for (const letter of COL_LETTERS) {
         const cell = `${letter}${r}`;
         if (written.has(cell)) continue;
@@ -321,10 +379,11 @@ export function rowsToUpdateCells(
         push(cell, '');
       }
     }
-    headerRow = 1; // giữ style header khi re-format (không ghi lại text header)
   }
 
-  const formatAction = buildTakeoffFormatAction(sheet.id, headerRow, dataStartRow, endRow, footnoteRow, opts?.headerBg);
+  const formatAction = buildTakeoffFormatAction(
+    sheet.id, headerRow, dataStartRow, endRow, footnoteRow, opts?.headerBg, titleRow,
+  );
   return { actions, sheetName: sheet.name, startRow, endRow, formatAction, footnoteRow };
 }
 

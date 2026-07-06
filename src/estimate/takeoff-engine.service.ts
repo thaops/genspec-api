@@ -69,6 +69,9 @@ export const COMMON_FALLBACK_CODES: Record<TakeoffRowKey, { code: string; name: 
   window: { code: 'AH.12110', name: 'Cửa sổ' },
   slab: { code: 'AF.61720', name: 'Bê tông sàn đá 1x2 M250' },
   floor_finish: { code: 'AK.51110', name: 'Lát nền gạch' },
+  ceiling: { code: 'AK.64110', name: 'Trần thạch cao khung xương' },
+  ceiling_paint: { code: 'AK.84330', name: 'Sơn trần' },
+  skirting: { code: 'AK.57110', name: 'Ốp/len chân tường' },
 };
 
 export type TakeoffRowKey =
@@ -82,7 +85,10 @@ export type TakeoffRowKey =
   | 'door'
   | 'window'
   | 'slab'
-  | 'floor_finish';
+  | 'floor_finish'
+  | 'ceiling'         // trần (= diện tích sàn) — suy ra
+  | 'ceiling_paint'   // sơn trần (= diện tích trần)
+  | 'skirting';       // len/chân tường (= chiều dài tường)
 
 export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
 
@@ -100,7 +106,7 @@ export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
  * không vỡ bản vẽ đơn chưa gắn bộ môn).
  */
 export const DISCIPLINE_ROWKEYS: Record<Discipline, TakeoffRowKey[] | null> = {
-  KT: ['wall_area', 'wall_volume', 'wall_paint', 'door', 'window', 'floor_finish'],
+  KT: ['wall_area', 'wall_volume', 'wall_paint', 'door', 'window', 'floor_finish', 'ceiling', 'ceiling_paint', 'skirting'],
   KC: ['column_concrete', 'column_formwork', 'beam_concrete', 'beam_formwork', 'slab'],
   DIEN: [],
   NUOC: [],
@@ -227,6 +233,9 @@ export const NORM_KEYWORDS: Record<TakeoffRowKey, string[]> = {
   window: ['cửa sổ', 'cửa'],
   slab: ['bê tông.*sàn'],
   floor_finish: ['lát nền', 'lát.*gạch', 'lát'],
+  ceiling: ['trần thạch cao', 'trần.*khung', 'trần'],
+  ceiling_paint: ['sơn.*trần'],
+  skirting: ['len chân tường', 'len tường', 'ốp.*chân tường'],
 };
 
 /** Nhóm công tác BOQ chuẩn TT13/2021 cho mỗi dòng đo được. */
@@ -246,6 +255,9 @@ const BOQ_GROUP: Record<TakeoffRowKey, string> = {
   floor_finish: BOQ_GROUP_FINISH,
   door: BOQ_GROUP_FINISH,
   window: BOQ_GROUP_FINISH,
+  ceiling: BOQ_GROUP_FINISH,
+  ceiling_paint: BOQ_GROUP_FINISH,
+  skirting: BOQ_GROUP_FINISH,
 };
 
 /** Thứ tự trình bày nhóm BOQ (thô trước, hoàn thiện sau, khác cuối). */
@@ -286,6 +298,9 @@ const ROWKEY_SHEET: Record<TakeoffRowKey, string> = {
   slab: 'structure',
   wall_paint: 'finishing',
   floor_finish: 'finishing',
+  ceiling: 'finishing',
+  ceiling_paint: 'finishing',
+  skirting: 'finishing',
   door: 'openings',
   window: 'openings',
 };
@@ -338,7 +353,11 @@ export const CHECKLIST_QS: {
     need: ['DIEN', 'NUOC'],
     haveReason: 'đã có bản Điện/Nước — chưa nhận diện được công tác MEP, cần khoanh vùng/gán loại',
   },
-  { name: 'Cầu thang, lanh tô, mái, chống thấm', reason: 'cần bản chi tiết / khoanh vùng thủ công' },
+  { name: 'Ốp lát WC/bếp, gạch trang trí, len chân tường (từng loại)', reason: 'cần khoanh vùng nền/tường theo phòng — không tách được vật liệu từ nét mặt bằng' },
+  { name: 'Chống thấm WC/ban công/mái', reason: 'cần khoanh vùng khu vệ sinh/ban công/mái' },
+  { name: 'Trần (thạch cao/nhôm) từng loại, chi tiết trần', reason: 'đã suy diện tích trần ≈ sàn — cần tách loại trần theo phòng' },
+  { name: 'Cầu thang, lan can, tay vịn, ram dốc, bậc tam cấp, bó vỉa', reason: 'cần bản chi tiết / khoanh vùng thủ công' },
+  { name: 'Mái, mái kính, mái che, vách kính, vách ngăn, lanh tô', reason: 'cần bản chi tiết / mặt đứng — không bóc được từ mặt bằng' },
 ];
 
 /** Reason phản ánh ĐÚNG cái còn thiếu theo bộ môn đã có trong estimate. */
@@ -369,6 +388,9 @@ const DEFAULT_NAMES: Record<TakeoffRowKey, string> = {
   window: 'Cửa sổ',
   slab: 'Sàn (bê tông)',
   floor_finish: 'Lát nền',
+  ceiling: 'Trần',
+  ceiling_paint: 'Sơn trần',
+  skirting: 'Len/chân tường',
 };
 
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -621,6 +643,14 @@ export function computeTakeoffRows(
       m2,
       `bả+sơn theo diện tích trát: ${f3(m2)} m² × 1 (hệ số 1:1) = ${f3(m2)} m²`,
     );
+    // Len/chân tường: chạy dọc chân tường ≈ chiều dài tường (suy ra, cần đối chiếu).
+    push(
+      'skirting',
+      'wall',
+      'm',
+      wall.length,
+      `len/chân tường theo chiều dài tường = ${f3(wall.length)} m`,
+    );
   }
 
   const column = totals.get('column');
@@ -695,6 +725,9 @@ export function computeTakeoffRows(
     // Hai dòng bản chất khác nhau → diễn giải RIÊNG, không lặp nguyên văn.
     push('slab', 'slab', 'm2', slabArea, `Diện tích sàn từ ${slabSrc} = ${f3(slabArea)} m² (BT sàn/mái)`);
     push('floor_finish', 'slab', 'm2', slabArea, `Lát nền theo diện tích sàn (${slabSrc}) = ${f3(slabArea)} m²`);
+    // Trần + sơn trần: diện tích trần ≈ diện tích sàn (suy ra, cần đối chiếu).
+    push('ceiling', 'slab', 'm2', slabArea, `trần theo diện tích sàn = ${f3(slabArea)} m²`);
+    push('ceiling_paint', 'slab', 'm2', slabArea, `sơn trần theo diện tích trần = ${f3(slabArea)} m²`);
   }
 
   // Sắp theo nhóm BOQ (thô → hoàn thiện → khác) để reducer/sheet hiển thị header
@@ -994,7 +1027,7 @@ export class TakeoffEngineService {
         })),
         state,
         sheetDef.name,
-        { headerBg: sheetDef.headerBg, ...(isLast ? { footnote: assumptionFootnote(a) } : {}) },
+        { title: sheetDef.name.toUpperCase(), ...(isLast ? { footnote: assumptionFootnote(a) } : {}) },
       );
       if (mirror) mirrorActions.push(...mirror.actions, mirror.formatAction);
     });
