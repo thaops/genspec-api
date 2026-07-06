@@ -391,12 +391,16 @@ export class DrawingDetectorService {
       const cands = o.detection.candidates;
       const has = (t: string) => cands.some((c) => c.type === t);
 
-      // (a) Linear element whose two endpoints rest on verticals → structural beam.
-      if ((has('beam') || has('wall')) && o.geometry.length >= 2) {
-        const p0 = o.geometry[0];
-        const p1 = o.geometry[o.geometry.length - 1];
-        if (p0 && p1 && vGrid.hits(p0) && vGrid.hits(p1)) {
-          this.applyBoost(o, 'beam', 2.2, 'Endpoints rest on columns → spans between supports');
+      // (a) Linear element whose two far ends rest on verticals → structural beam.
+      // Use bbox ends along the long axis (works for closed rectangles too, whose
+      // polyline first/last vertex coincide and would give a single point).
+      if (has('beam') || has('wall')) {
+        const bb = o.boundingBox;
+        const [e0, e1]: number[][] = bb.w >= bb.h
+          ? [[bb.x, bb.y + bb.h / 2], [bb.x + bb.w, bb.y + bb.h / 2]]
+          : [[bb.x + bb.w / 2, bb.y], [bb.x + bb.w / 2, bb.y + bb.h]];
+        if (vGrid.hits(e0) && vGrid.hits(e1)) {
+          this.applyBoost(o, 'beam', 2.2, 'Two ends rest on columns → spans between supports');
           continue;
         }
       }
