@@ -450,8 +450,8 @@ const TYPE_LABELS_VI: Record<string, string> = {
   dimension: 'dimension', unknown: 'chưa phân loại',
 };
 
-/** Các loại đã bóc được (trực tiếp hoặc qua hatch→sàn). */
-const TAKEN_TYPES = new Set<string>([...MEASURED_TYPES, 'hatch']);
+/** Các loại đã bóc được (trực tiếp, qua hatch→sàn, hoặc opening/slab-typed). */
+const TAKEN_TYPES = new Set<string>([...MEASURED_TYPES, 'hatch', 'opening', 'slab']);
 
 /**
  * 1 dòng thống kê (KHÔNG phải công tác) để user biết bản vẽ còn gì chưa bóc,
@@ -488,10 +488,13 @@ export function computeTakeoffRows(
   /** Lọc theo bộ môn: chỉ sinh rowKey trong tập này. null/undefined = tất cả. */
   allowedKeys?: Set<TakeoffRowKey> | null,
 ): TakeoffEngineRow[] {
+  // Ngoài MEASURED_TYPES, còn gom 'opening' (lỗ mở/cửa sổ) và 'slab' (sàn vẽ
+  // dạng polygon) để có nhánh đo — tăng coverage cho type đã nhận diện.
+  const AGG_TYPES = new Set<string>([...MEASURED_TYPES, 'opening', 'slab']);
   const totals = new Map<string, GroupTotals>();
   for (const obj of objects) {
     if (!isCountableObject(obj)) continue;
-    if (!(MEASURED_TYPES as readonly string[]).includes(obj.type)) continue;
+    if (!AGG_TYPES.has(obj.type)) continue;
     const m = measure(obj, factor);
     const g = totals.get(obj.type) ?? { count: 0, length: 0, area: 0, perimeter: 0 };
     g.count += 1;
@@ -607,19 +610,35 @@ export function computeTakeoffRows(
     push('door', 'door', 'm2', door.area, `tổng diện tích ${door.count} cửa = ${f3(door.area)} m²`);
   }
 
+  // Cửa sổ + lỗ mở (opening): gộp diện tích — opening trên mặt bằng không có cánh
+  // thường là cửa sổ/ô thoáng. Đo m² như cửa.
   const window = totals.get('window');
-  if (window) {
-    push('window', 'window', 'm2', window.area, `tổng diện tích ${window.count} cửa sổ = ${f3(window.area)} m²`);
+  const opening = totals.get('opening');
+  const winArea = (window?.area ?? 0) + (opening?.area ?? 0);
+  const winCount = (window?.count ?? 0) + (opening?.count ?? 0);
+  if (winArea > 0) {
+    const openNote = opening?.count ? ` (gồm ${opening.count} lỗ mở)` : '';
+    push('window', 'window', 'm2', winArea, `tổng diện tích ${winCount} cửa sổ/lỗ mở = ${f3(winArea)} m²${openNote}`);
   }
 
-  // Sàn/nền bóc từ hatch (đo thật, lọc outlier). Chỉ sinh dòng khi có ≥1 hatch
-  // đủ tin cậy — không có → không thêm dòng (finding riêng ở service).
+  // Sàn/nền: ưu tiên đo từ hatch (lọc outlier). Nếu không có hatch đủ tin cậy
+  // nhưng có object type 'slab' (sàn vẽ dạng polygon) → dùng diện tích slab làm
+  // nguồn thay thế. KHÔNG cộng cả hai để tránh đếm trùng cùng một mặt sàn.
   const hs = hatchSlabStats(objects, factor);
+  const slabTyped = totals.get('slab');
+  let slabArea = 0;
+  let slabSrc = '';
   if (hs.used >= 1 && hs.area > 0) {
-    const dropInfo = `${hs.used} mảng hatch (bỏ ${hs.dropped} ngoài ngưỡng ${HATCH_MIN_AREA}m²–${HATCH_MAX_SHARE * 100}%)`;
+    slabArea = hs.area;
+    slabSrc = `${hs.used} mảng hatch (bỏ ${hs.dropped} ngoài ngưỡng ${HATCH_MIN_AREA}m²–${HATCH_MAX_SHARE * 100}%)`;
+  } else if (slabTyped && slabTyped.area > 0) {
+    slabArea = round3(slabTyped.area);
+    slabSrc = `${slabTyped.count} polygon sàn (type=slab)`;
+  }
+  if (slabArea > 0) {
     // Hai dòng bản chất khác nhau → diễn giải RIÊNG, không lặp nguyên văn.
-    push('slab', 'slab', 'm2', hs.area, `Diện tích sàn từ ${dropInfo} = ${f3(hs.area)} m² (BT sàn/mái)`);
-    push('floor_finish', 'slab', 'm2', hs.area, `Lát nền theo diện tích sàn = ${f3(hs.area)} m²`);
+    push('slab', 'slab', 'm2', slabArea, `Diện tích sàn từ ${slabSrc} = ${f3(slabArea)} m² (BT sàn/mái)`);
+    push('floor_finish', 'slab', 'm2', slabArea, `Lát nền theo diện tích sàn (${slabSrc}) = ${f3(slabArea)} m²`);
   }
 
   // Sắp theo nhóm BOQ (thô → hoàn thiện → khác) để reducer/sheet hiển thị header
