@@ -196,13 +196,18 @@ export function buildTakeoffFormatAction(
   dataStartRow: number,
   dataEndRow: number,
   footnoteRow?: number,
+  /** Màu nền header (rgb) — mỗi sheet công tác 1 màu để phân biệt trực quan. */
+  headerBg?: string,
 ): Action {
   const columnWidths: Record<string, number> = {};
   TAKEOFF_COL_WIDTHS_PX.forEach((w, i) => (columnWidths[String(i)] = w));
 
+  const headerStyle = headerBg
+    ? { ...TAKEOFF_HEADER_STYLE, bg: { rgb: headerBg } }
+    : TAKEOFF_HEADER_STYLE;
   const cells: { cell: string; s: Record<string, any> }[] = [];
   if (headerRow != null) {
-    COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${headerRow}`, s: TAKEOFF_HEADER_STYLE }));
+    COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${headerRow}`, s: headerStyle }));
   }
   for (let r = dataStartRow; r <= dataEndRow; r++) {
     COL_LETTERS.forEach((letter, i) => {
@@ -257,7 +262,7 @@ export function rowsToUpdateCells(
   rows: RescueRow[],
   state: EstimateState,
   sheetNameHint?: string,
-  opts?: { footnote?: string },
+  opts?: { footnote?: string; headerBg?: string },
 ): TableRescueResult | null {
   if (rows.length === 0) return null;
   const sheet = pickTargetSheet(state.sheets ?? [], sheetNameHint);
@@ -319,7 +324,7 @@ export function rowsToUpdateCells(
     headerRow = 1; // giữ style header khi re-format (không ghi lại text header)
   }
 
-  const formatAction = buildTakeoffFormatAction(sheet.id, headerRow, dataStartRow, endRow, footnoteRow);
+  const formatAction = buildTakeoffFormatAction(sheet.id, headerRow, dataStartRow, endRow, footnoteRow, opts?.headerBg);
   return { actions, sheetName: sheet.name, startRow, endRow, formatAction, footnoteRow };
 }
 

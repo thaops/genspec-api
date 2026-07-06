@@ -252,6 +252,45 @@ const BOQ_GROUP: Record<TakeoffRowKey, string> = {
 const BOQ_GROUP_ORDER = [BOQ_GROUP_THO, BOQ_GROUP_FINISH, BOQ_GROUP_OTHER];
 
 /**
+ * Phân sheet BOQ theo nhóm công tác QS (bản kiến trúc): thay vì dồn tất cả vào
+ * 1 sheet "Khối lượng", tách 3 sheet để QS đọc theo trình tự chuẩn TT17/2019.
+ * Mỗi sheet 1 màu header để phân biệt trực quan + cảm giác "lật trang" khi bóc.
+ */
+export interface BoqSheetDef {
+  key: string;
+  name: string;
+  /** Màu nền header (rgb). */
+  headerBg: string;
+}
+
+export const BOQ_SHEETS: readonly BoqSheetDef[] = [
+  { key: 'structure', name: '1. Kết cấu & bao che', headerBg: '#1e3a5f' }, // xanh dương đậm
+  { key: 'finishing', name: '2. Hoàn thiện bề mặt', headerBg: '#14532d' }, // xanh lá đậm
+  { key: 'openings', name: '3. Cửa & phụ kiện', headerBg: '#713f12' }, // hổ phách đậm
+] as const;
+
+/** Tên 3 sheet (thứ tự) — FE dùng để tạo sheet trước khi bóc. */
+export const BOQ_SHEET_NAMES = BOQ_SHEETS.map((s) => s.name);
+
+/**
+ * rowKey → sheet đích. Xây + trát (bao che) và cấu kiện chịu lực → sheet 1;
+ * bả/sơn + lát nền → sheet 2; cửa đi/sổ → sheet 3.
+ */
+const ROWKEY_SHEET: Record<TakeoffRowKey, string> = {
+  wall_volume: 'structure',
+  wall_area: 'structure',
+  column_concrete: 'structure',
+  column_formwork: 'structure',
+  beam_concrete: 'structure',
+  beam_formwork: 'structure',
+  slab: 'structure',
+  wall_paint: 'finishing',
+  floor_finish: 'finishing',
+  door: 'openings',
+  window: 'openings',
+};
+
+/**
  * Tên hiển thị cột "Tên công tác": web/fallback LUÔN dùng tên chuẩn engine; tên DB
  * chỉ dùng khi gọn (≤60 ký tự và ≤50% chữ viết hoa) — ngược lại rơi về tên chuẩn.
  * Chống tên web "SB.82510 SƠN DẦM, TRẦN, CỘT, TƯỜNG TRONG NHÀ...". PURE.
@@ -845,28 +884,42 @@ export class TakeoffEngineService {
       note: r.note,
     }));
     const a = input.assumptions;
-    const mirror = rowsToUpdateCells(
-      rows.map((r, i) => ({
-        stt: String(i + 1),
-        code: r.code,
-        name: r.name,
-        unit: r.unit,
-        quantity: String(r.quantity),
-        note: r.note,
-        unitPrice: r.unitPrice != null ? String(r.unitPrice) : '',
-        total: r.totalPrice != null ? String(r.totalPrice) : '',
-        source: r.source ?? '—',
-      })),
-      state,
-      'Khối lượng',
-      { footnote: assumptionFootnote(a) },
-    );
+    // Route mỗi dòng vào sheet công tác của nó (structure/finishing/openings) —
+    // STT khởi động lại theo từng sheet, header màu riêng. Chú thích giả định chỉ
+    // ghi ở sheet cuối cùng có dữ liệu để tránh lặp.
+    const rowsBySheet = new Map<string, TakeoffEngineRow[]>();
+    for (const r of rows) {
+      const sk = ROWKEY_SHEET[r.key] ?? BOQ_SHEETS[0].key;
+      (rowsBySheet.get(sk) ?? rowsBySheet.set(sk, []).get(sk)!).push(r);
+    }
+    const filledSheets = BOQ_SHEETS.filter((s) => (rowsBySheet.get(s.key)?.length ?? 0) > 0);
+    const mirrorActions: Action[] = [];
+    filledSheets.forEach((sheetDef, si) => {
+      const sheetRows = rowsBySheet.get(sheetDef.key)!;
+      const isLast = si === filledSheets.length - 1;
+      const mirror = rowsToUpdateCells(
+        sheetRows.map((r, i) => ({
+          stt: String(i + 1),
+          code: r.code,
+          name: r.name,
+          unit: r.unit,
+          quantity: String(r.quantity),
+          note: r.note,
+          unitPrice: r.unitPrice != null ? String(r.unitPrice) : '',
+          total: r.totalPrice != null ? String(r.totalPrice) : '',
+          source: r.source ?? '—',
+        })),
+        state,
+        sheetDef.name,
+        { headerBg: sheetDef.headerBg, ...(isLast ? { footnote: assumptionFootnote(a) } : {}) },
+      );
+      if (mirror) mirrorActions.push(...mirror.actions, mirror.formatAction);
+    });
     // format_sheet đi SAU block update_cells: widths + header + border + căn số + chú thích italic.
     const actions: Action[] = [
       ...cleanupActions,
       ...takeoffActions,
-      ...(mirror?.actions ?? []),
-      ...(mirror ? [mirror.formatAction] : []),
+      ...mirrorActions,
     ];
 
     const groups = [...new Set(rows.map((r) => r.group))];
