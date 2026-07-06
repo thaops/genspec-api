@@ -248,12 +248,12 @@ export function buildTakeoffFormatAction(
   // Style tiêu đề/header theo màu sheet — chữ accent ĐẬM (đọc được cả khi nền bị strip).
   const titleStyle = theme
     ? {
-        bl: 1, fs: 13, vt: 2,
+        bl: 1, fs: 13, ht: 2, vt: 2,
         bg: { rgb: theme.tint },
         cl: { rgb: theme.accent },
         bd: { t: { s: 2, cl: { rgb: theme.accent } }, b: { s: 2, cl: { rgb: theme.accent } } },
       }
-    : TAKEOFF_TITLE_STYLE;
+    : { ...TAKEOFF_TITLE_STYLE, ht: 2 };
   const headerStyle = theme
     ? {
         bl: 1, ht: 2, vt: 2,
@@ -282,7 +282,12 @@ export function buildTakeoffFormatAction(
   }
   if (footnoteRow != null) cells.push({ cell: `B${footnoteRow}`, s: TAKEOFF_FOOTNOTE_STYLE });
 
-  return { type: 'format_sheet', sheetId, columnWidths, cells };
+  // Merge thanh tiêu đề trải hết 9 cột (A..I) để căn giữa toàn bảng.
+  const merges = titleRow != null
+    ? [{ startRow: titleRow - 1, startColumn: 0, endRow: titleRow - 1, endColumn: COL_LETTERS.length - 1 }]
+    : undefined;
+
+  return { type: 'format_sheet', sheetId, columnWidths, cells, ...(merges ? { merges } : {}) };
 }
 
 /**

@@ -18,11 +18,12 @@ export class AiService {
 
   constructor(private readonly config: ConfigService) {
     this.geminiKey = this.config.get<string>('GEMINI_API_KEY');
-    // Model mới nhất: Gemini 3 Flash. Nếu tên chưa mở cho tier của key →
-    // fallback tự rơi về gemini-flash-latest (luôn trỏ bản Flash mới nhất) →
-    // gemini-2.5-flash. Override qua env GEMINI_MODEL/GEMINI_SEARCH_MODEL.
-    const estimate = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-3-flash';
-    const search = this.config.get<string>('GEMINI_SEARCH_MODEL') ?? 'gemini-3-flash';
+    // Default gemini-2.5-flash: model DUY NHẤT test được với key này CÓ grounding
+    // (Google Search) thật — gemini-3-flash/gemini-3.5-flash KHÔNG tồn tại (call lỗi),
+    // để làm default sẽ khiến research rơi rỗng → agent bịa giá. Override qua env
+    // GEMINI_MODEL/GEMINI_SEARCH_MODEL nếu sau này có model mới ground được.
+    const estimate = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.5-flash';
+    const search = this.config.get<string>('GEMINI_SEARCH_MODEL') ?? 'gemini-2.5-flash';
     this.geminiEstimateModels = [...new Set([estimate, 'gemini-flash-latest', 'gemini-2.5-flash'])];
     this.geminiSearchModels = [...new Set([search, 'gemini-flash-latest', 'gemini-2.5-flash'])];
     // -1 = dynamic (model decides), 0 = off
@@ -57,16 +58,23 @@ export class AiService {
     if (!this.gemini) {
       return null;
     }
+    // Deadline TỔNG cho cả vòng model×attempt — chống treo ~160s khi key tier
+    // thiếu grounding (mỗi model timeout 20s + retry chồng lên nhau).
+    const OVERALL_MS = 30000;
+    const deadline = Date.now() + OVERALL_MS;
     for (const modelName of this.geminiSearchModels) {
+      if (Date.now() >= deadline) break;
       const model = this.gemini.getGenerativeModel({
         model: modelName,
         tools: [{ googleSearch: {} }] as unknown as never,
       });
       for (let attempt = 1; attempt <= 2; attempt++) {
+        const budget = deadline - Date.now();
+        if (budget <= 0) return null;
         try {
-          // 20-second timeout — grounding can be slow but shouldn't block the whole response
+          // Timeout min(20s, ngân sách còn lại của deadline tổng).
           const timeout = new Promise<never>((_, rej) =>
-            setTimeout(() => rej(new Error('research timeout')), 20000),
+            setTimeout(() => rej(new Error('research timeout')), Math.min(20000, budget)),
           );
           const r = await Promise.race([model.generateContent(query), timeout]);
           const text = r.response.text();

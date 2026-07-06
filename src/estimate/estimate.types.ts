@@ -199,6 +199,8 @@ export type Action =
       columnWidths?: Record<string, number>;
       /** Style object Univer gắn inline vào cell.s (giữ nguyên v/f hiện có). */
       cells?: { cell: string; s: Record<string, any> }[];
+      /** Vùng merge (0-based, Univer IRange) — vd thanh tiêu đề trải hết cột. */
+      merges?: { startRow: number; startColumn: number; endRow: number; endColumn: number }[];
     }
   | { type: 'set_sheets'; sheets: Sheet[] }
   | { type: 'clear' };

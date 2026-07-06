@@ -260,6 +260,15 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
           }
           data.cellData = cellData;
         }
+        if (a.merges?.length) {
+          const existing = Array.isArray(data.mergeData) ? [...data.mergeData] : [];
+          const key = (m: any) => `${m.startRow}:${m.startColumn}:${m.endRow}:${m.endColumn}`;
+          const seen = new Set(existing.map(key));
+          for (const m of a.merges) {
+            if (!seen.has(key(m))) { existing.push(m); seen.add(key(m)); }
+          }
+          data.mergeData = existing;
+        }
         return { ...s, data };
       });
       return { ...state, sheets: nextSheets };
