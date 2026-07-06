@@ -68,6 +68,19 @@ export class DrawingSceneService {
     return this.buildAndPersistFromDoc(drawingId, doc);
   }
 
+  /**
+   * Build scene from an ALREADY-PARSED DxfDocument — used by the upload pipeline so
+   * the DXF is parsed once (not re-read + re-tokenized), halving peak memory.
+   * Never throws (logs instead).
+   */
+  async buildAndPersistFromDxfDoc(drawingId: string, doc: DxfDocument): Promise<void> {
+    try {
+      await this.buildAndPersistFromDoc(drawingId, doc);
+    } catch (err: any) {
+      this.logger.warn(`[Scene] build failed for drawing ${drawingId}: ${err.message}`);
+    }
+  }
+
   private async buildAndPersistFromDoc(drawingId: string, doc: DxfDocument): Promise<DrawingScene> {
     let scene = this.builder.build(doc);
     let json = JSON.stringify(scene);

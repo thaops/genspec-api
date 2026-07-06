@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
+import * as readline from 'readline';
 import type {
   DrawingParserInterface,
   DrawingParseResult,
@@ -86,12 +87,11 @@ export class DxfParserService implements DrawingParserInterface {
   private readonly logger = new Logger(DxfParserService.name);
 
   async parse(filePath: string): Promise<DrawingParseResult> {
-    const raw = fs.readFileSync(filePath);
-    if (raw.length >= 4 && raw.toString('ascii', 0, 4) === 'AC10') {
-      throw new Error(`File is a binary DWG (${raw.toString('ascii', 0, 6)}), not DXF. Upload as .dwg or re-export as ASCII DXF from AutoCAD.`);
-    }
-    const doc = this.parseContent(raw.toString('utf-8'));
+    return this.docToResult(await this.parseFileStreaming(filePath));
+  }
 
+  /** Map an already-parsed DXF document to the pipeline's DrawingParseResult. */
+  docToResult(doc: DxfDocument): DrawingParseResult {
     const entities: RawEntity[] = doc.entities.map((e) => this.toRawEntity(e)).concat(doc.extras);
     const bbox = this.computeBounds(doc);
 
@@ -112,6 +112,176 @@ export class DxfParserService implements DrawingParserInterface {
       metadata: { units: doc.units },
       parserVersion: 'dxf-ascii@2',
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Streaming parser — bounds peak memory for arbitrarily large DXF files.
+  // Reads the file line-by-line (never the whole string), groups tags into one
+  // record at a time (a code-0 marker + its trailing non-zero tags), and reuses
+  // the existing per-record readers. Peak memory ≈ blocks + emitted entities
+  // (capped) instead of full-string(2×) + full-tag-array. Same output shape as
+  // parseContent(), guarded by a parity test.
+  // -------------------------------------------------------------------------
+
+  /** Stream {marker, body} records from a DXF file without loading it whole. */
+  private async *streamRecords(filePath: string): AsyncGenerator<{ marker: string; body: Tag[] }> {
+    const rl = readline.createInterface({
+      input: fs.createReadStream(filePath, { encoding: 'utf-8' }),
+      crlfDelay: Infinity,
+    });
+    let expectCode = true;
+    let code = 0;
+    let marker: string | null = null;
+    let body: Tag[] = [];
+    for await (const rawLine of rl) {
+      const line = rawLine.trim();
+      if (expectCode) {
+        code = parseInt(line, 10);
+        expectCode = false;
+      } else {
+        expectCode = true;
+        if (Number.isNaN(code)) continue;
+        if (code === 0) {
+          if (marker !== null) yield { marker, body };
+          marker = line;
+          body = [];
+        } else if (marker !== null) {
+          body.push({ code, value: line });
+        }
+      }
+    }
+    if (marker !== null) yield { marker, body };
+  }
+
+  async parseFileStreaming(filePath: string): Promise<DxfDocument> {
+    // Cheap binary-DWG guard from a tiny header read (avoids a full buffer copy).
+    try {
+      const fd = fs.openSync(filePath, 'r');
+      const hb = Buffer.alloc(6);
+      fs.readSync(fd, hb, 0, 6, 0);
+      fs.closeSync(fd);
+      if (hb.toString('ascii').startsWith('AC10')) {
+        throw new Error(`File is a binary DWG (${hb.toString('ascii')}), not DXF. Upload as .dwg or re-export as ASCII DXF from AutoCAD.`);
+      }
+    } catch (e: any) {
+      if (String(e?.message).includes('binary DWG')) throw e;
+    }
+
+    const doc: DxfDocument = { units: 'unknown', layers: [], entities: [], extras: [] };
+    const blocks = new Map<string, DxfBlock>();
+    const sceneTypes = new Set(['LINE', 'LWPOLYLINE', 'CIRCLE', 'ARC', 'TEXT', 'MTEXT']);
+    const extraTypes = new Set(['DIMENSION', 'LEADER', 'MULTILEADER', 'HATCH', 'VIEWPORT', 'SPLINE']);
+
+    let section = '';
+    let curBlock: DxfBlock | null = null;
+    // Active POLYLINE assembly (spans VERTEX* records until SEQEND).
+    let poly: { head: Tag[]; verts: Array<{ x: number; y: number; bulge: number }>; target: DxfEntity[] } | null = null;
+    let capped = false;
+
+    const closePoly = () => {
+      if (!poly) return;
+      const p = poly; poly = null;
+      if (p.verts.length < 2) return;
+      const { layer, colorIndex, lineType, lineweight } = this.common(p.head);
+      const closed = (this.num(p.head, 70, 0) & 1) === 1;
+      p.target.push({ kind: 'pline', layer, colorIndex, lineType, lineweight, closed, pts: this.tessellate(p.verts, closed) });
+    };
+
+    // Route one entity record into a target (block defn vs live entities).
+    const handleEntity = (marker: string, bodyTags: Tag[], target: DxfEntity[], inBlock: boolean) => {
+      if (marker === 'INSERT') {
+        const ins = this.readInsert(bodyTags);
+        if (!ins) return;
+        if (inBlock) curBlock!.inserts.push(ins);
+        else this.expandInsert(ins, blocks, doc.entities, new Set(), 0);
+        return;
+      }
+      if (sceneTypes.has(marker)) {
+        const ent = this.buildEntity(marker, bodyTags);
+        if (ent) target.push(ent);
+        return;
+      }
+      if (!inBlock && extraTypes.has(marker)) {
+        doc.extras.push(this.genericRawEntity(marker, bodyTags));
+      }
+    };
+
+    for await (const rec of this.streamRecords(filePath)) {
+      const m = rec.marker;
+
+      if (m === 'SECTION') {
+        closePoly();
+        section = rec.body.find((t) => t.code === 2)?.value ?? '';
+        if (section === 'HEADER') this.applyHeaderBody(rec.body, doc);
+        curBlock = null;
+        continue;
+      }
+      if (m === 'ENDSEC') { closePoly(); section = ''; curBlock = null; continue; }
+
+      if (section === 'TABLES') {
+        if (m === 'LAYER') {
+          const name = rec.body.find((t) => t.code === 2)?.value;
+          const ci = rec.body.find((t) => t.code === 62);
+          if (name) doc.layers.push({ name, colorIndex: ci ? Math.abs(parseInt(ci.value, 10)) || undefined : undefined });
+        }
+        continue;
+      }
+
+      if (section === 'BLOCKS') {
+        if (m === 'BLOCK') {
+          closePoly();
+          curBlock = {
+            name: rec.body.find((t) => t.code === 2)?.value ?? '',
+            baseX: this.num(rec.body, 10), baseY: this.num(rec.body, 20),
+            entities: [], inserts: [],
+          };
+        } else if (m === 'ENDBLK') {
+          closePoly();
+          if (curBlock?.name) blocks.set(curBlock.name, curBlock);
+          curBlock = null;
+        } else if (curBlock) {
+          if (poly && m === 'VERTEX') { poly.verts.push({ x: this.num(rec.body, 10), y: this.num(rec.body, 20), bulge: this.num(rec.body, 42, 0) }); continue; }
+          if (poly && m === 'SEQEND') { closePoly(); continue; }
+          closePoly();
+          if (m === 'POLYLINE') poly = { head: rec.body, verts: [], target: curBlock.entities };
+          else handleEntity(m, rec.body, curBlock.entities, true);
+        }
+        continue;
+      }
+
+      if (section === 'ENTITIES') {
+        if (capped) continue;
+        if (poly && m === 'VERTEX') { poly.verts.push({ x: this.num(rec.body, 10), y: this.num(rec.body, 20), bulge: this.num(rec.body, 42, 0) }); continue; }
+        if (poly && m === 'SEQEND') { closePoly(); }
+        else {
+          closePoly();
+          if (m === 'POLYLINE') poly = { head: rec.body, verts: [], target: doc.entities };
+          else handleEntity(m, rec.body, doc.entities, false);
+        }
+        if (doc.entities.length >= MAX_ENTITIES) {
+          this.logger.warn(`Entity cap ${MAX_ENTITIES} reached — truncating stream parse (pathological block nesting?)`);
+          capped = true;
+        }
+      }
+    }
+    closePoly();
+    return doc;
+  }
+
+  /** Extract $INSUNITS / $EXTMIN / $EXTMAX from the HEADER section's tag body. */
+  private applyHeaderBody(body: Tag[], doc: DxfDocument) {
+    for (let k = 0; k < body.length; k++) {
+      if (body[k].code !== 9) continue;
+      const varName = body[k].value;
+      if (varName === '$INSUNITS' && body[k + 1]?.code === 70) {
+        const n = parseInt(body[k + 1].value, 10);
+        doc.units = n === 4 ? 'mm' : n === 6 ? 'm' : n === 1 ? 'inch' : 'unknown';
+      } else if (varName === '$EXTMIN') {
+        doc.extMin = this.readPoint(body, k + 1);
+      } else if (varName === '$EXTMAX') {
+        doc.extMax = this.readPoint(body, k + 1);
+      }
+    }
   }
 
   /** Parse ASCII DXF content into the rich document model (INSERTs expanded). */
