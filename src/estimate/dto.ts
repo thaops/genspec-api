@@ -38,6 +38,13 @@ export class ActionsDto {
   source?: 'ai' | 'manual';
 }
 
+export class RepriceDto {
+  /** Tỉnh cần áp giá — bỏ trống thì lấy theo projectInfo.location. */
+  @IsOptional()
+  @IsString()
+  province?: string;
+}
+
 export class TakeoffAssumptionsDto {
   @IsNumber()
   @IsPositive()

@@ -12,6 +12,7 @@ import { buildTrace } from '../trace';
 import { previewActions } from '../transparency';
 import { validate } from '../validation';
 import { CitationEngineService } from '../sources/citation-engine';
+import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
 import { codeAssignmentsToUpdateCells, tableToUpdateCellsDetailed, takeoffActionsToUpdateCells } from '../markdown-table-actions';
 import { CONCRETE_NORMS, STEEL_NORMS } from '../knowledge/qs-standards';
 import { getChecklistForBuilding } from '../knowledge/work-checklist';
@@ -153,10 +154,25 @@ export class EditModeHandler {
     history = '',
   ): AsyncGenerator<StreamEvent> {
     const k = (n: number) => (n > 0 ? Math.round(n).toLocaleString('vi-VN') : '—');
-    const catalogCodes = this.catalog
-      .all()
-      .map((c) => `${c.code} | ${c.name} | ${c.unit} | VL ${k(c.material)} · NC ${k(c.labor)} · Máy ${k(c.machine)}`)
-      .join('\n');
+    const fmtCode = (c: { code: string; name: string; unit: string; material: number; labor: number; machine: number }) =>
+      `${c.code} | ${c.name} | ${c.unit} | VL ${k(c.material)} · NC ${k(c.labor)} · Máy ${k(c.machine)}`;
+
+    // Tra mã hiệu CÓ INDEX (norm_items đã import ưu tiên, fallback seed) theo tên công tác
+    // đang có + yêu cầu — thay vì dump toàn bộ danh mục (nhanh hơn, sát công tác hơn, ưu
+    // tiên định mức thật của tỉnh dự án). Rỗng → fallback danh mục seed rút gọn.
+    const workTerms = Array.from(new Set(state.takeoff.map((t) => t.name).filter(Boolean)))
+      .slice(0, 12)
+      .join(' ');
+    const catalogQuery = [message, workTerms].filter(Boolean).join(' ').slice(0, 400).trim();
+    type CodeRow = { code: string; name: string; unit: string; material: number; labor: number; machine: number };
+    let candidates: CodeRow[] = catalogQuery
+      ? await this.catalog.search(catalogQuery, 40, state.projectInfo.location).catch(() => [] as CodeRow[])
+      : [];
+    if (candidates.length < 8) {
+      const seen = new Set(candidates.map((c) => c.code.toLowerCase()));
+      candidates = [...candidates, ...this.catalog.all().filter((c) => !seen.has(c.code.toLowerCase())).slice(0, 60)];
+    }
+    const catalogCodes = candidates.map(fmtCode).join('\n');
 
     // Định mức/đơn giá chính thống đã import (norm_items + price_sets) khớp message + tỉnh dự án.
     const normRefResult = await this.catalog.referenceBlock(message, state.projectInfo.location);
@@ -474,6 +490,8 @@ export class EditModeHandler {
 
     return [
       'QUYỀN CHỈNH SỬA ĐANG BẬT: LUÔN xuất JSON actions thực hiện NGAY. TUYỆT ĐỐI KHÔNG kết thúc bằng câu hỏi xin phép (không "ông muốn…", "có cần…", "tôi có nên…", "…không?"). Nêu giả định đã chọn trong 1 câu rồi làm.',
+      SENIOR_QS_PRINCIPLES,
+      RECENCY_RULE,
       'Bạn là Minh — QS senior đang chỉnh sửa dự toán theo yêu cầu.',
       'Bất kể lịch sử trò chuyện nói gì, bạn KHÔNG ở chế độ đọc — TUYỆT ĐỐI KHÔNG bảo người dùng "bật Edit". Hãy xuất JSON actions để thực hiện yêu cầu ngay.',
       'Làm đúng yêu cầu, không thêm không bớt. Nếu thiếu thông tin thực sự cần thiết → CHỌN giả định phổ biến rồi làm (không hỏi lại).',

@@ -6,6 +6,7 @@ import { runReviewTools } from '../tools/tool-registry';
 import { Workbook } from '../estimate.types';
 import { detectSheetType } from '../rule-detector';
 import { auditAgainstChecklist } from '../knowledge/work-checklist';
+import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
 
 interface Finding {
   severity: 'error' | 'warn' | 'info';
@@ -199,9 +200,10 @@ export class ReviewModeHandler {
     const byArea = (area: string) => findings.filter((f) => f.area === area);
     const fmt = (list: Finding[]) => list.length === 0 ? 'không có' : list.map((f) => `• ${f.message}${f.suggestion ? ` → ${f.suggestion}` : ''}`).join('\n');
     return [
-      'Bạn là Minh — QS senior đang review dự toán. Kết quả kiểm tra tự động bên dưới.',
+      SENIOR_QS_PRINCIPLES,
+      'Đang review dự toán. Kết quả kiểm tra tự động bên dưới.',
       'Nói thẳng vấn đề quan trọng nhất. Không liệt kê lại từng lỗi — tổng hợp thành nhận xét thực chất.',
-      webContext ? 'Dẫn nguồn cụ thể (tên văn bản, ngày, link) nếu trích dẫn giá hoặc định mức.' : '',
+      webContext ? `Dẫn nguồn cụ thể (tên văn bản, ngày, link) nếu trích dẫn giá hoặc định mức.\n${RECENCY_RULE}` : '',
       'Nói như đồng nghiệp — không dùng header, không viết báo cáo hành chính.',
       '',
       history ? `LỊCH SỬ:\n${history}` : '',

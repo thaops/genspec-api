@@ -128,15 +128,21 @@ export const QUERY_HINTS: Record<string, string[]> = {
 /** Thử tuần tự tối đa 2 query/key — query 1 miss → query 2, dừng ngay khi hit. */
 export const MAX_QUERIES_PER_KEY = 2;
 
-/** Dựng danh sách query (tối đa MAX_QUERIES_PER_KEY): ưu tiên QUERY_HINTS[hintKey], fallback generic. PURE. */
+/**
+ * Nguồn định mức tham chiếu: ƯU TIÊN BẢN MỚI NHẤT. 12/2021/TT-BXD là mốc đã biết,
+ * nhưng nếu có thông tư/định mức thay thế mới hơn thì lấy bản mới — không cứng 1 bản.
+ */
+export const NORM_SOURCE_HINT =
+  'định mức xây dựng HIỆN HÀNH mới nhất (Thông tư 12/2021/TT-BXD hoặc bản sửa đổi/thay thế mới hơn nếu có)';
+
+/** Dựng danh sách query (tối đa MAX_QUERIES_PER_KEY): query MỚI-NHẤT trước, rồi QUERY_HINTS/generic. PURE. */
 export function buildQueries(hintKey: string | undefined, workName: string): string[] {
   const wn = normalizeWorkName(workName);
   const hinted = hintKey ? QUERY_HINTS[hintKey] : undefined;
-  const generic = [
-    `mã hiệu định mức "${wn}" theo Thông tư 12/2021/TT-BXD (định mức xây dựng). Ghi rõ mã hiệu dạng XX.NNNNN và tên công tác.`,
-    `định mức xây dựng 12/2021 công tác ${wn} mã hiệu`,
-  ];
-  return [...(hinted ?? []), ...generic].slice(0, MAX_QUERIES_PER_KEY);
+  // Query đầu tiên luôn hỏi bản mới nhất — nếu định mức đã có bản thay thế, bắt được ngay.
+  const recencyFirst = `mã hiệu định mức công tác "${wn}" theo ${NORM_SOURCE_HINT}. Ghi rõ mã hiệu dạng XX.NNNNN, tên công tác và SỐ HIỆU/NĂM văn bản.`;
+  const generic = `định mức xây dựng công tác ${wn} mã hiệu bản mới nhất`;
+  return [recencyFirst, ...(hinted ?? []), generic].slice(0, MAX_QUERIES_PER_KEY);
 }
 
 // ===== Types =====

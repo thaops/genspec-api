@@ -1,4 +1,5 @@
 import { PriceSource, SourceType } from './estimate.types';
+import { freshnessScore, recencyDelta } from './recency';
 
 /**
  * Source Ranking Engine — reliability is DERIVED from the source type, not
@@ -40,18 +41,41 @@ export function inferSourceType(s?: PriceSource): SourceType | undefined {
   return s.url ? 'market' : undefined;
 }
 
+/** Kẹp về [0,100]. */
+function clamp(n: number): number {
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
 /**
- * Normalise a price source: resolve its type (explicit → inferred) and set
- * confidence from the ranking table. If no type can be determined we leave the
- * existing confidence untouched rather than fabricate one.
+ * Normalise a price source: resolve its type (explicit → inferred), set
+ * confidence từ bảng reliability theo LOẠI rồi ĐIỀU CHỈNH theo tuổi nguồn
+ * (recencyDelta) — nguồn mới hơn được cộng, nguồn cũ bị trừ. Không xác định
+ * được loại → giữ nguyên confidence cũ thay vì bịa.
  */
 export function rankSource(s?: PriceSource): PriceSource | undefined {
   if (!s) return s;
   const type = s.type ?? inferSourceType(s);
   const ranked = reliabilityOf(type);
+  const confidence = ranked != null ? clamp(ranked + recencyDelta(s.date)) : s.confidence;
   return {
     ...s,
     type: type ?? s.type,
-    confidence: ranked ?? s.confidence,
+    confidence,
   };
+}
+
+/**
+ * Chọn nguồn "tốt hơn" giữa hai nguồn cho cùng một giá trị: reliability đã điều
+ * chỉnh theo tuổi thắng; hoà thì nguồn TƯƠI hơn thắng. Dùng khi hợp nhất giá từ
+ * nhiều nguồn (senior QS: ưu tiên mới hơn).
+ */
+export function pickBetterSource(a?: PriceSource, b?: PriceSource): PriceSource | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const ra = rankSource(a)?.confidence ?? 0;
+  const rb = rankSource(b)?.confidence ?? 0;
+  if (ra !== rb) return ra > rb ? a : b;
+  const fa = freshnessScore(a.date) ?? -1;
+  const fb = freshnessScore(b.date) ?? -1;
+  return fb > fa ? b : a;
 }

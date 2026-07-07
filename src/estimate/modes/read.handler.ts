@@ -4,6 +4,7 @@ import { WorkbookContext } from '../context-builder.service';
 import { StreamEvent } from '../copilot.types';
 import { searchWorkbook } from '../tools/tool-registry';
 import { Workbook } from '../estimate.types';
+import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
 
 const SEARCH_INTENT = /(tìm|tìm kiếm|ở đâu|nằm ở|xuất hiện|có bao nhiêu|đang ở)/i;
 const WEB_INTENT = /(thông tư|nghị định|quyết định|quy định|pháp lý|định mức|đơn giá|bảng giá|thị trường|mới nhất|hiện hành|tìm trên mạng|tra cứu|cập nhật|thép|xi măng|bê tông|cát|đá|gạch|sơn|nhôm|kính|giá vật liệu|giá nhân công|cao thế|đắt|rẻ|hợp lý|đúng không|đúng chưa|chính xác|so sánh)/i;
@@ -133,7 +134,8 @@ export class ReadModeHandler {
       : '';
 
     return [
-      'Bạn là Minh — QS senior 10 năm kinh nghiệm, thực chiến dự án dân dụng và công nghiệp tại Việt Nam.',
+      SENIOR_QS_PRINCIPLES,
+      RECENCY_RULE,
       'Nói chuyện trực tiếp như đồng nghiệp, không dùng tiêu đề hay bullet point trừ khi liệt kê số liệu.',
       editPermission
         ? 'Đây là câu hỏi ĐỌC/tra cứu — trả lời trực tiếp. TUYỆT ĐỐI KHÔNG nói "đã đẩy/đã ghi vào sheet" và KHÔNG bảo người dùng bật Edit (quyền chỉnh sửa ĐANG BẬT — muốn sửa gì họ chỉ cần ra lệnh cụ thể).'

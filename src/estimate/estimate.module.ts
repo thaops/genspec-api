@@ -19,6 +19,7 @@ import { DrawingSceneEntity, DrawingSceneSchema } from '../drawing/schemas/drawi
 import { NormItem, NormItemSchema } from '../catalog/catalog-db.schemas';
 import { NormWebLookupService, WebNormCache, WebNormCacheSchema } from './norm-web-lookup.service';
 import { PriceWebLookupService, WebPriceCache, WebPriceCacheSchema } from './price-web-lookup.service';
+import { RepriceService } from './reprice.service';
 import { TakeoffEngineService } from './takeoff-engine.service';
 
 @Module({
@@ -49,6 +50,7 @@ import { TakeoffEngineService } from './takeoff-engine.service';
     NormWebLookupService,
     PriceWebLookupService,
     TakeoffEngineService,
+    RepriceService,
   ],
   exports: [EstimateService],
 })

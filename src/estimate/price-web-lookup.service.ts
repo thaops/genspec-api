@@ -12,6 +12,7 @@ import { InjectModel, Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AiService } from '../ai/ai.service';
 import { normalizeWorkName } from './norm-web-lookup.service';
+import { currentYear, latestQuarterLabel } from './recency';
 
 // ===== Pure guardrails =====
 
@@ -64,14 +65,25 @@ export function groundedBatchPrice(unitPriceVnd: unknown, rawPrice: string, text
   return nums.some((n) => priceInRange(n) && priceAppearsInText(n, text));
 }
 
-/** Query grounded search cho đơn giá 1 công tác tại 1 tỉnh. PURE. */
-export function buildPriceQuery(workName: string, unit: string, province?: string): string {
+/**
+ * Query grounded search cho đơn giá 1 công tác tại 1 tỉnh. PURE.
+ * `refYear`/`quarter` mặc định lấy thời điểm hiện tại (không cứng "năm 2025") —
+ * luôn hỏi công bố giá MỚI NHẤT và yêu cầu nêu NGÀY nguồn để rank theo recency.
+ */
+export function buildPriceQuery(
+  workName: string,
+  unit: string,
+  province?: string,
+  refYear: number = currentYear(),
+  quarter: string = latestQuarterLabel(),
+): string {
   const wn = normalizeWorkName(workName);
   const loc = province ? `tại ${province}` : 'tại Việt Nam';
   return (
-    `Đơn giá thi công (bao gồm nhân công + vật liệu) công tác "${wn}" ${loc} năm 2025, ` +
-    `đơn vị tính ${unit}, bằng VNĐ. Nêu CON SỐ cụ thể (vd 40.000/m2) và trích nguồn. ` +
-    `Nếu là khoảng giá, lấy mức phổ biến.`
+    `Đơn giá thi công (bao gồm nhân công + vật liệu) công tác "${wn}" ${loc} MỚI NHẤT ` +
+    `(ưu tiên ${quarter}, năm ${refYear}), đơn vị tính ${unit}, bằng VNĐ. ` +
+    `Nêu CON SỐ cụ thể (vd 40.000/m2), NGÀY/quý công bố và trích nguồn. ` +
+    `Nếu là khoảng giá, lấy mức phổ biến. Nếu có nhiều mốc thời gian, lấy số MỚI NHẤT.`
   );
 }
 
@@ -209,8 +221,9 @@ export class PriceWebLookupService {
     const loc = province ? `tại ${province}` : 'tại Việt Nam';
     const names = queries.map((q) => `${normalizeWorkName(q.workName)} (${q.unit})`).join(', ');
     const query =
-      `Bảng đơn giá thi công (nhân công + vật liệu) các công tác xây dựng/hoàn thiện nhà ${loc} năm 2025, VNĐ. ` +
-      `Danh sách: ${names}. Nêu CON SỐ cụ thể từng công tác và trích nguồn.`;
+      `Bảng đơn giá thi công (nhân công + vật liệu) các công tác xây dựng/hoàn thiện nhà ${loc} MỚI NHẤT ` +
+      `(ưu tiên ${latestQuarterLabel()}, năm ${currentYear()}), VNĐ. ` +
+      `Danh sách: ${names}. Nêu CON SỐ cụ thể từng công tác, NGÀY/quý công bố và trích nguồn. Nhiều mốc thời gian → lấy số MỚI NHẤT.`;
     try {
       const research = await Promise.race([
         this.ai.research(query),

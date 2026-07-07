@@ -20,8 +20,9 @@ import { CatalogService } from '../catalog/catalog.service';
 import { CurrentUser } from '../common/current-user.decorator';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import { CopilotService } from './copilot.service';
-import { ActionsDto, CopilotDto, CreateEstimateDto, TakeoffEngineDto } from './dto';
+import { ActionsDto, CopilotDto, CreateEstimateDto, RepriceDto, TakeoffEngineDto } from './dto';
 import { EstimateService } from './estimate.service';
+import { RepriceService } from './reprice.service';
 import { TakeoffEngineService } from './takeoff-engine.service';
 import { ExportF1Service } from './export-f1.service';
 import { ExportThdtService } from './export-thdt.service';
@@ -36,6 +37,7 @@ export class EstimateController {
     private readonly thdtExporter: ExportThdtService,
     private readonly catalog: CatalogService,
     private readonly takeoffEngine: TakeoffEngineService,
+    private readonly reprice: RepriceService,
   ) {}
 
   @Get('catalog')
@@ -88,6 +90,16 @@ export class EstimateController {
   ) {
     // ⚡ là hành động chỉnh sửa (chỉ trả proposal, không tự apply) → bật fallback mã phổ thông mặc định trừ khi FE tắt.
     return this.takeoffEngine.run(userId, id, { ...dto, editPermission: dto.editPermission ?? true });
+  }
+
+  /** Áp đơn giá tỉnh vào giá VL/NC/máy — trả proposal + coverage (KHÔNG tự apply). */
+  @Post('estimates/:id/reprice')
+  repriceToProvince(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Body() dto: RepriceDto,
+  ) {
+    return this.reprice.plan(userId, id, dto.province);
   }
 
   /** Streaming copilot (SSE): live `step` events then a `proposal` (NOT applied). */
