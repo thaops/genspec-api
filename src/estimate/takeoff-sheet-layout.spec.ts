@@ -37,7 +37,7 @@ describe('layout sheet BOQ — tiêu đề + header + footnote', () => {
     const after = applyToSheet(sheet, r);
     expect(val(after, 'A1')).toBe('1. KẾT CẤU & BAO CHE');
     expect(val(after, 'A2')).toBe('STT');
-    expect(val(after, 'I2')).toBe('Diễn giải');
+    expect(val(after, 'G2')).toBe('Diễn giải');
     expect(val(after, 'B3')).toBe('AE.62210');
     expect(val(after, 'B4')).toBe('AK.21110');
     // footnote NGAY dưới data cuối (dòng 5), không chừa dòng trống

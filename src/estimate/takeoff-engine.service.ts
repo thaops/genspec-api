@@ -69,6 +69,7 @@ export const COMMON_FALLBACK_CODES: Record<TakeoffRowKey, { code: string; name: 
   door: { code: 'AH.11120', name: 'Cửa đi' },
   window: { code: 'AH.12110', name: 'Cửa sổ' },
   slab: { code: 'AF.61720', name: 'Bê tông sàn đá 1x2 M250' },
+  floor_screed: { code: 'AK.98110', name: 'Cán nền vữa xi măng' },
   floor_finish: { code: 'AK.51110', name: 'Lát nền gạch' },
   ceiling: { code: 'AK.64110', name: 'Trần thạch cao khung xương' },
   ceiling_paint: { code: 'AK.84330', name: 'Sơn trần' },
@@ -86,6 +87,7 @@ export type TakeoffRowKey =
   | 'door'
   | 'window'
   | 'slab'
+  | 'floor_screed'    // lớp cán nền/vữa lót (= diện tích sàn) — suy ra
   | 'floor_finish'
   | 'ceiling'         // trần (= diện tích sàn) — suy ra
   | 'ceiling_paint'   // sơn trần (= diện tích trần)
@@ -107,7 +109,7 @@ export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
  * không vỡ bản vẽ đơn chưa gắn bộ môn).
  */
 export const DISCIPLINE_ROWKEYS: Record<Discipline, TakeoffRowKey[] | null> = {
-  KT: ['wall_area', 'wall_volume', 'wall_paint', 'door', 'window', 'floor_finish', 'ceiling', 'ceiling_paint', 'skirting'],
+  KT: ['wall_area', 'wall_volume', 'wall_paint', 'door', 'window', 'floor_screed', 'floor_finish', 'ceiling', 'ceiling_paint', 'skirting'],
   KC: ['column_concrete', 'column_formwork', 'beam_concrete', 'beam_formwork', 'slab'],
   DIEN: [],
   NUOC: [],
@@ -235,6 +237,7 @@ export const NORM_KEYWORDS: Record<TakeoffRowKey, string[]> = {
   door: ['cửa đi', 'cửa'],
   window: ['cửa sổ', 'cửa'],
   slab: ['bê tông.*sàn'],
+  floor_screed: ['cán nền', 'láng.*nền', 'vữa.*lót'],
   floor_finish: ['lát nền', 'lát.*gạch', 'lát'],
   ceiling: ['trần thạch cao', 'trần.*khung', 'trần'],
   ceiling_paint: ['sơn.*trần'],
@@ -255,6 +258,7 @@ const BOQ_GROUP: Record<TakeoffRowKey, string> = {
   slab: BOQ_GROUP_THO,
   wall_area: BOQ_GROUP_FINISH,
   wall_paint: BOQ_GROUP_FINISH,
+  floor_screed: BOQ_GROUP_FINISH,
   floor_finish: BOQ_GROUP_FINISH,
   door: BOQ_GROUP_FINISH,
   window: BOQ_GROUP_FINISH,
@@ -302,6 +306,7 @@ const ROWKEY_SHEET: Record<TakeoffRowKey, string> = {
   beam_formwork: 'structure',
   slab: 'structure',
   wall_paint: 'finishing',
+  floor_screed: 'finishing',
   floor_finish: 'finishing',
   ceiling: 'finishing',
   ceiling_paint: 'finishing',
@@ -392,10 +397,21 @@ const DEFAULT_NAMES: Record<TakeoffRowKey, string> = {
   door: 'Cửa đi',
   window: 'Cửa sổ',
   slab: 'Sàn (bê tông)',
-  floor_finish: 'Lát nền',
-  ceiling: 'Trần',
+  floor_screed: 'Lớp cán nền (vữa lót)',
+  floor_finish: 'Lát nền (chưa xác định vật liệu)',
+  ceiling: 'Trần (chưa xác định loại)',
   ceiling_paint: 'Sơn trần',
   skirting: 'Len/chân tường',
+};
+
+/** Nhãn cột "Nhóm đối tượng" — cho QS truy vết công tác bóc từ đối tượng nào. */
+const OBJECT_GROUP_LABEL: Record<string, string> = {
+  wall: 'Tường (wall)',
+  column: 'Cột (column)',
+  beam: 'Dầm (beam)',
+  door: 'Cửa đi (door)',
+  window: 'Cửa sổ (window)',
+  slab: 'Sàn/nền (slab)',
 };
 
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -729,6 +745,7 @@ export function computeTakeoffRows(
   if (slabArea > 0) {
     // Hai dòng bản chất khác nhau → diễn giải RIÊNG, không lặp nguyên văn.
     push('slab', 'slab', 'm2', slabArea, `Diện tích sàn từ ${slabSrc} = ${f3(slabArea)} m² (BT sàn/mái)`);
+    push('floor_screed', 'slab', 'm2', slabArea, `cán nền theo diện tích sàn = ${f3(slabArea)} m²`);
     push('floor_finish', 'slab', 'm2', slabArea, `Lát nền theo diện tích sàn (${slabSrc}) = ${f3(slabArea)} m²`);
     // Trần + sơn trần: diện tích trần ≈ diện tích sàn (suy ra, cần đối chiếu).
     push('ceiling', 'slab', 'm2', slabArea, `trần theo diện tích sàn = ${f3(slabArea)} m²`);
@@ -744,14 +761,14 @@ export function computeTakeoffRows(
 
 /** Bảng markdown 9 cột chuẩn: STT/Mã hiệu/Tên công tác/Đơn vị/Khối lượng/Đơn giá/Thành tiền/Nguồn/Diễn giải. */
 export function rowsToMarkdownTable(rows: TakeoffEngineRow[]): string {
-  const vnd = (v?: number) => (v != null ? v.toLocaleString('vi-VN') : '');
+  // Đơn giá/Thành tiền/Nguồn tạm ẩn; thêm Nhóm đối tượng để QS truy vết.
   const lines = [
-    '| STT | Mã hiệu | Tên công tác | Đơn vị | Khối lượng | Đơn giá | Thành tiền | Nguồn | Diễn giải |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| STT | Mã hiệu | Tên công tác | Nhóm đối tượng | Đơn vị | Khối lượng | Diễn giải |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
   ];
   rows.forEach((r, i) => {
     lines.push(
-      `| ${i + 1} | ${r.code} | ${r.name} | ${r.unit} | ${r.quantity} | ${vnd(r.unitPrice)} | ${vnd(r.totalPrice)} | ${r.source ?? '—'} | ${r.note} |`,
+      `| ${i + 1} | ${r.code} | ${r.name} | ${OBJECT_GROUP_LABEL[r.group] ?? r.group} | ${r.unit} | ${r.quantity} | ${r.note} |`,
     );
   });
   return lines.join('\n');
@@ -981,7 +998,10 @@ export class TakeoffEngineService {
     // chống bịa 3 rào, gắn cờ "cần kiểm chứng" + link nguồn). Chỉ khi Edit bật.
     let webPricedCount = 0;
     const webPriceHits: WebPriceHit[] = [];
-    if (input.editPermission && this.priceWeb.enabled) {
+    // TẠM ẨN GIÁ WEB: cột Đơn giá/Thành tiền/Nguồn đã ẩn khỏi bảng + key Gemini free
+    // tier hết quota grounding. Bật lại khi có billing: đổi `false` → điều kiện gốc.
+    const PRICE_WEB_ON = false;
+    if (PRICE_WEB_ON && input.editPermission && this.priceWeb.enabled) {
       const need = rows.filter((r) => r.code && r.unitPrice == null);
       if (need.length > 0) {
         // BATCH: 1 research + 1 extract cho TẤT CẢ công tác thiếu giá (2 call tổng)
@@ -1055,12 +1075,10 @@ export class TakeoffEngineService {
           stt: String(i + 1),
           code: r.code,
           name: r.name,
+          objectGroup: OBJECT_GROUP_LABEL[r.group] ?? r.group,
           unit: r.unit,
           quantity: String(r.quantity),
           note: r.note,
-          unitPrice: r.unitPrice != null ? String(r.unitPrice) : '',
-          total: r.totalPrice != null ? String(r.totalPrice) : '',
-          source: r.source ?? '—',
         })),
         state,
         sheetDef.name,
@@ -1101,17 +1119,10 @@ export class TakeoffEngineService {
         : []),
       ...(fallbackRows.length > 0
         ? [
-            `Đã điền mã phổ thông cho ${fallbackRows.length} dòng (cần kiểm chứng theo chỉ dẫn kỹ thuật) — chưa có đơn giá vì chưa import giá tỉnh.`,
+            `Đã điền mã phổ thông cho ${fallbackRows.length} dòng (cần kiểm chứng theo chỉ dẫn kỹ thuật).`,
           ]
         : []),
-      priceCtx
-        ? `Đơn giá: ${pricedCount}/${rows.length} công tác gán từ công bố giá ${priceCtx.province} (${priceCtx.sourceDoc}, hiệu lực ${priceCtx.effectiveDate})${missingPrice.length ? `; ${missingPrice.length} công tác chưa có giá — cột giá để trống` : ''}.`
-        : `Đơn giá: chưa có công bố giá tỉnh khớp địa điểm dự án — cột giá để trống (import tại /settings).`,
-      ...(webPricedCount > 0
-        ? [
-            `Đã tra ĐƠN GIÁ từ web (grounded search) cho ${webPricedCount} công tác${state.projectInfo?.location ? ` tại ${state.projectInfo.location}` : ''} — điền cột Đơn giá/Thành tiền kèm link nguồn; giá web CẦN KIỂM CHỨNG, KHÔNG phải giá chính thống.`,
-          ]
-        : []),
+      `(Đơn giá/Thành tiền TẠM ẨN — sẽ bật lại khi cấu hình nguồn giá; hiện tập trung Khối lượng + Nhóm đối tượng.)`,
       `BOQ hiện chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm công tác cần bản vẽ kết cấu/MEP để bóc đầy đủ.`,
       '',
       rowsToMarkdownTable(rows),

@@ -4,17 +4,16 @@
 import { Action, EstimateState, Sheet } from './estimate.types';
 import { parseExcelCell } from './reducer';
 
-// Layout chuẩn 9 cột: A=STT B=Mã hiệu C=Tên công tác D=Đơn vị E=Khối lượng
-// F=Đơn giá G=Thành tiền H=Nguồn I=Diễn giải. Ô thiếu giá trị → "".
+// Layout 7 cột: A=STT B=Mã hiệu C=Tên công tác D=Nhóm đối tượng E=Đơn vị
+// F=Khối lượng G=Diễn giải. Ô thiếu giá trị → "".
+// (Đơn giá/Thành tiền/Nguồn TẠM ẨN — bật lại khi có billing Gemini để tra giá web.)
 const COLUMN_ORDER = [
   'stt',
   'code',
   'name',
+  'objectGroup',
   'unit',
   'quantity',
-  'unitPrice',
-  'total',
-  'source',
   'note',
 ] as const;
 type ColumnKey = (typeof COLUMN_ORDER)[number];
@@ -23,21 +22,19 @@ const HEADER_LABELS: Record<ColumnKey, string> = {
   stt: 'STT',
   code: 'Mã hiệu',
   name: 'Tên công tác',
+  objectGroup: 'Nhóm đối tượng',
   unit: 'Đơn vị',
   quantity: 'Khối lượng',
-  unitPrice: 'Đơn giá',
-  total: 'Thành tiền',
-  source: 'Nguồn',
   note: 'Diễn giải',
 };
 
-const COL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'] as const;
+const COL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'] as const;
 
-/** Độ rộng cột (px) theo thứ tự A→I. */
-export const TAKEOFF_COL_WIDTHS_PX = [40, 110, 320, 60, 90, 110, 130, 170, 420] as const;
+/** Độ rộng cột (px) theo thứ tự A→G. */
+export const TAKEOFF_COL_WIDTHS_PX = [40, 110, 300, 120, 60, 90, 420] as const;
 
-/** Chỉ số cột số (E/F/G) — căn phải. */
-const NUMERIC_COL_INDEXES = [4, 5, 6];
+/** Chỉ số cột số (Khối lượng = F, index 5) — căn phải. */
+const NUMERIC_COL_INDEXES = [5];
 
 const THIN_BORDER = { s: 1, cl: { rgb: '#d0d0d0' } };
 const CELL_BORDER = { t: THIN_BORDER, b: THIN_BORDER, l: THIN_BORDER, r: THIN_BORDER };
@@ -88,9 +85,9 @@ export const TAKEOFF_TITLE_STYLE = {
 
 const REQUIRED_KEYS = ['stt', 'code', 'name', 'unit', 'quantity', 'note'] as const;
 
-/** Dòng chuẩn — 6 cột lõi + 3 cột optional (giá/nguồn). */
+/** Dòng chuẩn — 6 cột lõi + objectGroup (Nhóm đối tượng). Giá/nguồn tạm ẩn. */
 export type RescueRow = Record<(typeof REQUIRED_KEYS)[number], string> &
-  Partial<Record<'unitPrice' | 'total' | 'source', string>>;
+  Partial<Record<'objectGroup', string>>;
 
 /** Bỏ dấu tiếng Việt + lowercase để so khớp fuzzy. */
 function normalize(s: string): string {
@@ -107,10 +104,8 @@ function detectColumn(header: string): ColumnKey | null {
   if (!h) return null;
   if (h === 'stt' || h === 'tt' || h.includes('stt')) return 'stt';
   if (h.includes('ma hieu') || h.includes('ma dinh muc') || h === 'ma') return 'code';
+  if (h.includes('nhom doi tuong') || h.includes('doi tuong') || h.includes('nhom')) return 'objectGroup';
   if (h.includes('don vi') || h === 'dvt' || h === 'dv') return 'unit';
-  if (h.includes('don gia')) return 'unitPrice';
-  if (h.includes('thanh tien')) return 'total';
-  if (h.includes('nguon')) return 'source';
   if (h.includes('ten cong tac') || h.includes('noi dung') || h.includes('cong tac') || h.includes('ten')) return 'name';
   if (h.includes('khoi luong') || h === 'kl' || h.includes('so luong')) return 'quantity';
   if (h.includes('ghi chu') || h.includes('dien giai')) return 'note';
@@ -533,28 +528,16 @@ export function codeAssignmentsToUpdateCells(
       newValue: code,
     });
 
-    // Ô I: xoá "⚠ cần chọn mã…" (giữ công thức + token [nhóm:])
-    const oldNote = currentValueAt(sheet, `I${r}`);
+    // Ô G (Diễn giải): xoá "⚠ cần chọn mã…" (giữ công thức + token [nhóm:])
+    const oldNote = currentValueAt(sheet, `G${r}`);
     const cleanedNote = oldNote.replace(WARN_CODE_RE, '').replace(/\s{2,}/g, ' ').trim();
     if (cleanedNote !== oldNote) {
       actions.push({
         type: 'update_cells',
         sheetId: sheet.id,
-        cell: `I${r}`,
+        cell: `G${r}`,
         oldValue: oldNote,
         newValue: cleanedNote,
-      });
-    }
-
-    // Ô H: nguồn "—" → "AI đề xuất — cần kiểm chứng"
-    const oldSource = currentValueAt(sheet, `H${r}`);
-    if (oldSource.trim() === '—' || oldSource.trim() === '') {
-      actions.push({
-        type: 'update_cells',
-        sheetId: sheet.id,
-        cell: `H${r}`,
-        oldValue: oldSource,
-        newValue: 'AI đề xuất — cần kiểm chứng',
       });
     }
 
