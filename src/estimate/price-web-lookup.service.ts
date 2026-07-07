@@ -41,6 +41,29 @@ export function priceAppearsInText(vnd: number, text: string): boolean {
   return variants.some((v) => t.includes(v));
 }
 
+/** Rút các số từ chuỗi giá (vd "50.000 - 60.000" → [50000, 60000]). PURE. */
+export function parseNumbers(s: string): number[] {
+  const out: number[] = [];
+  for (const m of (s || '').matchAll(/\d[\d.,\s]*\d|\d/g)) {
+    const n = Number(m[0].replace(/[.,\s]/g, ''));
+    if (isFinite(n) && n > 0) out.push(n);
+  }
+  return out;
+}
+
+/**
+ * Guard chống bịa cho BATCH: unitPriceVnd trong khoảng hợp lý, VÀ ít nhất 1 con
+ * số trong rawPrice (chuỗi trích literal) xuất hiện nguyên văn trong text grounded
+ * → đảm bảo giá bắt nguồn từ web, cho phép unitPriceVnd là mức phổ biến/midpoint
+ * của một khoảng có thật (midpoint không nhất thiết literal). PURE.
+ */
+export function groundedBatchPrice(unitPriceVnd: unknown, rawPrice: string, text: string): boolean {
+  if (!priceInRange(unitPriceVnd)) return false;
+  const nums = parseNumbers(rawPrice);
+  if (nums.length === 0) return priceAppearsInText(unitPriceVnd as number, text);
+  return nums.some((n) => priceInRange(n) && priceAppearsInText(n, text));
+}
+
 /** Query grounded search cho đơn giá 1 công tác tại 1 tỉnh. PURE. */
 export function buildPriceQuery(workName: string, unit: string, province?: string): string {
   const wn = normalizeWorkName(workName);
@@ -101,6 +124,27 @@ const EXTRACT_SCHEMA = {
   required: ['found'],
 };
 
+// Batch: 1 research + 1 extract cho CẢ danh sách công tác → 2 call tổng (thay vì
+// 2/công tác) → tránh 429 quota, điền được nhiều dòng.
+const BATCH_EXTRACT_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    items: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          work: { type: 'STRING' },
+          unitPriceVnd: { type: 'NUMBER' },
+          rawPrice: { type: 'STRING' },
+        },
+        required: ['work', 'unitPriceVnd'],
+      },
+    },
+  },
+  required: ['items'],
+};
+
 @Injectable()
 export class PriceWebLookupService {
   private readonly logger = new Logger(PriceWebLookupService.name);
@@ -145,6 +189,86 @@ export class PriceWebLookupService {
       }
     };
     await Promise.all(Array.from({ length: Math.max(1, POOL) }, () => worker()));
+    return out;
+  }
+
+  /**
+   * BATCH: 1 grounded search + 1 extract cho TẤT CẢ công tác → 2 call tổng.
+   * Chống 429 quota (thay vì 2 call/công tác). Guard grounded per-item.
+   */
+  async lookupPricesBatch(
+    queries: WebPriceQuery[],
+    province?: string,
+  ): Promise<Map<string, WebPriceHit | null>> {
+    const out = new Map<string, WebPriceHit | null>();
+    queries.forEach((q) => out.set(q.key, null));
+    if (!this.enabled || queries.length === 0) return out;
+
+    const loc = province ? `tại ${province}` : 'tại Việt Nam';
+    const names = queries.map((q) => `${normalizeWorkName(q.workName)} (${q.unit})`).join(', ');
+    const query =
+      `Bảng đơn giá thi công (nhân công + vật liệu) các công tác xây dựng/hoàn thiện nhà ${loc} năm 2025, VNĐ. ` +
+      `Danh sách: ${names}. Nêu CON SỐ cụ thể từng công tác và trích nguồn.`;
+    try {
+      const research = await Promise.race([
+        this.ai.research(query),
+        new Promise<{ text: string; sources: { title?: string; uri?: string }[] }>((r) =>
+          setTimeout(() => r({ text: '', sources: [] }), LOOKUP_TIMEOUT_MS),
+        ),
+      ]);
+      if (research.sources.length === 0 || !research.text) {
+        this.logger.log(`[WebPriceBatch] ${queries.length} works → sources=0 (grounding fail/429)`);
+        return out;
+      }
+      const raw = await this.ai.generateJson(
+        [
+          {
+            text:
+              `Từ đoạn văn (kết quả tra web), trích ĐƠN GIÁ VNĐ cho từng công tác trong danh sách: ` +
+              `[${queries.map((q) => normalizeWorkName(q.workName)).join(', ')}]. ` +
+              `Trả items = mảng {work, unitPriceVnd (số; khoảng thì lấy mức phổ biến), rawPrice (chuỗi giá nguyên văn)}. ` +
+              `CHỈ công tác có số rõ trong đoạn văn; không có → bỏ qua. TUYỆT ĐỐI không bịa.\n\n--- ĐOẠN VĂN ---\n${research.text}`,
+          },
+        ],
+        BATCH_EXTRACT_SCHEMA,
+      );
+      const parsed = JSON.parse(raw) as { items?: { work?: string; unitPriceVnd?: number; rawPrice?: string }[] };
+      const items = parsed.items ?? [];
+      let filled = 0;
+      for (const q of queries) {
+        const wn = normalizeWorkName(q.workName);
+        const it = items.find((x) => {
+          const xw = normalizeWorkName(String(x.work ?? ''));
+          return xw && (xw.includes(wn) || wn.includes(xw));
+        });
+        if (it && groundedBatchPrice(it.unitPriceVnd, String(it.rawPrice ?? ''), research.text)) {
+          out.set(q.key, {
+            unitPrice: Math.round(it.unitPriceVnd as number),
+            sourceTitle: research.sources[0]?.title,
+            sourceUri: research.sources[0]?.uri,
+          });
+          filled++;
+        }
+      }
+      this.logger.log(`[WebPriceBatch] ${queries.length} works → sources=${research.sources.length}, filled=${filled}`);
+      // Cache các hit (7 ngày) để lần sau đỡ tốn call.
+      await Promise.all(
+        queries.map((q) => {
+          const h = out.get(q.key);
+          if (!h) return Promise.resolve();
+          const cacheKey = `${province ?? '-'}|${normalizeWorkName(q.workName)}|${q.unit}`;
+          return this.cacheModel
+            .updateOne(
+              { key: cacheKey },
+              { $set: { hit: h, sources: research.sources, expireAt: new Date(Date.now() + HIT_TTL_MS) }, $setOnInsert: { createdAt: new Date() } },
+              { upsert: true },
+            )
+            .catch(() => undefined);
+        }),
+      );
+    } catch (err) {
+      this.logger.warn(`[WebPriceBatch] failed: ${(err as Error).message}`);
+    }
     return out;
   }
 
