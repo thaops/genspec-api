@@ -1,4 +1,13 @@
-import { amendedNorms2025, domainTier, provinceRule, QS_CURRENT_DOCS } from './qs-knowledge';
+import { amendedNorms2025, domainTier, provinceRule, QS_CURRENT_DOCS, QS_STANDARDS } from './qs-knowledge';
+
+describe('QS_STANDARDS', () => {
+  it('có TCVN đã kiểm chứng + quy tắc chống bịa', () => {
+    expect(QS_STANDARDS).toContain('TCVN 5574:2018');
+    expect(QS_STANDARDS).toContain('TCVN 4453:1995');
+    expect(QS_STANDARDS).toMatch(/vsqi\.gov\.vn/);
+    expect(QS_STANDARDS).toMatch(/KHÔNG tự bịa|không bịa/i);
+  });
+});
 
 describe('amendedNorms2025 (thận trọng, không cry-wolf)', () => {
   it('bắt đào đất AB, cọc AC, nghiền đá AD.28000; KHÔNG bắt bê tông AF/khác', () => {

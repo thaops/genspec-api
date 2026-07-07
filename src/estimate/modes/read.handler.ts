@@ -8,7 +8,9 @@ import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
 import { QS_KNOWLEDGE, provinceRule } from '../knowledge/qs-knowledge';
 
 const SEARCH_INTENT = /(tìm|tìm kiếm|ở đâu|nằm ở|xuất hiện|có bao nhiêu|đang ở)/i;
-const WEB_INTENT = /(thông tư|nghị định|quyết định|quy định|pháp lý|định mức|đơn giá|bảng giá|thị trường|mới nhất|hiện hành|tìm trên mạng|tra cứu|cập nhật|thép|xi măng|bê tông|cát|đá|gạch|sơn|nhôm|kính|giá vật liệu|giá nhân công|cao thế|đắt|rẻ|hợp lý|đúng không|đúng chưa|chính xác|so sánh)/i;
+const WEB_INTENT = /(thông tư|nghị định|quyết định|quy định|pháp lý|định mức|đơn giá|bảng giá|thị trường|mới nhất|hiện hành|tìm trên mạng|tra cứu|cập nhật|thép|xi măng|bê tông|cát|đá|gạch|sơn|nhôm|kính|giá vật liệu|giá nhân công|cao thế|đắt|rẻ|hợp lý|đúng không|đúng chưa|chính xác|so sánh|tiêu chuẩn|tcvn|nghiệm thu)/i;
+const STANDARD_INTENT = /(tiêu chuẩn|tcvn|nghiệm thu|quy chuẩn|qcvn)/i;
+const PRICE_ASK_INTENT = /(giá|đơn giá|vật liệu|nhân công|ca máy|thép|xi măng|cát|đá|gạch|sơn)/i;
 
 @Injectable()
 export class ReadModeHandler {
@@ -37,11 +39,16 @@ export class ReadModeHandler {
     if (WEB_INTENT.test(message)) {
       yield { event: 'step', data: { text: 'Tra cứu thông tin pháp lý / giá thị trường…' } };
       try {
-        // Ghim TỈNH vào truy vấn: câu hỏi giá/vật liệu/nhân công phải tra đúng tỉnh
-        // dự án (ưu tiên công bố giá Sở XD tỉnh đó) — không tra chung chung.
-        const webQuery = location?.trim()
-          ? `${message}\n(Dự án tại ${location}: nếu là câu hỏi đơn giá/giá vật liệu/nhân công/ca máy → tra theo tỉnh ${location}, ưu tiên công bố giá Sở Xây dựng ${location}, số MỚI NHẤT.)`
-          : message;
+        // Bias truy vấn theo LOẠI: tiêu chuẩn → vsqi.gov.vn; giá → ghim tỉnh dự án
+        // (ưu tiên công bố giá Sở XD tỉnh đó). Không tra chung chung.
+        const hints: string[] = [];
+        if (STANDARD_INTENT.test(message)) {
+          hints.push('Tra tiêu chuẩn tại tieuchuan.vsqi.gov.vn / tcvn.gov.vn: nêu SỐ HIỆU TCVN + tên + TÌNH TRẠNG hiệu lực; không bịa số hiệu/nội dung điều khoản.');
+        }
+        if (location?.trim() && PRICE_ASK_INTENT.test(message)) {
+          hints.push(`Câu hỏi về giá → tra theo tỉnh ${location}, ưu tiên công bố giá Sở Xây dựng ${location}, số MỚI NHẤT.`);
+        }
+        const webQuery = hints.length ? `${message}\n(${hints.join(' ')})` : message;
         const result = await this.ai.research(webQuery);
         if (result.text) {
           const sourceList = result.sources.slice(0, 5).map((s) => `- ${s.title ?? s.uri}: ${s.uri}`).join('\n');

@@ -64,8 +64,24 @@ export function provinceRule(location?: string): string {
   return `TỈNH DỰ ÁN: ${loc}. Mọi tra cứu ĐƠN GIÁ/công bố giá/vật liệu/nhân công/ca máy PHẢI kèm tên tỉnh "${loc}" trong truy vấn và ưu tiên công bố giá của Sở Xây dựng ${loc} (soxaydung.<${loc}>.gov.vn) — trừ khi user chỉ định tỉnh khác. Định mức là toàn quốc (không theo tỉnh).`;
 }
 
+/**
+ * Tra tiêu chuẩn TCVN — danh mục ĐÃ VERIFY (vsqi.gov.vn) để agent trả nhanh + đúng
+ * số hiệu. Ngoài danh sách này TUYỆT ĐỐI không bịa số hiệu/nội dung điều khoản —
+ * phải tra vsqi.gov.vn (bản full thường phải mua, chỉ trích số hiệu + tình trạng).
+ */
+export const QS_STANDARDS = [
+  'TIÊU CHUẨN TCVN THƯỜNG DÙNG (đã kiểm chứng — số hiệu chuẩn, nêu kèm khi tư vấn nghiệm thu/thiết kế):',
+  '- TCVN 5574:2018 — Thiết kế kết cấu bê tông & bê tông cốt thép.',
+  '- TCVN 4453:1995 — Kết cấu BT & BTCT toàn khối: thi công & nghiệm thu.',
+  '- TCVN 7570:2006 — Cốt liệu cho bê tông & vữa (yêu cầu kỹ thuật).',
+  '- TCVN 9346:2012 — Chống ăn mòn BTCT môi trường biển.',
+  '- TCVN 9343:2012 — Bảo trì kết cấu BTCT.',
+  '- TCVN 13718:2023 — Kết cấu bê tông thủy công: thi công & nghiệm thu.',
+  'QUY TẮC: tiêu chuẩn NGOÀI danh sách trên → tra tieuchuan.vsqi.gov.vn / tcvn.gov.vn, trả SỐ HIỆU + tên + TÌNH TRẠNG hiệu lực; KHÔNG tự bịa số hiệu hay trích nội dung điều khoản khi chưa tra được.',
+].join('\n');
+
 /** Gói kiến thức đầy đủ (chèn vào prompt read/edit/review). */
-export const QS_KNOWLEDGE = [QS_CURRENT_DOCS, QS_SOURCE_ROUTING, QS_TASK_PLAYBOOKS].join('\n\n');
+export const QS_KNOWLEDGE = [QS_CURRENT_DOCS, QS_SOURCE_ROUTING, QS_STANDARDS, QS_TASK_PLAYBOOKS].join('\n\n');
 
 // ===== Domain trust — dùng để (a) bias query web về T1, (b) chấm nguồn ở source.ts =====
 
