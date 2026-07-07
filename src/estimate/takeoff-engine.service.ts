@@ -1019,7 +1019,7 @@ export class TakeoffEngineService {
               ...r,
               unitPrice: h.unitPrice,
               totalPrice: Math.round(h.unitPrice * r.quantity),
-              source: h.sourceTitle ? `Web: ${h.sourceTitle} — cần kiểm chứng` : 'Giá web — cần kiểm chứng',
+              source: `${h.sourceTitle ? `Web: ${h.sourceTitle}` : 'Giá web'}${h.date ? ` (${h.date})` : ''} — cần kiểm chứng`,
               pricedFromWeb: true,
             };
           }
@@ -1259,7 +1259,7 @@ export class TakeoffEngineService {
       const dedupe = h.sourceUri ?? h.sourceTitle ?? '';
       if (!dedupe || seenWeb.has(dedupe)) continue;
       seenWeb.add(dedupe);
-      sources.push({ title: h.sourceTitle, uri: h.sourceUri, type: 'web' });
+      sources.push({ title: h.date ? `${h.sourceTitle ?? 'Giá web'} (${h.date})` : h.sourceTitle, uri: h.sourceUri, type: 'web' });
     }
 
     return {

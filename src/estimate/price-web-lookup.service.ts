@@ -12,7 +12,7 @@ import { InjectModel, Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AiService } from '../ai/ai.service';
 import { normalizeWorkName } from './norm-web-lookup.service';
-import { currentYear, latestQuarterLabel } from './recency';
+import { currentYear, latestQuarterLabel, parseSourceDate } from './recency';
 
 // ===== Pure guardrails =====
 
@@ -93,6 +93,15 @@ export interface WebPriceHit {
   unitPrice: number;
   sourceTitle?: string;
   sourceUri?: string;
+  /** Ngày/quý công bố trích được từ text grounded (vd "Q2/2026") — phục vụ recency. */
+  date?: string;
+}
+
+/** Giữ date nếu parse được (loại chuỗi rác); PURE. */
+export function cleanPublishDate(raw?: string): string | undefined {
+  const s = (raw ?? '').trim();
+  if (!s) return undefined;
+  return parseSourceDate(s) ? s : undefined;
 }
 
 export interface WebPriceQuery {
@@ -132,6 +141,7 @@ const EXTRACT_SCHEMA = {
     found: { type: 'BOOLEAN' },
     unitPriceVnd: { type: 'NUMBER' },
     rawPrice: { type: 'STRING' }, // trích literal từ text để đối chiếu
+    publishDate: { type: 'STRING' }, // ngày/quý công bố nếu xuất hiện trong đoạn (vd "Q2/2026"), else ""
   },
   required: ['found'],
 };
@@ -151,6 +161,7 @@ const BATCH_EXTRACT_SCHEMA = {
           id: { type: 'NUMBER' },
           unitPriceVnd: { type: 'NUMBER' },
           rawPrice: { type: 'STRING' },
+          publishDate: { type: 'STRING' }, // ngày/quý công bố nếu có trong đoạn, else ""
         },
         required: ['id', 'unitPriceVnd'],
       },
@@ -244,13 +255,13 @@ export class PriceWebLookupService {
             text:
               `Từ đoạn văn (kết quả tra web), trích ĐƠN GIÁ VNĐ cho từng công tác trong danh sách đánh số:\n${numbered}\n\n` +
               `Trả items = mảng {id (SỐ THỨ TỰ trong danh sách trên), unitPriceVnd (số; khoảng thì lấy mức phổ biến), ` +
-              `rawPrice (chuỗi giá nguyên văn trong đoạn)}. CHỈ công tác có số giá rõ trong đoạn văn; không có → bỏ qua. ` +
+              `rawPrice (chuỗi giá nguyên văn trong đoạn), publishDate (ngày/quý công bố nếu XUẤT HIỆN trong đoạn — vd "Q2/2026", "08/2026"; không có thì "")}. CHỈ công tác có số giá rõ trong đoạn văn; không có → bỏ qua. ` +
               `TUYỆT ĐỐI không bịa.\n\n--- ĐOẠN VĂN ---\n${research.text}`,
           },
         ],
         BATCH_EXTRACT_SCHEMA,
       );
-      const parsed = JSON.parse(raw) as { items?: { id?: number; unitPriceVnd?: number; rawPrice?: string }[] };
+      const parsed = JSON.parse(raw) as { items?: { id?: number; unitPriceVnd?: number; rawPrice?: string; publishDate?: string }[] };
       const items = parsed.items ?? [];
       let filled = 0;
       for (const it of items) {
@@ -262,6 +273,7 @@ export class PriceWebLookupService {
           unitPrice: Math.round(it.unitPriceVnd as number),
           sourceTitle: research.sources[0]?.title,
           sourceUri: research.sources[0]?.uri,
+          date: cleanPublishDate(it.publishDate),
         });
         filled++;
       }
@@ -307,19 +319,20 @@ export class PriceWebLookupService {
               text:
                 `Từ đoạn văn (kết quả tra web) sau, trích ĐƠN GIÁ thi công công tác "${normalizeWorkName(q.workName)}" ` +
                 `đơn vị ${q.unit} bằng VNĐ. Trả unitPriceVnd = con số (nếu là khoảng, lấy mức phổ biến/trung bình), ` +
-                `rawPrice = chuỗi giá NGUYÊN VĂN trong đoạn (vd "40.000/m2"). Không thấy giá rõ ràng → found=false. ` +
+                `rawPrice = chuỗi giá NGUYÊN VĂN trong đoạn (vd "40.000/m2"), publishDate = ngày/quý công bố nếu XUẤT HIỆN trong đoạn (vd "Q2/2026"), không có thì "". Không thấy giá rõ ràng → found=false. ` +
                 `TUYỆT ĐỐI không dùng kiến thức riêng, không suy đoán.\n\n--- ĐOẠN VĂN ---\n${research.text}`,
             },
           ],
           EXTRACT_SCHEMA,
         );
-        const parsed = JSON.parse(raw) as { found?: boolean; unitPriceVnd?: number; rawPrice?: string };
+        const parsed = JSON.parse(raw) as { found?: boolean; unitPriceVnd?: number; rawPrice?: string; publishDate?: string };
         const price = parsed.unitPriceVnd;
         if (parsed.found && priceInRange(price) && priceAppearsInText(price as number, research.text)) {
           hit = {
             unitPrice: Math.round(price as number),
             sourceTitle: research.sources[0]?.title,
             sourceUri: research.sources[0]?.uri,
+            date: cleanPublishDate(parsed.publishDate),
           };
         } else {
           reason = !parsed.found ? 'not-found' : !priceInRange(price) ? 'range' : 'literal';

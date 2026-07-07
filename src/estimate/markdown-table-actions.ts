@@ -3,6 +3,7 @@
 // Đồng thời là nơi định nghĩa layout 9 cột chuẩn của sheet Khối lượng + format_sheet.
 import { Action, EstimateState, Sheet } from './estimate.types';
 import { parseExcelCell } from './reducer';
+import { NORM_CODE_CORE } from '../catalog/norm-code';
 
 // Layout 7 cột: A=STT B=Mã hiệu C=Tên công tác D=Nhóm đối tượng E=Đơn vị
 // F=Khối lượng G=Diễn giải. Ô thiếu giá trị → "".
@@ -418,7 +419,7 @@ export function rowsToUpdateCells(
 // Model (edit mode) trả lời VĂN XUÔI dạng "1. Trát tường trong: AK.21214 (…)"
 // thay vì JSON actions → parse các cặp (tên, mã) và điền vào cột B của sheet.
 
-const CODE_RE = /[A-Z]{2}\.\d{4,5}[a-z]?/;
+const CODE_RE = new RegExp(NORM_CODE_CORE);
 const ASSIGNMENT_LINE_RE = new RegExp(
   `^\\s*(?:\\d+[.)]\\s*|[-*•+]\\s+)?(.{2,80}?)\\s*:\\s*(?:\\*\\*)?(${CODE_RE.source})\\b`,
 );

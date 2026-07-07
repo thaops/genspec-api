@@ -5,6 +5,7 @@ import { NormComponent, NormItem, PriceItem, PriceSet } from './catalog-db.schem
 import { CATALOG } from './catalog.seed';
 import { CatalogItem, CatalogSearchResult } from './catalog.types';
 import { extractProvinceFromText } from './province-aliases';
+import { extractNormCodes } from './norm-code';
 
 /** Bỏ dấu tiếng Việt + lowercase — dùng chung cho match giá/tỉnh (pure, không Mongo). */
 export function normalizeVn(s: string): string {
@@ -101,7 +102,7 @@ export class CatalogService {
   async referenceBlock(message: string, location?: string, max = 10): Promise<ReferenceBlockResult> {
     const empty: ReferenceBlockResult = { text: '', priceSources: [] };
     try {
-      const codes = Array.from(new Set(message.match(/[A-Za-z]{2,3}[.\-]?\d{4,}/g) ?? []));
+      const codes = extractNormCodes(message);
       const byCode = codes.length
         ? await this.norms.find({ code: { $in: codes.map((c) => new RegExp(`^${c}`, 'i')) } }).limit(max).lean<NormItem[]>()
         : [];

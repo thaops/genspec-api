@@ -15,24 +15,17 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AiService } from '../ai/ai.service';
+import { NORM_CODE_RE, literalCodeInText as sharedLiteralCodeInText } from '../catalog/norm-code';
 
 // ===== Pure guardrails (không Mongo/AI — verify script gọi trực tiếp từ dist) =====
 
-/** Format mã định mức VN: 2 chữ hoa + '.' + 4-5 số + hậu tố thường tuỳ chọn (AF.61522, AB.1141a). */
-export const WEB_NORM_CODE_RE = /^[A-Z]{2}\.\d{4,5}[a-z]?$/;
+/** Format mã định mức VN — dùng CHUẨN CHUNG (catalog/norm-code): 2-3 chữ hoa + '.' + 4-6 số + hậu tố thường. */
+export const WEB_NORM_CODE_RE = NORM_CODE_RE;
 
 export type WebNormFailReason = 'none' | 'grounding' | 'format' | 'literal';
 
-/**
- * Rào 3 nới đúng mức: mã xuất hiện literal trong text, chấp nhận biến thể hoa/thường
- * và khoảng trắng quanh dấu chấm ("AE. 62210", "ae .62210"). Vẫn là chuỗi nguyên văn
- * trong text grounded — không phải kiến thức model. PURE.
- */
-export function literalCodeInText(code: string, text: string): boolean {
-  if (!code || !text) return false;
-  const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\./g, '\\s*\\.\\s*');
-  return new RegExp(escaped, 'i').test(text);
-}
+/** Re-export chuẩn chung để verify script cũ không vỡ. */
+export const literalCodeInText = sharedLiteralCodeInText;
 
 /**
  * Rào 2 + Rào 3: mã đúng format VÀ xuất hiện literal trong text grounded → trả code sạch;
