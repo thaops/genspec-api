@@ -9,6 +9,7 @@ import {
   ValidationStatus,
 } from './estimate.types';
 import { reliabilityOf } from './source';
+import { amendedNorms2025 } from './knowledge/qs-knowledge';
 
 const pct = (a: number, b: number) => (b === 0 ? 0 : Math.round(((a - b) / b) * 1000) / 10);
 const fmt = (n: number) => Math.round(n).toLocaleString('vi-VN');
@@ -184,6 +185,24 @@ export function validate(state: EstimateState, computed: Computed, benchmark?: B
       area: 'source',
       title: 'Có giá chưa truy vết nguồn',
       detail: `${noSource} đơn giá chưa gắn nguồn — không kiểm toán được.`,
+    });
+  }
+
+  // ---- Định mức đã sửa 2025 (ưu tiên bản mới nhất) ----
+  // Gộp 1 finding info, chỉ khi thực sự có mã thuộc nhóm sửa — không spam từng dòng.
+  const usedCodes = [
+    ...state.analyses.map((a) => a.code),
+    ...state.takeoff.map((t) => t.code),
+  ];
+  const amended = amendedNorms2025(usedCodes);
+  if (amended.length > 0) {
+    const list = amended.map((a) => `${a.code} (${a.group}, ${a.doc})`).join('; ');
+    findings.push({
+      id: nid('amend2025'),
+      severity: 'info',
+      area: 'unitPrice',
+      title: `${amended.length} mã thuộc nhóm định mức vừa sửa 2025 — đối chiếu bản mới`,
+      detail: `Các mã: ${list}. Định mức nhóm này được sửa/bổ sung bởi TT 08/2025 (hiệu lực 15/07/2025) và/hoặc TT 60/2025 (15/02/2026) — kiểm tra hao phí theo bản mới trước khi chốt. Lưu ý: định mức bê tông (AF) cũng có bổ sung 2025, đối chiếu khi cần.`,
     });
   }
 

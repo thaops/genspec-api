@@ -97,6 +97,33 @@ export function domainTier(url?: string): DomainTier | undefined {
   return DOMAIN_TRUST.find((d) => u.includes(d.match))?.tier;
 }
 
+// ===== Cảnh báo định mức đã sửa 2025 (theo mã) =====
+// THẬN TRỌNG chống báo nhầm: chỉ bắt các nhóm ÍT PHỔ BIẾN (đào đất AB, cọc AC,
+// nghiền đá AD.28000) — nơi một cảnh báo là TÍN HIỆU. Bê tông (AF) tuy cũng được
+// bổ sung 2025 nhưng có mặt ở gần như mọi dự toán → bắt theo mã sẽ thành NHIỄU
+// (bài học "đừng cry-wolf"); AF chỉ nhắc trong text finding, không tự gắn cờ từng dòng.
+export const AMENDED_2025: { re: RegExp; group: string; doc: string }[] = [
+  { re: /^AB\./i, group: 'đào/đắp đất-đá-cát', doc: 'TT 08/2025' },
+  { re: /^AC\./i, group: 'đóng/ép cọc', doc: 'TT 08/2025' },
+  { re: /^AD\.?28000/i, group: 'nghiền đá (AD.28000)', doc: 'TT 60/2025' },
+];
+
+/** Các mã đang dùng thuộc nhóm định mức đã sửa 2025 (dedupe theo mã). PURE. */
+export function amendedNorms2025(codes: string[]): { code: string; group: string; doc: string }[] {
+  const seen = new Set<string>();
+  const out: { code: string; group: string; doc: string }[] = [];
+  for (const raw of codes) {
+    const c = (raw ?? '').trim();
+    if (!c) continue;
+    const hit = AMENDED_2025.find((a) => a.re.test(c));
+    if (hit && !seen.has(c.toUpperCase())) {
+      seen.add(c.toUpperCase());
+      out.push({ code: c, group: hit.group, doc: hit.doc });
+    }
+  }
+  return out;
+}
+
 /** Gợi ý domain ưu tiên để nhồi vào query web theo loại dữ liệu. */
 export const PREFERRED_DOMAINS: Record<'norm' | 'price' | 'standard' | 'legal', string> = {
   norm: 'ưu tiên nguồn chính thống moc.gov.vn, vbpl.vn, vanban.chinhphu.vn',

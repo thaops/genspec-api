@@ -1,4 +1,15 @@
-import { domainTier, provinceRule, QS_CURRENT_DOCS } from './qs-knowledge';
+import { amendedNorms2025, domainTier, provinceRule, QS_CURRENT_DOCS } from './qs-knowledge';
+
+describe('amendedNorms2025 (thận trọng, không cry-wolf)', () => {
+  it('bắt đào đất AB, cọc AC, nghiền đá AD.28000; KHÔNG bắt bê tông AF/khác', () => {
+    const hits = amendedNorms2025(['AB.11411', 'AC.12100', 'AD.28000', 'AF.61120', 'AK.21110', 'AB.11411']);
+    expect(hits.map((h) => h.code)).toEqual(['AB.11411', 'AC.12100', 'AD.28000']); // dedupe + loại AF/AK
+    expect(hits.find((h) => h.code === 'AD.28000')?.doc).toBe('TT 60/2025');
+  });
+  it('rỗng khi không có mã thuộc nhóm sửa', () => {
+    expect(amendedNorms2025(['AE.62210', 'AK.51110'])).toEqual([]);
+  });
+});
 
 describe('provinceRule', () => {
   it('ghim tỉnh vào tra cứu giá khi có location', () => {
