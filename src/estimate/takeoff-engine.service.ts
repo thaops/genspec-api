@@ -982,16 +982,23 @@ export class TakeoffEngineService {
     let webPricedCount = 0;
     const webPriceHits: WebPriceHit[] = [];
     if (input.editPermission && this.priceWeb.enabled) {
-      const need = rows.filter((r) => r.code && r.unitPrice == null);
-      if (need.length > 0) {
+      // Nhiều SWEEP: dòng thiếu giá ở lần 1 (thường do 429 quota tạm) được tra lại
+      // ở lần sau → điền đầy đủ hơn. Miss THẬT (grounding có nhưng web không có giá)
+      // đã cache nên sweep sau không tốn thêm quota cho nó.
+      const SWEEPS = Number(input.editPermission ? 2 : 0);
+      for (let sweep = 0; sweep < SWEEPS; sweep++) {
+        const need = rows.filter((r) => r.code && r.unitPrice == null);
+        if (need.length === 0) break;
         const hits = await this.priceWeb.lookupPrices(
           need.map((r) => ({ key: r.key, workName: r.name, unit: r.unit })),
           state.projectInfo?.location,
         );
+        let filledThisSweep = 0;
         rows = rows.map((r) => {
           const h = r.unitPrice == null ? hits.get(r.key) : null;
           if (h) {
             webPricedCount++;
+            filledThisSweep++;
             webPriceHits.push(h);
             return {
               ...r,
@@ -1003,6 +1010,8 @@ export class TakeoffEngineService {
           }
           return r;
         });
+        // Không điền thêm được gì ở sweep này → dừng (miss THẬT, sweep nữa vô ích).
+        if (filledThisSweep === 0) break;
       }
     }
 
