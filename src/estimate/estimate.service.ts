@@ -245,6 +245,10 @@ export class EstimateService {
     doc.entityMaps = state.entityMaps ?? [];
     (doc as any).patchHistory = state.patchHistory;
     doc.costs = computed.costs;
+    // sheets là [Mixed]: gán mảng mới KHÔNG luôn khiến Mongoose ghi các thay đổi
+    // lồng sâu (vd cell.s = style trong data.cellData) → reload mất màu/nền dù apply
+    // in-memory vẫn thấy. markModified ép serialize full cây sheets.
+    doc.markModified('sheets');
     await doc.save();
     return toEstimateDto(doc);
   }
