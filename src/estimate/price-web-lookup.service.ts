@@ -126,6 +126,8 @@ const EXTRACT_SCHEMA = {
 
 // Batch: 1 research + 1 extract cho CẢ danh sách công tác → 2 call tổng (thay vì
 // 2/công tác) → tránh 429 quota, điền được nhiều dòng.
+// Map bằng ID (số thứ tự) — LLM hay trả tên mô tả khác input ("bả sơn tường" →
+// "Thi công sơn bả nội thất") nên khớp theo tên bị rớt. ID thì bất biến.
 const BATCH_EXTRACT_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -134,11 +136,11 @@ const BATCH_EXTRACT_SCHEMA = {
       items: {
         type: 'OBJECT',
         properties: {
-          work: { type: 'STRING' },
+          id: { type: 'NUMBER' },
           unitPriceVnd: { type: 'NUMBER' },
           rawPrice: { type: 'STRING' },
         },
-        required: ['work', 'unitPriceVnd'],
+        required: ['id', 'unitPriceVnd'],
       },
     },
   },
@@ -220,35 +222,35 @@ export class PriceWebLookupService {
         this.logger.log(`[WebPriceBatch] ${queries.length} works → sources=0 (grounding fail/429)`);
         return out;
       }
+      const numbered = queries
+        .map((q, i) => `${i + 1}) ${normalizeWorkName(q.workName)} (${q.unit})`)
+        .join('\n');
       const raw = await this.ai.generateJson(
         [
           {
             text:
-              `Từ đoạn văn (kết quả tra web), trích ĐƠN GIÁ VNĐ cho từng công tác trong danh sách: ` +
-              `[${queries.map((q) => normalizeWorkName(q.workName)).join(', ')}]. ` +
-              `Trả items = mảng {work, unitPriceVnd (số; khoảng thì lấy mức phổ biến), rawPrice (chuỗi giá nguyên văn)}. ` +
-              `CHỈ công tác có số rõ trong đoạn văn; không có → bỏ qua. TUYỆT ĐỐI không bịa.\n\n--- ĐOẠN VĂN ---\n${research.text}`,
+              `Từ đoạn văn (kết quả tra web), trích ĐƠN GIÁ VNĐ cho từng công tác trong danh sách đánh số:\n${numbered}\n\n` +
+              `Trả items = mảng {id (SỐ THỨ TỰ trong danh sách trên), unitPriceVnd (số; khoảng thì lấy mức phổ biến), ` +
+              `rawPrice (chuỗi giá nguyên văn trong đoạn)}. CHỈ công tác có số giá rõ trong đoạn văn; không có → bỏ qua. ` +
+              `TUYỆT ĐỐI không bịa.\n\n--- ĐOẠN VĂN ---\n${research.text}`,
           },
         ],
         BATCH_EXTRACT_SCHEMA,
       );
-      const parsed = JSON.parse(raw) as { items?: { work?: string; unitPriceVnd?: number; rawPrice?: string }[] };
+      const parsed = JSON.parse(raw) as { items?: { id?: number; unitPriceVnd?: number; rawPrice?: string }[] };
       const items = parsed.items ?? [];
       let filled = 0;
-      for (const q of queries) {
-        const wn = normalizeWorkName(q.workName);
-        const it = items.find((x) => {
-          const xw = normalizeWorkName(String(x.work ?? ''));
-          return xw && (xw.includes(wn) || wn.includes(xw));
+      for (const it of items) {
+        const idx = Number(it.id) - 1;
+        const q = queries[idx];
+        if (!q || out.get(q.key)) continue;
+        if (!groundedBatchPrice(it.unitPriceVnd, String(it.rawPrice ?? ''), research.text)) continue;
+        out.set(q.key, {
+          unitPrice: Math.round(it.unitPriceVnd as number),
+          sourceTitle: research.sources[0]?.title,
+          sourceUri: research.sources[0]?.uri,
         });
-        if (it && groundedBatchPrice(it.unitPriceVnd, String(it.rawPrice ?? ''), research.text)) {
-          out.set(q.key, {
-            unitPrice: Math.round(it.unitPriceVnd as number),
-            sourceTitle: research.sources[0]?.title,
-            sourceUri: research.sources[0]?.uri,
-          });
-          filled++;
-        }
+        filled++;
       }
       this.logger.log(`[WebPriceBatch] ${queries.length} works → sources=${research.sources.length}, filled=${filled}`);
       // Cache các hit (7 ngày) để lần sau đỡ tốn call.
