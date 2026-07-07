@@ -16,6 +16,7 @@ import { DrawingCompareService } from './services/drawing-compare.service';
 import { DrawingRevisionService } from './services/drawing-revision.service';
 import { DrawingAnnotationService } from './services/drawing-annotation.service';
 import { DrawingGraphService } from './services/drawing-graph.service';
+import { DrawingThumbnailService } from './services/drawing-thumbnail.service';
 
 @Controller('estimates/:estimateId/drawings')
 export class DrawingController {
@@ -31,6 +32,7 @@ export class DrawingController {
     private readonly annotation: DrawingAnnotationService,
     private readonly graph: DrawingGraphService,
     private readonly scene: DrawingSceneService,
+    private readonly thumbnail: DrawingThumbnailService,
   ) {}
 
   @Post()
@@ -51,6 +53,16 @@ export class DrawingController {
     @UploadedFiles() files: Express.Multer.File[],
   ) {
     return this.upload.uploadMany(estimateId, files);
+  }
+
+  // FE render scene → data-URI ảnh nhỏ → lưu làm thumbnail cho card home.
+  @Patch(':drawingId/thumbnail')
+  setThumbnail(
+    @Param('estimateId') estimateId: string,
+    @Param('drawingId') drawingId: string,
+    @Body('dataUrl') dataUrl: string,
+  ) {
+    return this.thumbnail.save(estimateId, drawingId, dataUrl);
   }
 
   // User chỉnh tay bộ môn của bản vẽ.
