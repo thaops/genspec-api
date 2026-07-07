@@ -5,7 +5,7 @@ import { StreamEvent } from '../copilot.types';
 import { searchWorkbook } from '../tools/tool-registry';
 import { Workbook } from '../estimate.types';
 import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
-import { QS_KNOWLEDGE } from '../knowledge/qs-knowledge';
+import { QS_KNOWLEDGE, provinceRule } from '../knowledge/qs-knowledge';
 
 const SEARCH_INTENT = /(tìm|tìm kiếm|ở đâu|nằm ở|xuất hiện|có bao nhiêu|đang ở)/i;
 const WEB_INTENT = /(thông tư|nghị định|quyết định|quy định|pháp lý|định mức|đơn giá|bảng giá|thị trường|mới nhất|hiện hành|tìm trên mạng|tra cứu|cập nhật|thép|xi măng|bê tông|cát|đá|gạch|sơn|nhôm|kính|giá vật liệu|giá nhân công|cao thế|đắt|rẻ|hợp lý|đúng không|đúng chưa|chính xác|so sánh)/i;
@@ -16,6 +16,7 @@ export class ReadModeHandler {
 
   async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = '', editPermission = false): AsyncGenerator<StreamEvent> {
     yield { event: 'step', data: { text: 'Đọc cấu trúc Workbook…' } };
+    const location = (workbook as any)?.projectInfo?.location as string | undefined;
 
     let searchContext = '';
     if (SEARCH_INTENT.test(message)) {
@@ -36,7 +37,12 @@ export class ReadModeHandler {
     if (WEB_INTENT.test(message)) {
       yield { event: 'step', data: { text: 'Tra cứu thông tin pháp lý / giá thị trường…' } };
       try {
-        const result = await this.ai.research(message);
+        // Ghim TỈNH vào truy vấn: câu hỏi giá/vật liệu/nhân công phải tra đúng tỉnh
+        // dự án (ưu tiên công bố giá Sở XD tỉnh đó) — không tra chung chung.
+        const webQuery = location?.trim()
+          ? `${message}\n(Dự án tại ${location}: nếu là câu hỏi đơn giá/giá vật liệu/nhân công/ca máy → tra theo tỉnh ${location}, ưu tiên công bố giá Sở Xây dựng ${location}, số MỚI NHẤT.)`
+          : message;
+        const result = await this.ai.research(webQuery);
         if (result.text) {
           const sourceList = result.sources.slice(0, 5).map((s) => `- ${s.title ?? s.uri}: ${s.uri}`).join('\n');
           webContext = [
@@ -62,7 +68,7 @@ export class ReadModeHandler {
       }
     }
 
-    const prompt = this.buildPrompt(context, message, searchContext, webContext, webSearchFailed, history, editPermission);
+    const prompt = this.buildPrompt(context, message, searchContext, webContext, webSearchFailed, history, editPermission, location);
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
@@ -129,7 +135,7 @@ export class ReadModeHandler {
     return words.slice(-2).join(' ');
   }
 
-  private buildPrompt(context: WorkbookContext, message: string, searchContext: string, webContext: string, webSearchFailed: boolean, history: string, editPermission = false): string {
+  private buildPrompt(context: WorkbookContext, message: string, searchContext: string, webContext: string, webSearchFailed: boolean, history: string, editPermission = false, location?: string): string {
     const searchFailedNote = webSearchFailed
       ? 'CẢNH BÁO: Tra cứu mạng thất bại. TUYỆT ĐỐI KHÔNG tự bịa thông tin pháp lý. Nếu câu hỏi liên quan đến thông tư/nghị định → nói thẳng không tra cứu được, hướng dẫn người dùng vào moc.gov.vn hoặc vbpl.vn để kiểm tra.'
       : '';
@@ -138,6 +144,7 @@ export class ReadModeHandler {
       SENIOR_QS_PRINCIPLES,
       RECENCY_RULE,
       QS_KNOWLEDGE, // read = đường hỏi-đáp: nạp đủ playbook + nguồn tin cậy + văn bản hiện hành
+      provinceRule(location), // ghim tỉnh dự án — tra giá phải đúng tỉnh
       'Nói chuyện trực tiếp như đồng nghiệp, không dùng tiêu đề hay bullet point trừ khi liệt kê số liệu.',
       editPermission
         ? 'Đây là câu hỏi ĐỌC/tra cứu — trả lời trực tiếp. TUYỆT ĐỐI KHÔNG nói "đã đẩy/đã ghi vào sheet" và KHÔNG bảo người dùng bật Edit (quyền chỉnh sửa ĐANG BẬT — muốn sửa gì họ chỉ cần ra lệnh cụ thể).'

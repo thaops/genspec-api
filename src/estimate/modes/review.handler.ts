@@ -7,7 +7,7 @@ import { Workbook } from '../estimate.types';
 import { detectSheetType } from '../rule-detector';
 import { auditAgainstChecklist } from '../knowledge/work-checklist';
 import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
-import { QS_CURRENT_DOCS, QS_SOURCE_ROUTING } from '../knowledge/qs-knowledge';
+import { QS_CURRENT_DOCS, QS_SOURCE_ROUTING, provinceRule } from '../knowledge/qs-knowledge';
 
 interface Finding {
   severity: 'error' | 'warn' | 'info';
@@ -26,6 +26,7 @@ export class ReviewModeHandler {
   async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = ''): AsyncGenerator<StreamEvent> {
     // If user has selected a specific range, skip full rule engine — just answer about that area
     const hasFocus = !!context.focusedData;
+    const location = (workbook as any)?.projectInfo?.location as string | undefined;
 
     let findings: Finding[] = [];
 
@@ -111,7 +112,11 @@ export class ReviewModeHandler {
     if (needsWebCheck) {
       yield { event: 'step', data: { text: 'Tra cứu giá thị trường để dẫn chứng…' } };
       try {
-        const q = message || 'Bảng giá vật liệu xây dựng và định mức nhân công mới nhất Việt Nam';
+        const base = message || 'Bảng giá vật liệu xây dựng và đơn giá nhân công mới nhất';
+        // Ghim tỉnh dự án để dẫn chứng đúng công bố giá của tỉnh đó.
+        const q = location?.trim()
+          ? `${base} tại ${location} (ưu tiên công bố giá Sở Xây dựng ${location}, quý gần nhất)`
+          : `${base} Việt Nam`;
         const result = await this.ai.research(q);
         if (result.text) {
           webContext = result.text.slice(0, 2000);
@@ -122,7 +127,7 @@ export class ReviewModeHandler {
 
     yield { event: 'step', data: { text: 'AI soát xét logic nghiệp vụ…' } };
 
-    const prompt = this.buildPrompt(context, message, findings, history, webContext, hasFocus);
+    const prompt = this.buildPrompt(context, message, findings, history, webContext, hasFocus, location);
     let reply = '';
     try {
       for await (const chunk of this.ai.stream([{ text: prompt }])) {
@@ -177,7 +182,7 @@ export class ReviewModeHandler {
     };
   }
 
-  private buildPrompt(context: WorkbookContext, message: string, findings: Finding[], history: string, webContext: string, hasFocus: boolean): string {
+  private buildPrompt(context: WorkbookContext, message: string, findings: Finding[], history: string, webContext: string, hasFocus: boolean, location?: string): string {
     if (hasFocus) {
       // Focused mode: user selected a cell/range — answer only about that
       return [
@@ -204,6 +209,7 @@ export class ReviewModeHandler {
       SENIOR_QS_PRINCIPLES,
       QS_CURRENT_DOCS,
       QS_SOURCE_ROUTING,
+      provinceRule(location),
       'Đang review dự toán. Kết quả kiểm tra tự động bên dưới.',
       'Nói thẳng vấn đề quan trọng nhất. Không liệt kê lại từng lỗi — tổng hợp thành nhận xét thực chất.',
       webContext ? `Dẫn nguồn cụ thể (tên văn bản, ngày, link) nếu trích dẫn giá hoặc định mức.\n${RECENCY_RULE}` : '',

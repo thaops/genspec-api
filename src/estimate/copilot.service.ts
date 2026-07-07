@@ -484,11 +484,16 @@ Trả về 6-8 kết quả chính xác nhất, mới nhất. trustScore từ 70-
   }
 
   private researchQuery(state: any, message: string): string {
-    const loc = state.projectInfo.location ? ` tại ${state.projectInfo.location}` : ' tại Việt Nam';
+    const prov = state.projectInfo.location?.trim();
+    const loc = prov ? ` tại ${prov}` : ' tại Việt Nam';
+    // Ghim tỉnh: ưu tiên công bố giá của CHÍNH tỉnh dự án (Sở XD tỉnh đó), quý gần nhất.
+    const provPref = prov
+      ? `Ưu tiên CÔNG BỐ GIÁ của Sở Xây dựng ${prov} (soxaydung.<${prov}>.gov.vn), quý gần nhất. Nêu rõ NGÀY và tên nguồn.`
+      : 'Ưu tiên thông báo giá liên Sở / báo giá nhà cung cấp quý gần nhất. Nêu rõ NGÀY và tên nguồn.';
     return [
       `Bảng giá vật liệu xây dựng MỚI NHẤT${loc} (xi măng PCB40, cát, đá, thép, gạch, sơn).`,
-      'Ưu tiên thông báo giá liên Sở / báo giá nhà cung cấp quý gần nhất. Nêu rõ NGÀY và tên nguồn.',
-      'Đơn giá nhân công và ca máy hiện hành theo địa phương.',
+      provPref,
+      `Đơn giá nhân công và ca máy hiện hành${loc}.`,
       `Suất đầu tư "${state.projectInfo.buildingType ?? state.projectInfo.name ?? 'nhà ở dân dụng'}"${loc} (triệu đồng/m² sàn).`,
       message ? `Bối cảnh: ${message}` : '',
     ]

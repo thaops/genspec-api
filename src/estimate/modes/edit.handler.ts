@@ -13,7 +13,7 @@ import { previewActions } from '../transparency';
 import { validate } from '../validation';
 import { CitationEngineService } from '../sources/citation-engine';
 import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
-import { QS_CURRENT_DOCS, QS_SOURCE_ROUTING } from '../knowledge/qs-knowledge';
+import { QS_CURRENT_DOCS, QS_SOURCE_ROUTING, provinceRule } from '../knowledge/qs-knowledge';
 import { codeAssignmentsToUpdateCells, tableToUpdateCellsDetailed, takeoffActionsToUpdateCells } from '../markdown-table-actions';
 import { CONCRETE_NORMS, STEEL_NORMS } from '../knowledge/qs-standards';
 import { getChecklistForBuilding } from '../knowledge/work-checklist';
@@ -495,6 +495,7 @@ export class EditModeHandler {
       RECENCY_RULE,
       QS_CURRENT_DOCS, // biết định mức đã bị sửa (TT08/2025, TT60/2025) — không gán mã theo bản cũ
       QS_SOURCE_ROUTING,
+      provinceRule(state.projectInfo.location), // ghim tỉnh — điền/tra giá phải theo tỉnh dự án
       'Bạn là Minh — QS senior đang chỉnh sửa dự toán theo yêu cầu.',
       'Bất kể lịch sử trò chuyện nói gì, bạn KHÔNG ở chế độ đọc — TUYỆT ĐỐI KHÔNG bảo người dùng "bật Edit". Hãy xuất JSON actions để thực hiện yêu cầu ngay.',
       'Làm đúng yêu cầu, không thêm không bớt. Nếu thiếu thông tin thực sự cần thiết → CHỌN giả định phổ biến rồi làm (không hỏi lại).',

@@ -14,6 +14,7 @@
 export const QS_CURRENT_DOCS = [
   'VĂN BẢN HIỆN HÀNH (cập nhật 2026 — nếu nguồn web nói khác, ưu tiên bản MỚI hơn và nêu rõ ngày):',
   '- Định mức xây dựng: Thông tư 12/2021/TT-BXD (gốc) ĐÃ ĐƯỢC SỬA ĐỔI bởi TT 08/2025/TT-BXD (hiệu lực 15/07/2025, thêm ~58 định mức) và TT 60/2025/TT-BXD (hiệu lực 15/02/2026). Khi trích định mức phải soát cả 3 văn bản — KHÔNG nói "TT12/2021" như thể là bản duy nhất.',
+  '  → CÔNG TÁC bị sửa/bổ sung 2025 (nếu dùng, PHẢI nhắc user kiểm bản mới): đào/đắp đất-đá-cát, đóng/ép cọc, đường ray, bê tông (TT08/2025); nghiền đá công suất lớn (mã AD.28000, TT60/2025). Gặp các nhóm này thì cảnh báo "định mức nhóm này vừa sửa 2025 — đối chiếu TT08/2025 & TT60/2025".',
   '- Quản lý chi phí đầu tư XD: Nghị định 10/2021/NĐ-CP, sửa bởi Nghị định 35/2023/NĐ-CP (vẫn hiệu lực — KHÔNG có nghị định mới thay thế).',
   '- Thông tư liên quan: TT 11/2021 (xác định & quản lý chi phí), TT 13/2021 (giá ca máy + đơn giá nhân công), TT 14/2021 (bảo trì) — đều sửa bởi TT 60/2025 (15/02/2026).',
   '- Mã 1776/BXD-VP, QĐ 588, QĐ 957 là bản CŨ/lịch sử — chỉ tham chiếu, không coi là hiện hành.',
@@ -50,6 +51,18 @@ export const QS_TASK_PLAYBOOKS = [
   '8. Sanity-check tổng mức bằng suất đầu tư/benchmark theo loại công trình.',
   'Với mọi việc trên: gắn NGUỒN + NGÀY + độ tin cậy; thiếu dữ liệu thật thì nói "chưa đủ căn cứ" thay vì bịa.',
 ].join('\n');
+
+/**
+ * Ghim TỈNH DỰ ÁN vào prompt — mọi tra cứu GIÁ phải kèm tỉnh này để ra đúng số
+ * của tỉnh (đơn giá VLXD/nhân công/ca máy khác nhau theo tỉnh). Định mức toàn quốc.
+ */
+export function provinceRule(location?: string): string {
+  const loc = (location ?? '').trim();
+  if (!loc) {
+    return 'TỈNH DỰ ÁN: CHƯA XÁC ĐỊNH — trước khi tra đơn giá phải hỏi/nhắc user chọn tỉnh (giá VLXD/nhân công/ca máy khác nhau từng tỉnh). Định mức là toàn quốc, không cần tỉnh.';
+  }
+  return `TỈNH DỰ ÁN: ${loc}. Mọi tra cứu ĐƠN GIÁ/công bố giá/vật liệu/nhân công/ca máy PHẢI kèm tên tỉnh "${loc}" trong truy vấn và ưu tiên công bố giá của Sở Xây dựng ${loc} (soxaydung.<${loc}>.gov.vn) — trừ khi user chỉ định tỉnh khác. Định mức là toàn quốc (không theo tỉnh).`;
+}
 
 /** Gói kiến thức đầy đủ (chèn vào prompt read/edit/review). */
 export const QS_KNOWLEDGE = [QS_CURRENT_DOCS, QS_SOURCE_ROUTING, QS_TASK_PLAYBOOKS].join('\n\n');
