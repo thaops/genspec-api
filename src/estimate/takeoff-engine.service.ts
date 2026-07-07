@@ -623,7 +623,7 @@ export function computeTakeoffRows(
       code = cand.code;
       name = DEFAULT_NAMES[key];
       source = 'AI đề xuất mã phổ thông — cần kiểm chứng';
-      note += ' ⚠ mã phổ thông mặc định — cần kiểm chứng';
+      // ⚠ không lặp vào Diễn giải từng dòng (nhiễu) — đã có finding tổng + cột Nguồn.
       webSourced = true;
       fallback = true;
     } else if (cand && cand.code && cand.webSource) {
@@ -632,7 +632,7 @@ export function computeTakeoffRows(
       code = cand.code;
       name = DEFAULT_NAMES[key];
       source = `Web: ${cand.webSource.title ?? cand.webSource.uri ?? 'nguồn web'}`;
-      note += ' ⚠ mã tra từ web — cần kiểm chứng';
+      // ⚠ không lặp vào Diễn giải — đã có finding tổng + cột Nguồn "Web: …".
       webSourced = true;
     } else if (cand && cand.code) {
       // Mã DB: giữ tên DB nếu gọn, chuẩn hoá về tên engine nếu lộn xộn/viết hoa dài.
@@ -1105,13 +1105,15 @@ export class TakeoffEngineService {
     const pricedCount = rows.length - missingPrice.length;
     const message = [
       `Đã bóc khối lượng ${rows.length} dòng từ ${groups.length} nhóm cấu kiện (${groups.join(', ')}) — ${objects.length} đối tượng hình học${rejected.size ? `, đã loại ${rejected.size} đối tượng bị từ chối` : ''}${regionKept != null ? `. Bóc TRONG VÙNG CHỌN: chỉ tính ${regionKept}/${regionTotal} đối tượng nằm trong vùng` : ''}.`,
-      `Giả định: cao tầng ${a.floorHeight}m, dày tường ${a.wallThickness}m, cao dầm ${a.beamDepth}m, bề rộng dầm ${ASSUMED_BEAM_WIDTH}m, tỷ lệ ${input.unitsPerDrawingUnit} m/đơn vị vẽ.`,
-      `Khối lượng do máy tính từ hình học bản vẽ — không phải AI ước lượng.`,
+      // Cảnh báo phạm vi lên NGAY sau dòng đầu — đây là điểm QS mất tin nhất (khối
+      // lượng là TỔNG nhiều cụm). Phải thấy trước bảng, không chôn giữa bài.
       ...(multiDrawing
         ? [
             `⚠ PHẠM VI: model space có ~${clusterInfo.clusters} cụm bản vẽ (trải ~${Math.round(clusterInfo.spanM)}m) — thường là nhiều mặt bằng/mặt đứng/chi tiết đặt cạnh nhau. Số trên là TỔNG tất cả các cụm. Để bóc riêng 1 mặt bằng, dùng "Bóc trong vùng" (kéo chọn vùng quanh mặt bằng) rồi bóc lại.`,
           ]
         : []),
+      `Giả định: cao tầng ${a.floorHeight}m, dày tường ${a.wallThickness}m, cao dầm ${a.beamDepth}m, bề rộng dầm ${ASSUMED_BEAM_WIDTH}m, tỷ lệ ${input.unitsPerDrawingUnit} m/đơn vị vẽ. (Sửa giả định ở nút ⚙ cạnh "Bóc toàn bộ" rồi bóc lại.)`,
+      `Khối lượng do máy tính từ hình học bản vẽ — không phải AI ước lượng.`,
       ...(webCode.length > 0
         ? [
             `Mã hiệu: ${webCode.length} công tác không có trong norm_items — đã tra từ web (grounded search, chậm hơn bình thường); mã web CẦN KIỂM CHỨNG trước khi dùng.`,
@@ -1177,12 +1179,14 @@ export class TakeoffEngineService {
       });
     }
     if (multiDrawing) {
+      // severity 'error' (không phải 'warn') — QS xác nhận con số TỔNG đa cụm KHÔNG
+      // nộp được, phải bóc lại theo vùng. Để UI hiện đỏ/nổi bật như bước bắt buộc.
       findings.push({
         id: 'takeoff-engine-multi-drawing',
-        severity: 'warn',
+        severity: 'error',
         area: 'quantity',
-        title: `Bản vẽ chứa ~${clusterInfo.clusters} cụm — khối lượng là TỔNG tất cả`,
-        detail: `Model space có ~${clusterInfo.clusters} cụm đối tượng cách xa nhau (trải ~${Math.round(clusterInfo.spanM)}m) — thường là nhiều mặt bằng/mặt đứng/chi tiết đặt cạnh nhau trong cùng file. "Bóc toàn bộ" đã cộng dồn TẤT CẢ. Để bóc đúng 1 mặt bằng: dùng "Bóc trong vùng" — kéo chọn vùng bao quanh mặt bằng cần bóc rồi bóc lại.`,
+        title: `⚠ Cần bóc theo vùng: bản vẽ có ~${clusterInfo.clusters} cụm — số hiện tại là TỔNG, chưa dùng để nộp được`,
+        detail: `Model space có ~${clusterInfo.clusters} cụm đối tượng cách xa nhau (trải ~${Math.round(clusterInfo.spanM)}m) — thường là nhiều mặt bằng/mặt đứng/chi tiết đặt cạnh nhau trong cùng file. "Bóc toàn bộ" đã cộng dồn TẤT CẢ nên khối lượng bị phồng. BƯỚC TIẾP THEO (nên làm ngay): dùng "Bóc trong vùng" — kéo chọn vùng bao quanh ĐÚNG 1 mặt bằng cần bóc rồi bóc lại.`,
       });
     }
     if (factorOverridden) {
