@@ -7,6 +7,7 @@ import { Workbook } from '../estimate.types';
 import { detectSheetType } from '../rule-detector';
 import { auditAgainstChecklist } from '../knowledge/work-checklist';
 import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
+import { QS_CURRENT_DOCS, QS_SOURCE_ROUTING } from '../knowledge/qs-knowledge';
 
 interface Finding {
   severity: 'error' | 'warn' | 'info';
@@ -201,6 +202,8 @@ export class ReviewModeHandler {
     const fmt = (list: Finding[]) => list.length === 0 ? 'không có' : list.map((f) => `• ${f.message}${f.suggestion ? ` → ${f.suggestion}` : ''}`).join('\n');
     return [
       SENIOR_QS_PRINCIPLES,
+      QS_CURRENT_DOCS,
+      QS_SOURCE_ROUTING,
       'Đang review dự toán. Kết quả kiểm tra tự động bên dưới.',
       'Nói thẳng vấn đề quan trọng nhất. Không liệt kê lại từng lỗi — tổng hợp thành nhận xét thực chất.',
       webContext ? `Dẫn nguồn cụ thể (tên văn bản, ngày, link) nếu trích dẫn giá hoặc định mức.\n${RECENCY_RULE}` : '',

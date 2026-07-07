@@ -13,6 +13,7 @@ import { Model } from 'mongoose';
 import { AiService } from '../ai/ai.service';
 import { normalizeWorkName } from './norm-web-lookup.service';
 import { currentYear, latestQuarterLabel, parseSourceDate } from './recency';
+import { PREFERRED_DOMAINS } from './knowledge/qs-knowledge';
 
 // ===== Pure guardrails =====
 
@@ -81,7 +82,7 @@ export function buildPriceQuery(
   const loc = province ? `tại ${province}` : 'tại Việt Nam';
   return (
     `Đơn giá thi công (bao gồm nhân công + vật liệu) công tác "${wn}" ${loc} MỚI NHẤT ` +
-    `(ưu tiên ${quarter}, năm ${refYear}), đơn vị tính ${unit}, bằng VNĐ. ` +
+    `(ưu tiên ${quarter}, năm ${refYear}), đơn vị tính ${unit}, bằng VNĐ. ${PREFERRED_DOMAINS.price}. ` +
     `Nêu CON SỐ cụ thể (vd 40.000/m2), NGÀY/quý công bố và trích nguồn. ` +
     `Nếu là khoảng giá, lấy mức phổ biến. Nếu có nhiều mốc thời gian, lấy số MỚI NHẤT.`
   );

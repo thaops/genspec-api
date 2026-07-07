@@ -16,6 +16,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AiService } from '../ai/ai.service';
 import { NORM_CODE_RE, literalCodeInText as sharedLiteralCodeInText } from '../catalog/norm-code';
+import { PREFERRED_DOMAINS } from './knowledge/qs-knowledge';
 
 // ===== Pure guardrails (không Mongo/AI — verify script gọi trực tiếp từ dist) =====
 
@@ -132,8 +133,9 @@ export const NORM_SOURCE_HINT =
 export function buildQueries(hintKey: string | undefined, workName: string): string[] {
   const wn = normalizeWorkName(workName);
   const hinted = hintKey ? QUERY_HINTS[hintKey] : undefined;
-  // Query đầu tiên luôn hỏi bản mới nhất — nếu định mức đã có bản thay thế, bắt được ngay.
-  const recencyFirst = `mã hiệu định mức công tác "${wn}" theo ${NORM_SOURCE_HINT}. Ghi rõ mã hiệu dạng XX.NNNNN, tên công tác và SỐ HIỆU/NĂM văn bản.`;
+  // Query đầu tiên luôn hỏi bản mới nhất + ưu tiên nguồn chính thống (T1) — nếu định
+  // mức đã có bản thay thế (TT08/2025, TT60/2025), bắt được ngay.
+  const recencyFirst = `mã hiệu định mức công tác "${wn}" theo ${NORM_SOURCE_HINT}, ${PREFERRED_DOMAINS.norm}. Ghi rõ mã hiệu dạng XX.NNNNN, tên công tác và SỐ HIỆU/NĂM văn bản.`;
   const generic = `định mức xây dựng công tác ${wn} mã hiệu bản mới nhất`;
   return [recencyFirst, ...(hinted ?? []), generic].slice(0, MAX_QUERIES_PER_KEY);
 }

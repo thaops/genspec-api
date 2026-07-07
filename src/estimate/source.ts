@@ -1,5 +1,6 @@
 import { PriceSource, SourceType } from './estimate.types';
 import { freshnessScore, recencyDelta } from './recency';
+import { domainTier } from './knowledge/qs-knowledge';
 
 /**
  * Source Ranking Engine — reliability is DERIVED from the source type, not
@@ -56,7 +57,11 @@ export function rankSource(s?: PriceSource): PriceSource | undefined {
   if (!s) return s;
   const type = s.type ?? inferSourceType(s);
   const ranked = reliabilityOf(type);
-  const confidence = ranked != null ? clamp(ranked + recencyDelta(s.date)) : s.confidence;
+  // Guard nguồn giả: khai "government" nhưng URL là domain cộng đồng/thương mại
+  // (gxd.vn, dutoanf1…) → KHÔNG phải công bố nhà nước, hạ mạnh độ tin.
+  const tier = domainTier(s.url);
+  const spoofPenalty = type === 'government' && tier === 'community' ? -35 : 0;
+  const confidence = ranked != null ? clamp(ranked + recencyDelta(s.date) + spoofPenalty) : s.confidence;
   return {
     ...s,
     type: type ?? s.type,

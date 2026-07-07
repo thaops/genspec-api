@@ -42,6 +42,18 @@ describe('rankSource with recency', () => {
   });
 });
 
+describe('domain trust guard (spoof nguồn chính thống)', () => {
+  it('government claim from a community domain is downgraded', () => {
+    const real = rankSource({ type: 'government', date: latestQuarterLabel(), url: 'https://vbpl.vn/x' })!;
+    const spoof = rankSource({ type: 'government', date: latestQuarterLabel(), url: 'https://gxd.vn/x' })!;
+    expect(spoof.confidence!).toBeLessThan(real.confidence! - 20);
+  });
+  it('official gov domain keeps high confidence', () => {
+    const gov = rankSource({ type: 'government', date: latestQuarterLabel(), url: 'https://moc.gov.vn/x' })!;
+    expect(gov.confidence!).toBeGreaterThanOrEqual(90);
+  });
+});
+
 describe('pickBetterSource', () => {
   it('prefers the fresher/more reliable adjusted source', () => {
     const a = { type: 'government' as const, date: '2018' };
