@@ -69,63 +69,70 @@ export class DrawingJobProcessor extends WorkerHost {
       const filePath = await this.ensureLocalFile(drawingId, storageUrl, tmpPath);
       await this.plog(drawingId, `[downloaded] ${fileSizeMB(filePath)}MB`);
 
-      // 2. Convert DWG → DXF if needed
+      // 2. Parse. DWG dùng WASM TRƯỚC (nhanh, KHÔNG cần binary native) — như đường
+      // in-process. Chỉ file lớn/phức tạp mà WASM gãy mới cần converter dwg2dxf/ODA.
       let parsePath = filePath;
       let parseExt  = fileType === 'image' ? 'image' : fileType;
+      let result: DrawingParseResult | null = null;
 
       if (fileType === 'dwg') {
-        await this.progress(job, 'converting', 'Đang chuyển đổi DWG → DXF...', 15);
+        await this.progress(job, 'parsing', 'Đang đọc bản vẽ (WASM)...', 25);
         try {
-          const dxfPath = await this.dwgConverter.convert(filePath);
-          parsePath = dxfPath;
-          parseExt  = 'dxf';
-          await this.plog(drawingId, `[converted] DWG→DXF ${fileSizeMB(dxfPath)}MB`);
-          // Persist converted DXF durably so scenes can be rebuilt later
-          let convertedUrl = dxfPath;
+          result = await this.parserFactory.resolve('dwg').parse(filePath);
+          await this.scene.buildAndPersistFromDwgResult(drawingId, result);
+          await this.plog(drawingId, `[parsed:wasm] entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}`);
+          parseExt = 'dwg-done';
+        } catch (wasmErr: any) {
+          await this.plog(drawingId, `[wasm-fail] ${wasmErr.message} → converter native DWG→DXF`);
+          await this.progress(job, 'converting', 'DWG lớn — chuyển DWG→DXF...', 15);
           try {
-            const up = await this.cloudinary.uploadBuffer(fs.readFileSync(dxfPath), {
-              folder: `genspec/drawings/${estimateId}/converted`,
-              fileName: `${drawingId}.dxf`,
-            });
-            convertedUrl = up.url;
-          } catch (upErr: any) {
-            this.logger.warn(`Converted DXF upload failed, keeping local path: ${upErr.message}`);
+            const dxfPath = await this.dwgConverter.convert(filePath);
+            parsePath = dxfPath;
+            parseExt  = 'dxf';
+            await this.plog(drawingId, `[converted] DWG→DXF ${fileSizeMB(dxfPath)}MB`);
+            let convertedUrl = dxfPath;
+            try {
+              const up = await this.cloudinary.uploadBuffer(fs.readFileSync(dxfPath), {
+                folder: `genspec/drawings/${estimateId}/converted`,
+                fileName: `${drawingId}.dxf`,
+              });
+              convertedUrl = up.url;
+            } catch (upErr: any) {
+              this.logger.warn(`Converted DXF upload failed, keeping local path: ${upErr.message}`);
+            }
+            await this.drawingModel.updateOne({ _id: drawingId }, { convertedUrl });
+          } catch (convErr: any) {
+            await this.setStatus(drawingId, 'failed',
+              `WASM không đọc được (file lớn/phức tạp) và converter native cũng không khả dụng: ${convErr.message}. ` +
+              `Hãy PURGE/AUDIT + Save As DWG mới cho nhẹ, hoặc upload file .dxf.`);
+            return;
           }
-          await this.drawingModel.updateOne({ _id: drawingId }, { convertedUrl });
-        } catch (err: any) {
-          // ODA not installed — mark failed with helpful message
-          await this.setStatus(drawingId, 'failed',
-            `DWG converter không khả dụng: ${err.message}. Vui lòng upload file DXF.`);
-          return;
         }
       }
 
-      // 3. Parse. Guard against a pathological converted DXF whose sheer size would
-      // OOM the tokenizer before the per-entity cap can even engage.
-      const parseMB = fileSizeMB(parsePath);
-      if (parseMB > MAX_PARSE_MB) {
-        await this.setStatus(drawingId, 'failed',
-          `File quá lớn để xử lý (${parseMB}MB > ${MAX_PARSE_MB}MB) — bản vẽ có thể chứa block lồng bất thường. Hãy purge/audit trong CAD rồi upload lại.`);
-        await this.plog(drawingId, `[abort] parse size ${parseMB}MB exceeds ${MAX_PARSE_MB}MB`);
-        return;
+      // 3. Parse DXF/khác (bỏ qua nếu DWG đã parse xong bằng WASM). Guard MAX_PARSE_MB.
+      if (parseExt !== 'dwg-done') {
+        const parseMB = fileSizeMB(parsePath);
+        if (parseMB > MAX_PARSE_MB) {
+          await this.setStatus(drawingId, 'failed',
+            `File quá lớn để xử lý (${parseMB}MB > ${MAX_PARSE_MB}MB) — bản vẽ có thể chứa block lồng bất thường. Hãy purge/audit trong CAD rồi upload lại.`);
+          await this.plog(drawingId, `[abort] parse size ${parseMB}MB exceeds ${MAX_PARSE_MB}MB`);
+          return;
+        }
+        await this.progress(job, 'parsing', 'Đang đọc bản vẽ...', 30);
+        await this.plog(drawingId, `[parsing] ${parseExt} ${parseMB}MB…`);
+        if (parseExt === 'dxf') {
+          const doc = await this.dxfParser.parseFileStreaming(parsePath);
+          result = this.dxfParser.docToResult(doc);
+          await this.plog(drawingId, `[parsed] entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}`);
+          await this.scene.buildAndPersistFromDxfDoc(drawingId, doc);
+          await this.plog(drawingId, `[scene] built (reused doc)`);
+        } else {
+          result = await this.parserFactory.resolve(parseExt).parse(parsePath);
+          await this.plog(drawingId, `[parsed] entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}`);
+        }
       }
-      await this.progress(job, 'parsing', 'Đang đọc bản vẽ...', 30);
-      await this.plog(drawingId, `[parsing] ${parseExt} ${parseMB}MB…`);
-
-      // DXF: parse the file ONCE into a doc, then derive both the detection result
-      // and the render scene from it — avoids a second full read+tokenize (which
-      // doubled peak memory and caused OOM on large drawings).
-      let result: DrawingParseResult;
-      if (parseExt === 'dxf') {
-        const doc = await this.dxfParser.parseFileStreaming(parsePath);
-        result = this.dxfParser.docToResult(doc);
-        await this.plog(drawingId, `[parsed] entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}`);
-        await this.scene.buildAndPersistFromDxfDoc(drawingId, doc);
-        await this.plog(drawingId, `[scene] built (reused doc)`);
-      } else {
-        result = await this.parserFactory.resolve(parseExt).parse(parsePath);
-        await this.plog(drawingId, `[parsed] entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}`);
-      }
+      if (!result) throw new Error('Parse không trả kết quả');
 
       // 4. Normalize + Detect
       await this.progress(job, 'detecting', 'Đang phân tích đối tượng...', 55);
