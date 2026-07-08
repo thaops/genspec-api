@@ -19,6 +19,7 @@ import { DrawingGraphService } from '../drawing/services/drawing-graph.service';
 import { DrawingParserFactory } from '../drawing/parsers/drawing-parser.factory';
 import { PdfParserService } from '../drawing/parsers/pdf-parser.service';
 import { DxfParserService } from '../drawing/parsers/dxf-parser.service';
+import { DwgParserService } from '../drawing/parsers/dwg-parser.service';
 import { DwgConverterService } from '../drawing/converters/dwg-converter.service';
 import { CloudinaryService } from '../storage/cloudinary.service';
 import { SceneBuilderService } from '../drawing/services/scene-builder.service';
@@ -51,6 +52,7 @@ import { DrawingSceneEntity, DrawingSceneSchema } from '../drawing/schemas/drawi
     DrawingParserFactory,
     PdfParserService,
     DxfParserService,
+    DwgParserService,
     DwgConverterService,
     CloudinaryService,
     SceneBuilderService,
