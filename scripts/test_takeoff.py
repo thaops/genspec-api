@@ -30,6 +30,12 @@ import time
 from typing import Any
 
 try:
+    sys.stdout.reconfigure(encoding="utf-8")  # console Windows cp1252 → UTF-8
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+try:
     import requests
 except ImportError:
     sys.exit("Cần: pip install requests")
@@ -77,18 +83,29 @@ class GenSpecClient:
         r.raise_for_status()
         return r.json()["id"]
 
-    def wait_ready(self, estimate_id: str, drawing_id: str, timeout_s: int = 400) -> dict:
+    def wait_ready(self, estimate_id: str, drawing_id: str, timeout_s: int = 600) -> dict:
         t0 = time.time()
+        last = ""
         while time.time() - t0 < timeout_s:
-            r = self.s.get(f"{self.base}/estimates/{estimate_id}/drawings/{drawing_id}", timeout=30)
-            r.raise_for_status()
-            d = r.json()
-            st = d.get("parseStatus")
-            if st == "ready":
-                return d
-            if st == "failed":
-                raise RuntimeError(f"parse failed: {d.get('parseError')}")
-            time.sleep(3)
+            try:
+                r = self.s.get(f"{self.base}/estimates/{estimate_id}/drawings/{drawing_id}", timeout=30)
+                if r.status_code >= 500:
+                    print(f"    …{r.status_code} (server bận/convert nặng) — chờ tiếp {int(time.time()-t0)}s")
+                    time.sleep(5)
+                    continue
+                r.raise_for_status()
+                d = r.json()
+                st = d.get("parseStatus")
+                if st != last:
+                    print(f"    parseStatus={st} ({int(time.time()-t0)}s)")
+                    last = st
+                if st == "ready":
+                    return d
+                if st == "failed":
+                    raise RuntimeError(f"parse failed: {d.get('parseError')}")
+            except requests.exceptions.RequestException as e:
+                print(f"    …lỗi mạng tạm ({type(e).__name__}) — chờ tiếp {int(time.time()-t0)}s")
+            time.sleep(4)
         raise TimeoutError(f"drawing {drawing_id} không ready sau {timeout_s}s")
 
     def run_takeoff(self, estimate_id: str, drawing_id: str, units: float, assumptions: dict) -> dict:
@@ -238,8 +255,12 @@ def main():
 
     results = []
     for spec in args.drawing:
-        path, _, disc = spec.partition(":")
-        disc = disc.upper() or None
+        # rpartition để không cắt nhầm "C:" ổ đĩa Windows; chỉ nhận :DISC hợp lệ.
+        head, sep, tail = spec.rpartition(":")
+        if sep and tail.upper() in ("KT", "KC", "DIEN", "NUOC", "KHAC"):
+            path, disc = head, tail.upper()
+        else:
+            path, disc = spec, None
         base = os.path.basename(path)
         print(f"\n— Upload {base} (bộ môn {disc or 'auto'})…")
         try:
