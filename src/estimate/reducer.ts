@@ -1,6 +1,7 @@
 import { v4 as uuid } from 'uuid';
-import { Action, EstimateState } from './estimate.types';
+import { Action, EstimateState, Sheet } from './estimate.types';
 import { rankSource } from './source';
+import { detectSheetType } from './rule-detector';
 
 export interface ApplyResult {
   state: EstimateState;
@@ -51,14 +52,24 @@ function normalizeName(s: string): string {
     .trim();
 }
 
+/** Tên sheet bóc tách/BOQ phổ biến (đã bỏ dấu) — fallback khi detect không chắc. */
+const TAKEOFF_NAME_RE = /khoi luong|boc tach|boq|tien luong|du toan|khoi tich/;
+
 /**
- * Resolve sheet đích cho update_cells/format_sheet khi sheetId có thể stale:
- * (1) đúng id → (2) sheet tên chứa "khối lượng" → (3) sheet đầu tiên → (4) -1 (không có sheet).
+ * Resolve sheet đích cho update_cells/format_sheet khi sheetId có thể stale.
+ * Ưu tiên (agent map chuẩn, không ghi nhầm/tạo mới):
+ *   (1) đúng id → (2) sheet detect ra 'takeoff'/'boq' (theo NỘI DUNG, không chỉ tên)
+ *   → (3) tên khớp bóc tách/BOQ/tiên lượng/dự toán → (4) sheet đầu → (5) -1 (rỗng).
  */
-function resolveSheetIndex(sheets: { id: string; name: string }[], sheetId: string): number {
+function resolveSheetIndex(sheets: Sheet[], sheetId: string): number {
   const byId = sheets.findIndex((s) => s.id === sheetId);
   if (byId >= 0) return byId;
-  const byName = sheets.findIndex((s) => normalizeName(s.name).includes('khoi luong'));
+  const byType = sheets.findIndex((s) => {
+    const t = detectSheetType(s).sheetType;
+    return t === 'takeoff' || t === 'boq';
+  });
+  if (byType >= 0) return byType;
+  const byName = sheets.findIndex((s) => TAKEOFF_NAME_RE.test(normalizeName(s.name)));
   if (byName >= 0) return byName;
   return sheets.length > 0 ? 0 : -1;
 }

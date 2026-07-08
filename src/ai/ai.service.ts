@@ -284,6 +284,66 @@ export class AiService {
     throw new Error('Gemini generateJson failed on all models');
   }
 
+  /**
+   * AGENTIC TOOL LOOP (ReAct): model gọi tool (functionDeclarations) → BE thực thi
+   * → feed kết quả lại → lặp tới khi model trả text cuối (không còn gọi tool) hoặc
+   * hết maxSteps. `executor(name,args)` do caller cấp (giữ ai.service domain-agnostic).
+   * FAIL-SAFE: mọi lỗi → null để caller fallback về luồng cũ. Trả text cuối của model.
+   */
+  async runToolLoop(
+    parts: GeminiPart[],
+    functionDeclarations: unknown[],
+    executor: (name: string, args: Record<string, any>) => unknown,
+    opts?: { maxSteps?: number },
+  ): Promise<string | null> {
+    if (!this.gemini) return null;
+    const maxSteps = opts?.maxSteps ?? 4;
+    for (const modelName of this.geminiEstimateModels) {
+      try {
+        const model = this.gemini.getGenerativeModel({
+          model: modelName,
+          tools: [{ functionDeclarations }] as unknown as never,
+        });
+        const contents: any[] = [{ role: 'user', parts }];
+        for (let step = 0; step < maxSteps; step++) {
+          const r = await model.generateContent({
+            contents: contents as unknown as never,
+            generationConfig: { temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } } as unknown as never,
+          });
+          const calls = (typeof r.response.functionCalls === 'function' ? r.response.functionCalls() : []) ?? [];
+          if (!calls.length) return r.response.text();
+          // Append lượt model (chứa functionCall) + kết quả tool (functionResponse).
+          const modelParts = r.response.candidates?.[0]?.content?.parts ?? [];
+          contents.push({ role: 'model', parts: modelParts });
+          contents.push({
+            role: 'user',
+            parts: calls.map((c: any) => ({
+              functionResponse: { name: c.name, response: { result: this.safeExec(executor, c.name, c.args ?? {}) } },
+            })),
+          });
+        }
+        // Hết bước — 1 lượt cuối KHÔNG tool để lấy kết luận.
+        const fin = await model.generateContent({ contents: contents as unknown as never });
+        return fin.response.text();
+      } catch (err) {
+        if (!this.isTransient(err)) {
+          this.logger.warn(`runToolLoop (${modelName}) failed: ${(err as Error).message}`);
+          return null;
+        }
+        await this.sleep(1500);
+      }
+    }
+    return null;
+  }
+
+  private safeExec(executor: (n: string, a: Record<string, any>) => unknown, name: string, args: Record<string, any>): unknown {
+    try {
+      return executor(name, args);
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+  }
+
   private sleep(ms: number) {
     return new Promise((r) => setTimeout(r, ms));
   }

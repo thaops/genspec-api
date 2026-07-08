@@ -14,6 +14,34 @@ function emptyState(): EstimateState {
   };
 }
 
+describe('update_cells – resolve sheet đích (map chuẩn, không tạo mới)', () => {
+  const withSheets = (): EstimateState => ({
+    ...emptyState(),
+    sheets: [
+      { id: 'overview', name: 'Tổng quan', data: { cellData: { '0': { '0': { v: 'Ghi chú' } } } } },
+      { id: 'bt', name: 'Bóc tách khối lượng', data: { cellData: { '0': { '0': { v: 'STT' } } } } },
+    ],
+  });
+
+  it('sheetId stale → rơi vào sheet Bóc tách (không phải sheet đầu, không tạo mới)', () => {
+    const { state } = applyActions(withSheets(), [
+      { type: 'update_cells', sheetId: 'sheet-stale-123', cell: 'B2', oldValue: '', newValue: 'AE.62210' } as any,
+    ]);
+    expect(state.sheets!.length).toBe(2); // KHÔNG đẻ sheet mới
+    const bt = state.sheets!.find((s) => s.id === 'bt')!;
+    expect(bt.data.cellData['1']['1'].v).toBe('AE.62210'); // ghi vào Bóc tách
+    const overview = state.sheets!.find((s) => s.id === 'overview')!;
+    expect(overview.data.cellData['1']).toBeUndefined(); // KHÔNG ghi nhầm sheet đầu
+  });
+
+  it('sheetId đúng → ghi đúng sheet đó', () => {
+    const { state } = applyActions(withSheets(), [
+      { type: 'update_cells', sheetId: 'overview', cell: 'A5', oldValue: '', newValue: 'x' } as any,
+    ]);
+    expect(state.sheets!.find((s) => s.id === 'overview')!.data.cellData['4']['0'].v).toBe('x');
+  });
+});
+
 describe('parseExcelCell', () => {
   it('parses A1 → row 0, col 0', () => {
     expect(parseExcelCell('A1')).toEqual({ row: 0, col: 0 });

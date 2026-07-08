@@ -13,6 +13,9 @@ import { previewActions } from '../transparency';
 import { validate } from '../validation';
 import { CitationEngineService } from '../sources/citation-engine';
 import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
+import { detectSheetType } from '../rule-detector';
+import { AGENT_TOOL_DECLARATIONS, executeAgentTool, locateSheet, reconcileByCode } from '../agent-tools';
+import { isNormCode, normalizeNormCode } from '../../catalog/norm-code';
 import { QS_CURRENT_DOCS, QS_SOURCE_ROUTING, provinceRule } from '../knowledge/qs-knowledge';
 import { codeAssignmentsToUpdateCells, tableToUpdateCellsDetailed, takeoffActionsToUpdateCells } from '../markdown-table-actions';
 import { CONCRETE_NORMS, STEEL_NORMS } from '../knowledge/qs-standards';
@@ -191,6 +194,9 @@ export class EditModeHandler {
     const excelFiles = files.filter((f) => this.isExcel(f.originalname));
     if (visualFiles.length) yield { event: 'step', data: { text: `Đọc ${visualFiles.length} tệp đính kèm…` } };
     const excelText = await this.excelToText(excelFiles);
+    // Reconcile deterministic: Excel đính kèm → khớp mã vào sheet bóc tách đang có.
+    const reconcileMap = excelFiles.length ? this.buildReconcileMap(state, await this.excelToCodeRows(excelFiles)) : '';
+    if (reconcileMap) yield { event: 'step', data: { text: 'Đối chiếu mã hiệu Excel với bảng bóc tách…' } };
 
     const visualParts: GeminiPart[] = visualFiles.map((f) => ({
       inlineData: { data: f.buffer.toString('base64'), mimeType: this.mime(f.originalname) },
@@ -198,11 +204,37 @@ export class EditModeHandler {
 
     const benchmark = parseBenchmarkFromText(research.text, state.projectInfo) ?? staticBenchmark(state.projectInfo);
 
+    // READ-BEFORE-WRITE (agentic): nếu đã có sheet bóc tách/BOQ, cho model dùng tool
+    // (locate_sheet/get_sheet_state/find_row) ĐỊNH VỊ đúng sheet+dòng TRƯỚC khi ghi →
+    // map chuẩn, không đoán/tạo mới. Fail-safe: lỗi/không có sheet → bỏ qua (luồng cũ).
+    let grounding = '';
+    if (locateSheet(state, 'takeoff').found) {
+      yield { event: 'step', data: { text: 'Định vị đúng sheet/dòng cần sửa…' } };
+      const g = await this.ai
+        .runToolLoop(
+          [
+            {
+              text:
+                `QS chuẩn bị chỉnh sửa dự toán theo yêu cầu: "${message || '(tệp đính kèm)'}". ` +
+                `Dùng tool để xác định ĐÚNG sheet và dòng cần tác động: locate_sheet('takeoff' hoặc 'boq') lấy sheetId; ` +
+                `get_sheet_state để xem header/cấu trúc; find_row(sheetId, mã hiệu/từ khoá) để định vị dòng đã có. ` +
+                `Sau khi tra xong, TRẢ GỌN (không sửa gì): "sheetId đích = …; các dòng liên quan: <mã> → row <n>". ` +
+                `Nếu công tác chưa có trong sheet thì nói "cần THÊM dòng mới vào sheetId …".`,
+            },
+          ],
+          AGENT_TOOL_DECLARATIONS as unknown as unknown[],
+          (name, args) => executeAgentTool(state, name, args),
+          { maxSteps: 4 },
+        )
+        .catch(() => null);
+      if (g && g.trim()) grounding = g.trim();
+    }
+
     yield { event: 'step', data: { text: 'Phân tích yêu cầu chỉnh sửa…' } };
 
     const streamParts: GeminiPart[] = [
       ...visualParts,
-      { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, normRef, true, history) },
+      { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, normRef, true, history, [grounding, reconcileMap].filter(Boolean).join('\n\n')) },
     ];
 
     let buf = '';
@@ -259,7 +291,7 @@ export class EditModeHandler {
       try {
         const fbParts: GeminiPart[] = [
           ...visualParts,
-          { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, normRef, false, history) },
+          { text: this.buildPrompt(state, context, message, visualFiles.length, excelText, research.text, catalogCodes, normRef, false, history, [grounding, reconcileMap].filter(Boolean).join('\n\n')) },
         ];
         // JSON mode + responseSchema: the model can't wrap the payload in prose,
         // so the "nói mà không làm" failure mode disappears at the source.
@@ -458,7 +490,30 @@ export class EditModeHandler {
     normRef: string,
     streaming: boolean,
     history = '',
+    grounding = '',
   ): string {
+    // MAP SHEET ĐÚNG (agent thật, không tạo mới): liệt kê sheet hiện có + loại (detect
+    // theo nội dung), chỉ rõ sheet bóc tách/BOQ để agent ghi đúng vào đó thay vì đoán.
+    const sheetHints = (state.sheets ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      type: detectSheetType(s).sheetType,
+    }));
+    const targetSheet =
+      sheetHints.find((s) => s.type === 'takeoff') ?? sheetHints.find((s) => s.type === 'boq');
+    const sheetTargetBlock = sheetHints.length
+      ? [
+          `CÁC SHEET HIỆN CÓ (ghi ĐÚNG sheetId, KHÔNG tạo sheet mới nếu đã có sheet phù hợp): ${sheetHints
+            .map((s) => `${s.id}="${s.name}"[${s.type}]`)
+            .join(', ')}`,
+          targetSheet
+            ? `SHEET BÓC TÁCH/BOQ ĐANG CÓ: sheetId="${targetSheet.id}" ("${targetSheet.name}"). Khi sửa/thêm dòng bóc tách, điền mã hiệu hay đơn giá → update_cells với sheetId NÀY. TUYỆT ĐỐI KHÔNG tạo sheet mới cho việc này.`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '';
+
     const stateSummary = {
       projectInfo: state.projectInfo,
       markups: state.markups,
@@ -533,6 +588,8 @@ export class EditModeHandler {
       '- upsert_takeoff: dùng field "formula" (vd "5*3.14*2"), KHÔNG điền quantity là số cứng.',
       '- Giữ nguyên công thức hiện có của ô, chỉ thay giá trị nếu ô đó không phụ thuộc vào ô khác.',
       '',
+      sheetTargetBlock,
+      grounding ? `ĐÃ TRA WORKBOOK BẰNG TOOL (read-before-write — GHI ĐÚNG sheet/dòng này, không tạo trùng):\n${grounding}` : '',
       context.activeSheetSummary ? `SHEET ĐANG XEM (chỉnh sửa ưu tiên ở đây):\n${context.activeSheetSummary}` : '',
       context.focusedData ? `VÙNG ĐANG CHỌN (${context.selectionLabel ?? ''}) — action phải nhắm vào vùng này trước:\n${context.focusedData}` : '',
       context.drawingSummary ? `BẢN VẼ ĐANG MỞ:\n${context.drawingSummary}` : '',
@@ -563,6 +620,9 @@ export class EditModeHandler {
       '',
       fileCount > 0 ? `Tệp đính kèm: ${fileCount} tệp — đọc để lấy dữ liệu theo yêu cầu.` : '',
       excelText ? `Dữ liệu Excel:\n${excelText.slice(0, 3000)}` : '',
+      excelText && targetSheet
+        ? `LƯU Ý HỢP NHẤT: nếu Excel trên là bảng bóc tách/BOQ, hãy KHỚP THEO MÃ HIỆU vào sheet "${targetSheet.name}" (sheetId="${targetSheet.id}") đang có — mã trùng thì CẬP NHẬT dòng đó, mã mới thì thêm; KHÔNG tạo sheet/bảng mới trùng lặp.`
+        : '',
       '',
       'YÊU CẦU CỦA NGƯỜI DÙNG:',
       message || '(chỉ có tệp đính kèm)',
@@ -796,6 +856,56 @@ export class EditModeHandler {
       }
     }
     return blocks.join('\n\n');
+  }
+
+  /**
+   * Rút các dòng CÓ MÃ HIỆU từ Excel đính kèm (mã tự nhận diện bằng regex — khỏi
+   * map cột mong manh). Dùng cho reconcile: khớp mã vào sheet bóc tách đang có.
+   */
+  private async excelToCodeRows(files: Express.Multer.File[]): Promise<{ code: string; cells: string[] }[]> {
+    if (files.length === 0) return [];
+    const ExcelJS = await import('exceljs');
+    const out: { code: string; cells: string[] }[] = [];
+    for (const file of files) {
+      try {
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(file.buffer as unknown as ArrayBuffer);
+        wb.eachSheet((ws) => {
+          ws.eachRow({ includeEmpty: false }, (row, n) => {
+            if (n > 300) return;
+            const cells: string[] = [];
+            row.eachCell({ includeEmpty: true }, (cell) => cells.push(this.cellText(cell.value)));
+            const codeCell = cells.map((v) => v.trim()).find((v) => isNormCode(v));
+            if (codeCell) out.push({ code: normalizeNormCode(codeCell), cells });
+          });
+        });
+      } catch (err) {
+        this.logger.warn(`excelToCodeRows failed: ${(err as Error).message}`);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * BẢN ĐỒ HỢP NHẤT (MERGE by key): mỗi mã trong Excel → đã có ở row nào (CẬP NHẬT)
+   * hay chưa có (THÊM), dựa trên findRow vào sheet bóc tách đang có. Deterministic,
+   * không gọi AI — đưa vào prompt để agent ghi ĐÚNG dòng, không tạo bảng trùng.
+   */
+  private buildReconcileMap(state: EstimateState, codeRows: { code: string; cells: string[] }[]): string {
+    const target = locateSheet(state, 'takeoff');
+    if (!target.found || !target.sheetId || codeRows.length === 0) return '';
+    const lines = reconcileByCode(state, target.sheetId, codeRows.map((r) => r.code))
+      .slice(0, 60)
+      .map((m) =>
+        m.matchedRow != null
+          ? `${m.code} → ĐÃ CÓ ở row ${m.matchedRow} → CẬP NHẬT dòng đó`
+          : `${m.code} → CHƯA CÓ → THÊM dòng mới`,
+      );
+    if (!lines.length) return '';
+    return (
+      `HỢP NHẤT EXCEL → sheet bóc tách "${target.name}" (sheetId="${target.sheetId}") theo MÃ HIỆU — ` +
+      `ghi update_cells ĐÚNG dòng, KHÔNG tạo bảng/sheet trùng:\n${lines.join('\n')}`
+    );
   }
 
   private cellText(value: unknown): string {
