@@ -104,8 +104,10 @@ export class DwgConverterService {
 
   private async commandExists(cmd: string): Promise<boolean> {
     try {
+      // 'command -v' là builtin của sh → LUÔN có; 'which' là binary riêng, Debian
+      // slim thường KHÔNG cài → dùng which sẽ báo thiếu dwg2dxf dù đã cài thật.
       const isWin = process.platform === 'win32';
-      await execAsync(isWin ? `where "${cmd}"` : `which "${cmd}"`);
+      await execAsync(isWin ? `where "${cmd}"` : `command -v "${cmd}"`);
       return true;
     } catch {
       return false;
