@@ -223,8 +223,10 @@ export class DrawingUploadService {
       return null;
     }
     try {
+      // family:0 = dual-stack DNS → kết nối được Redis private của Railway (IPv6-only);
+      // thiếu nó ioredis tra IPv4 → fail → rơi về in-process dù đã set REDIS_URL.
       this._queue = new (Queue as any)('drawing', {
-        connection: { url: process.env.REDIS_URL },
+        connection: { url: process.env.REDIS_URL, family: 0 },
       });
     } catch {
       this._queue = null;

@@ -32,9 +32,10 @@ const redisUrl = process.env.REDIS_URL;
       }),
     }),
     EventEmitterModule.forRoot(),
-    // BullMQ root — only when Redis is configured
+    // BullMQ root — only when Redis is configured. family:0 = dual-stack DNS để
+    // kết nối Redis private của Railway (IPv6-only); thiếu → connection fail.
     ...(redisUrl
-      ? [BullModule.forRoot({ connection: { url: redisUrl } })]
+      ? [BullModule.forRoot({ connection: { url: redisUrl, family: 0 } })]
       : []),
     StorageModule,
     UsersModule,
