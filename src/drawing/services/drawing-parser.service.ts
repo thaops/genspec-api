@@ -16,6 +16,7 @@ import {
 } from '../../events/domain-events';
 import { CloudinaryService } from '../../storage/cloudinary.service';
 import { DrawingSceneService } from './drawing-scene.service';
+import { DwgConverterService } from '../converters/dwg-converter.service';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -34,6 +35,7 @@ export class DrawingParserService {
     private readonly events: EventEmitter2,
     private readonly cloudinary: CloudinaryService,
     private readonly scene: DrawingSceneService,
+    private readonly dwgConverter: DwgConverterService,
   ) {}
 
   @OnEvent(DrawingConvertedEvent.EVENT)
@@ -71,14 +73,29 @@ export class DrawingParserService {
       const parser = this.parserFactory.resolve(ext);
       await this.log(drawingId, `[parse] using parser: ${parser.constructor.name}`);
       const t0 = Date.now();
-      const result = await parser.parse(filePath);
+      // FALLBACK file lớn/phức tạp: WASM libredwg (nhanh) gãy trên bản KẾT CẤU 20MB+
+      // ("memory access out of bounds") → chuyển sang converter native dwg2dxf/ODA →
+      // parse DXF (parser DXF chịu được file lớn). Giữ WASM làm đường CHÍNH (nhanh).
+      let result: Awaited<ReturnType<typeof parser.parse>>;
+      let dxfFallbackPath: string | null = null;
+      try {
+        result = await parser.parse(filePath);
+      } catch (parseErr: any) {
+        if (ext !== 'dwg') throw parseErr;
+        await this.log(drawingId, `[parse] WASM DWG fail: ${parseErr.message} → fallback converter dwg2dxf/ODA`);
+        await this.setStatus(drawingId, 'converting');
+        dxfFallbackPath = await this.dwgConverter.convert(filePath); // throw có hướng dẫn nếu không có backend
+        await this.log(drawingId, `[convert] DWG→DXF ok: ${path.basename(dxfFallbackPath)}`);
+        result = await this.parserFactory.resolve('dxf').parse(dxfFallbackPath);
+        await this.setStatus(drawingId, 'parsing');
+      }
       const parseMs = Date.now() - t0;
-      await this.log(drawingId, `[parse] done in ${parseMs}ms — pages=${result.pages.length}, layers=${result.layers.length}, entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}, parserVersion=${result.parserVersion}`);
+      await this.log(drawingId, `[parse] done in ${parseMs}ms — pages=${result.pages.length}, layers=${result.layers.length}, entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}, parserVersion=${result.parserVersion}${dxfFallbackPath ? ' (via DXF fallback)' : ''}`);
 
       // 1b. Build render scene (DXF geometry — includes converted DWG)
-      if (ext === 'dxf') {
-        await this.scene.buildAndPersistFromDxfFile(drawingId, filePath);
-        await this.log(drawingId, `[scene] built and persisted`);
+      if (ext === 'dxf' || dxfFallbackPath) {
+        await this.scene.buildAndPersistFromDxfFile(drawingId, dxfFallbackPath ?? filePath);
+        await this.log(drawingId, `[scene] built from DXF${dxfFallbackPath ? ' (fallback)' : ''} and persisted`);
       } else if (ext === 'dwg') {
         // Reuse the libredwg parse result — no second parse, no CLI converter
         await this.scene.buildAndPersistFromDwgResult(drawingId, result);

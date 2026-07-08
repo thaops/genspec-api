@@ -70,17 +70,39 @@ export class DwgParserService implements DrawingParserInterface {
     const uint8 = new Uint8Array(buffer);
     this.logger.log(`[DwgParser] calling dwg_read_data (${uint8.length} bytes)`);
 
-    // dwg_read_data returns Dwg_Data pointer (number) on success, undefined on failure.
-    // Non-fatal parse warnings are console.warn'd internally; only OUTOFMEM throws.
-    const dwgPtr = lib.dwg_read_data(uint8, Dwg_File_Type.DWG);
+    // dwg_read_data returns Dwg_Data pointer on success, undefined on failure. NHƯNG
+    // với file lớn/phức tạp (vd bản KẾT CẤU 20MB+) WASM có thể THROW "memory access out
+    // of bounds" — không được bắt sẽ crash worker VÀ để module ở trạng thái ABORTED
+    // trong _cache → mọi parse sau cũng chết. Bắt → fail gọn + reset cache.
+    const sizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+    let dwgPtr: number | undefined | null;
+    try {
+      dwgPtr = lib.dwg_read_data(uint8, Dwg_File_Type.DWG);
+    } catch (err) {
+      this._cache = null; // module đã abort → buộc tạo mới cho lần sau
+      throw new Error(
+        `Không đọc được bản vẽ "${path.basename(filePath)}" (${sizeMB}MB): libredwg lỗi bộ nhớ/định dạng trên file lớn. ` +
+          `Thử Save As sang DWG bản mới (AutoCAD 2018+), hoặc PURGE/tách bản vẽ cho nhẹ rồi upload lại. [${(err as Error).message}]`,
+      );
+    }
     if (dwgPtr === undefined || dwgPtr === null) {
       throw new Error(`libredwg: cannot read DWG — unsupported version or corrupt file (${path.basename(filePath)})`);
     }
     this.logger.log(`[DwgParser] dwg_read_data OK in ${Date.now() - t0}ms, ptr=${dwgPtr}`);
 
-    // 3. Convert WASM struct → JS database
+    // 3. Convert WASM struct → JS database (cũng có thể throw trên file nặng).
     const t1 = Date.now();
-    const db = lib.convert(dwgPtr);
+    let db: any;
+    try {
+      db = lib.convert(dwgPtr);
+    } catch (err) {
+      try { lib.dwg_free(dwgPtr); } catch { /* module có thể đã abort */ }
+      this._cache = null;
+      throw new Error(
+        `Không dựng được dữ liệu bản vẽ "${path.basename(filePath)}" (${sizeMB}MB): quá lớn/phức tạp. ` +
+          `PURGE hoặc tách bản vẽ rồi thử lại. [${(err as Error).message}]`,
+      );
+    }
     lib.dwg_free(dwgPtr);
     this.logger.log(`[DwgParser] convert OK in ${Date.now() - t1}ms, version=${(db.header as any)?.version ?? '?'}`);
 
