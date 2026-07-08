@@ -76,15 +76,31 @@ export class DrawingJobProcessor extends WorkerHost {
       let result: DrawingParseResult | null = null;
 
       if (fileType === 'dwg') {
-        await this.progress(job, 'parsing', 'Đang đọc bản vẽ (WASM)...', 25);
-        try {
-          result = await this.parserFactory.resolve('dwg').parse(filePath);
-          await this.scene.buildAndPersistFromDwgResult(drawingId, result);
-          await this.plog(drawingId, `[parsed:wasm] entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}`);
-          parseExt = 'dwg-done';
-        } catch (wasmErr: any) {
-          await this.plog(drawingId, `[wasm-fail] ${wasmErr.message} → converter native DWG→DXF`);
-          await this.progress(job, 'converting', 'DWG lớn — chuyển DWG→DXF...', 15);
+        // WASM (libredwg-web) nạp CẢ file vào WASM heap + dựng object JS → RAM cao.
+        // Với DWG LỚN, trên container RAM hạn chế nó OOM-KILL cả process (SIGKILL,
+        // try/catch KHÔNG bắt được, BullMQ retry → crash-loop). Nên: file lớn BỎ QUA
+        // WASM, đi thẳng converter native (dwg2dxf/ODA = subprocess, streaming, RAM thấp).
+        const dwgMB = fileSizeMB(filePath);
+        const maxWasmMb = Number(process.env.MAX_WASM_DWG_MB ?? 12);
+        let needConvert = dwgMB > maxWasmMb;
+
+        if (!needConvert) {
+          await this.progress(job, 'parsing', 'Đang đọc bản vẽ (WASM)...', 25);
+          try {
+            result = await this.parserFactory.resolve('dwg').parse(filePath);
+            await this.scene.buildAndPersistFromDwgResult(drawingId, result);
+            await this.plog(drawingId, `[parsed:wasm] entities=${result.pages.reduce((s, p) => s + p.entities.length, 0)}`);
+            parseExt = 'dwg-done';
+          } catch (wasmErr: any) {
+            await this.plog(drawingId, `[wasm-fail] ${wasmErr.message} → converter native`);
+            needConvert = true;
+          }
+        } else {
+          await this.plog(drawingId, `[skip-wasm] ${dwgMB}MB > ${maxWasmMb}MB → converter native trực tiếp (tránh OOM-kill)`);
+        }
+
+        if (needConvert) {
+          await this.progress(job, 'converting', 'Chuyển đổi DWG→DXF...', 15);
           try {
             const dxfPath = await this.dwgConverter.convert(filePath);
             parsePath = dxfPath;
@@ -103,8 +119,8 @@ export class DrawingJobProcessor extends WorkerHost {
             await this.drawingModel.updateOne({ _id: drawingId }, { convertedUrl });
           } catch (convErr: any) {
             await this.setStatus(drawingId, 'failed',
-              `WASM không đọc được (file lớn/phức tạp) và converter native cũng không khả dụng: ${convErr.message}. ` +
-              `Hãy PURGE/AUDIT + Save As DWG mới cho nhẹ, hoặc upload file .dxf.`);
+              `Không xử lý được DWG lớn: converter native (dwg2dxf) chưa khả dụng — ${convErr.message}. ` +
+              `Tạm thời: Save As sang .dxf trong AutoCAD rồi upload file .dxf.`);
             return;
           }
         }
