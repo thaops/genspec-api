@@ -1,20 +1,21 @@
-FROM node:22-alpine AS builder
+# Debian (glibc) thay Alpine: Alpine KHÔNG có gói cung cấp binary dwg2dxf; Debian
+# có 'libredwg-tools' (dwg2dxf/dwgread) — cần cho convert DWG lớn (WASM gãy).
+# Project không có native npm dep (bcryptjs thuần JS) nên đổi base an toàn.
+FROM node:22-slim AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine AS runner
+FROM node:22-slim AS runner
 WORKDIR /app
-# dwg2dxf: fallback converter cho DWG lớn/phức tạp mà WASM libredwg-web parse gãy
-# (vd bản kết cấu 20MB+). DwgConverterService tự dò 'dwg2dxf' trong PATH.
-# libredwg nằm ở repo 'community' — bật rõ + thử 'libredwg-tools' rồi 'libredwg'.
-# KHÔNG fail build nếu thiếu (WASM vẫn xử lý file nhỏ) — build-log in rõ có/không.
-RUN apk add --no-cache libredwg-tools 2>/dev/null \
-      || apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community libredwg 2>/dev/null \
-      || apk add --no-cache libredwg 2>/dev/null \
-      || true; \
+# dwg2dxf: converter DWG→DXF cho file lớn mà WASM libredwg-web OOM-gãy (bản KC 20MB+).
+# In rõ ✅/❌ trong build-log. KHÔNG fail build nếu thiếu (WASM vẫn xử lý file nhỏ).
+RUN apt-get update \
+      && apt-get install -y --no-install-recommends libredwg-tools \
+      && rm -rf /var/lib/apt/lists/* \
+      || echo "WARN: apt install libredwg-tools failed"; \
     if command -v dwg2dxf >/dev/null 2>&1; then echo "✅ dwg2dxf INSTALLED: $(command -v dwg2dxf)"; \
     else echo "❌ dwg2dxf MISSING — DWG lớn phải upload dạng .dxf"; fi
 COPY package*.json ./
