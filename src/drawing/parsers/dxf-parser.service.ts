@@ -16,13 +16,20 @@ import type {
 // of hanging.
 const MAX_ENTITIES = 120_000;
 
-// LEAN PARSE: doc.extras (DIMENSION/HATCH/LEADER/SPLINE/VIEWPORT) TRƯỚC ĐÂY không bị
-// cap → bản KẾT CẤU nặng (nhiều nghìn dim/hatch) phình vô hạn → OOM sập worker/API.
-// VIEWPORT là paper-space (bố cục in) — vô dụng cho takeoff/scene → luôn bỏ.
-export const MAX_EXTRAS = 60_000;
-export function shouldKeepExtra(type: string, currentExtras: number): boolean {
-  if (type === 'VIEWPORT') return false;
-  return currentExtras < MAX_EXTRAS;
+// LEAN PARSE (mục tiêu 2 = bóc tách QS, không phải render lại 100% bản vẽ):
+//  - doc.extras TRƯỚC ĐÂY không cap → bản KẾT CẤU nặng phình vô hạn → OOM.
+//  - Chặn TỔNG (entities + extras) bằng MỘT budget để hatch/dim nặng KHÔNG cộng
+//    thêm 60k lên trên 120k entities (=180k). Bounded ~150k object.
+//  - Bỏ sớm các type RÁC KHÔNG hiển thị dạng nét/không phục vụ bóc tách (paper-space,
+//    raster, 3D). GIỮ tất cả nét 2D + text + hatch/dim (QS vẫn nhìn đủ để đối chiếu).
+export const MAX_TOTAL = 150_000;
+export const DROP_TYPES = new Set([
+  'VIEWPORT', 'WIPEOUT', 'IMAGE', 'RASTERIMAGE', 'OLE2FRAME', 'OLEFRAME',
+  '3DSOLID', 'REGION', 'BODY', 'SURFACE', 'MESH', 'HELIX', 'ACAD_PROXY_ENTITY',
+]);
+export function shouldKeepExtra(type: string, entitiesCount: number, extrasCount: number): boolean {
+  if (DROP_TYPES.has(type)) return false;          // rác không cần cho bóc tách
+  return entitiesCount + extrasCount < MAX_TOTAL;   // budget CHUNG chống phình
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +217,7 @@ export class DxfParserService implements DrawingParserInterface {
         if (ent) target.push(ent);
         return;
       }
-      if (!inBlock && extraTypes.has(marker) && shouldKeepExtra(marker, doc.extras.length)) {
+      if (!inBlock && extraTypes.has(marker) && shouldKeepExtra(marker, doc.entities.length, doc.extras.length)) {
         doc.extras.push(this.genericRawEntity(marker, bodyTags));
       }
     };
@@ -468,7 +475,7 @@ export class DxfParserService implements DrawingParserInterface {
       } else if (type === 'INSERT') {
         const ins = this.readInsert(entityTags);
         if (ins) this.expandInsert(ins, blocks, doc.entities, new Set(), 0);
-      } else if (extraTypes.has(type) && shouldKeepExtra(type, doc.extras.length)) {
+      } else if (extraTypes.has(type) && shouldKeepExtra(type, doc.entities.length, doc.extras.length)) {
         doc.extras.push(this.genericRawEntity(type, entityTags));
       }
       i = next;
