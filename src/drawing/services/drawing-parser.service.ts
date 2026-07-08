@@ -67,24 +67,28 @@ export class DrawingParserService {
   private async runPipeline(drawingId: string, filePath: string, ext: string) {
     await this.log(drawingId, `[pipeline] start ext=${ext}, file=${path.basename(filePath)}`);
 
-    // GUARD kích thước: DWG rất lớn (vd bản kết cấu 26MB) → convert→DXF khổng lồ +
-    // parse + detect có thể OOM và LÀM SẬP container (kéo theo mọi user). Chặn sớm,
-    // fail gọn có hướng dẫn thay vì để nổ. Ngưỡng chỉnh qua env MAX_DRAWING_MB.
-    try {
-      const bytes = fs.statSync(filePath).size;
-      const maxMb = Number(process.env.MAX_DRAWING_MB ?? 18);
-      if (bytes > maxMb * 1024 * 1024) {
-        const mb = (bytes / (1024 * 1024)).toFixed(1);
-        await this.log(drawingId, `[guard] file ${mb}MB > ${maxMb}MB → skip (tránh OOM/crash container)`);
-        await this.setStatus(
-          drawingId,
-          'failed',
-          `Bản vẽ ${mb}MB vượt giới hạn xử lý (${maxMb}MB) của hạ tầng hiện tại — file quá nặng dễ gây quá tải. ` +
-            `Hãy tách phần cần bóc (mặt bằng + bảng thống kê thép) bằng WBLOCK, hoặc PURGE/AUDIT + Save As DWG mới cho nhẹ, rồi upload lại.`,
-        );
-        return;
-      }
-    } catch { /* statSync lỗi → cứ để pipeline thử */ }
+    // GUARD kích thước — CHỈ là lưới an toàn khi parse chạy NGAY TRONG process API
+    // (không có Redis/worker): DWG rất lớn (bản KC 26MB) OOM sẽ SẬP CẢ API cho mọi
+    // user. Khi đã có worker riêng (REDIS_URL) → parse cô lập, OOM chỉ hỏng job đó →
+    // KHÔNG chặn file lớn (bỏ cap). Ngưỡng chỉnh qua env MAX_DRAWING_MB.
+    const isolated = !!process.env.REDIS_URL; // có worker riêng = an toàn cho file lớn
+    if (!isolated) {
+      try {
+        const bytes = fs.statSync(filePath).size;
+        const maxMb = Number(process.env.MAX_DRAWING_MB ?? 22);
+        if (bytes > maxMb * 1024 * 1024) {
+          const mb = (bytes / (1024 * 1024)).toFixed(1);
+          await this.log(drawingId, `[guard] in-process, file ${mb}MB > ${maxMb}MB → skip (tránh OOM sập API)`);
+          await this.setStatus(
+            drawingId,
+            'failed',
+            `Bản vẽ ${mb}MB vượt ngưỡng xử lý tại chỗ (${maxMb}MB) của hạ tầng hiện tại. ` +
+              `Cách xử lý: bật Redis + worker riêng để nhận file lớn, hoặc tạm tách WBLOCK phần cần bóc rồi upload lại.`,
+          );
+          return;
+        }
+      } catch { /* statSync lỗi → cứ để pipeline thử */ }
+    }
 
     await this.setStatus(drawingId, 'parsing');
 

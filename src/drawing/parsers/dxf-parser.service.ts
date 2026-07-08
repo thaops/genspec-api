@@ -16,6 +16,15 @@ import type {
 // of hanging.
 const MAX_ENTITIES = 120_000;
 
+// LEAN PARSE: doc.extras (DIMENSION/HATCH/LEADER/SPLINE/VIEWPORT) TRƯỚC ĐÂY không bị
+// cap → bản KẾT CẤU nặng (nhiều nghìn dim/hatch) phình vô hạn → OOM sập worker/API.
+// VIEWPORT là paper-space (bố cục in) — vô dụng cho takeoff/scene → luôn bỏ.
+export const MAX_EXTRAS = 60_000;
+export function shouldKeepExtra(type: string, currentExtras: number): boolean {
+  if (type === 'VIEWPORT') return false;
+  return currentExtras < MAX_EXTRAS;
+}
+
 // ---------------------------------------------------------------------------
 // Rich DXF document model — consumed by SceneBuilderService and by parse()
 // ---------------------------------------------------------------------------
@@ -201,7 +210,7 @@ export class DxfParserService implements DrawingParserInterface {
         if (ent) target.push(ent);
         return;
       }
-      if (!inBlock && extraTypes.has(marker)) {
+      if (!inBlock && extraTypes.has(marker) && shouldKeepExtra(marker, doc.extras.length)) {
         doc.extras.push(this.genericRawEntity(marker, bodyTags));
       }
     };
@@ -459,7 +468,7 @@ export class DxfParserService implements DrawingParserInterface {
       } else if (type === 'INSERT') {
         const ins = this.readInsert(entityTags);
         if (ins) this.expandInsert(ins, blocks, doc.entities, new Set(), 0);
-      } else if (extraTypes.has(type)) {
+      } else if (extraTypes.has(type) && shouldKeepExtra(type, doc.extras.length)) {
         doc.extras.push(this.genericRawEntity(type, entityTags));
       }
       i = next;
