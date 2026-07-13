@@ -237,6 +237,12 @@ export class DrawingController {
     return this.graph.mepTakeoff(drawingId, factor ? Number(factor) : 1, byFloor === 'true');
   }
 
+  /** AI Review — phát hiện thiếu phạm vi (scope-gap). */
+  @Get(':drawingId/building/review')
+  review(@Param('drawingId') drawingId: string) {
+    return this.graph.review(drawingId);
+  }
+
   // --- Revisions ---
   @Get(':drawingId/revisions')
   listRevisions(@Param('drawingId') drawingId: string) {

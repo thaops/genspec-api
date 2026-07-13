@@ -14,6 +14,7 @@ import {
   roomsMissingType,
 } from '../building-graph';
 import { mepTakeoff } from '../mep-takeoff';
+import { reviewBuilding } from '../building-review';
 
 /**
  * Builds structural graph after AI detect completes.
@@ -180,6 +181,11 @@ export class DrawingGraphService {
    */
   async mepTakeoff(drawingId: string, factor = 1, byFloor = false) {
     return mepTakeoff(await this.load(drawingId), factor, byFloor);
+  }
+
+  /** AI Review: rà soát thiếu phạm vi (scope-gap) — human-in-the-loop, không tự sửa. */
+  async review(drawingId: string) {
+    return reviewBuilding(await this.load(drawingId));
   }
 
   private overlaps(
