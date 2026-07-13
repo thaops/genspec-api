@@ -63,6 +63,55 @@ function resolveColor(color: any): string | undefined {
   return undefined;
 }
 
+/** JS Date → Excel serial (days since 1899-12-30), dùng UTC components để tránh lệch timezone. */
+function dateToExcelSerial(d: Date): number {
+  const utc = Date.UTC(
+    d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(),
+    d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(),
+  );
+  const serial = (utc - Date.UTC(1899, 11, 30)) / 86400000;
+  return Math.round(serial * 1e6) / 1e6;
+}
+
+/** ExcelJS font → Univer text-style keys (dùng chung cho cell style và từng run rich text). */
+function fontToStyle(font: any): Record<string, any> {
+  const s: Record<string, any> = {};
+  if (!font) return s;
+  if (font.bold) s.bl = 1;
+  if (font.italic) s.it = 1;
+  if (font.underline) s.ul = { s: font.underline === 'double' || font.underline === 'doubleAccounting' ? 2 : 1 };
+  if (font.strike) s.st = { s: 1 };
+  if (font.size && font.size !== 11) s.fs = font.size;
+  if (font.name && font.name !== 'Calibri') s.ff = font.name;
+  if (font.color) { const rgb = resolveColor(font.color); if (rgb) s.cl = { rgb }; }
+  if (font.vertAlign === 'superscript') s.va = 2;
+  else if (font.vertAlign === 'subscript') s.va = 1;
+  return s;
+}
+
+/**
+ * ExcelJS richText → Univer cell rich-text document (IDocumentData) với textRuns per-run.
+ * dataStream phải kết thúc bằng '\r\n' (paragraph + section break); textRuns không phủ 2 ký tự này.
+ */
+function richTextToDoc(richText: Array<{ text?: string; font?: any }>): { doc: any; plain: string } {
+  const runs: any[] = [];
+  let text = '';
+  for (const part of richText) {
+    const t = part.text ?? '';
+    if (!t) continue;
+    const st = text.length;
+    text += t;
+    const ts = fontToStyle(part.font);
+    if (Object.keys(ts).length) runs.push({ st, ed: text.length, ts });
+  }
+  const doc = {
+    id: 'd',
+    documentStyle: {},
+    body: { dataStream: text + '\r\n', textRuns: runs },
+  };
+  return { doc, plain: text };
+}
+
 function buildBorders(border: any): Record<string, any> | undefined {
   if (!border) return undefined;
   const map: Record<string, string> = { top: 't', bottom: 'b', left: 'l', right: 'r' };
@@ -74,6 +123,13 @@ function buildBorders(border: any): Record<string, any> | undefined {
       s: BORDER_STYLE[b.style] ?? 1,
       cl: { rgb: resolveColor(b.color) ?? '#000000' },
     };
+  }
+  // Diagonal borders: down = top-left→bottom-right (tl_br), up = bottom-left→top-right (bl_tr)
+  const diag = border.diagonal;
+  if (diag?.style) {
+    const line = { s: BORDER_STYLE[diag.style] ?? 1, cl: { rgb: resolveColor(diag.color) ?? '#000000' } };
+    if (diag.down) bd.tl_br = line;
+    if (diag.up) bd.bl_tr = line;
   }
   return Object.keys(bd).length ? bd : undefined;
 }
@@ -90,23 +146,29 @@ export function excelToUniverSheets(workbook: ExcelJS.Workbook): {
     const s: Record<string, any> = {};
     const fill = (cell as any).fill;
     if (fill?.type === 'pattern' && fill.pattern !== 'none') {
-      const rgb = resolveColor(fill.fgColor);
+      // solid → fgColor là màu nền; pattern khác (gray125…) fgColor là màu chấm,
+      // nền lấy bgColor. Fallback lẫn nhau để không mất màu.
+      const rgb = fill.pattern === 'solid'
+        ? resolveColor(fill.fgColor)
+        : (resolveColor(fill.bgColor) ?? resolveColor(fill.fgColor));
+      if (rgb) s.bg = { rgb };
+    } else if (fill?.type === 'gradient' && Array.isArray(fill.stops) && fill.stops.length) {
+      // Univer chưa hỗ trợ gradient trong cell style → xấp xỉ bằng stop đầu tiên
+      const rgb = resolveColor(fill.stops[0]?.color);
       if (rgb) s.bg = { rgb };
     }
-    const font = (cell as any).font;
-    if (font?.bold) s.bl = 1;
-    if (font?.italic) s.it = 1;
-    if (font?.underline) s.ul = { s: 1 };
-    if (font?.strike) s.st = { s: 1 };
-    if (font?.size && font.size !== 11) s.fs = font.size;
-    if (font?.name && font.name !== 'Calibri') s.ff = font.name;
-    if (font?.color) { const rgb = resolveColor(font.color); if (rgb) s.cl = { rgb }; }
+    Object.assign(s, fontToStyle((cell as any).font));
     const align = (cell as any).alignment;
     const HT: Record<string, number> = { left: 1, center: 2, right: 3 };
     const VT: Record<string, number> = { top: 1, middle: 2, bottom: 3 };
     if (align?.horizontal && HT[align.horizontal]) s.ht = HT[align.horizontal];
     if (align?.vertical && VT[align.vertical]) s.vt = VT[align.vertical];
     if (align?.wrapText) s.tb = 3;
+    if (typeof align?.textRotation === 'number' && align.textRotation !== 0) {
+      // Excel 90..180 = xoay xuống (âm); Univer dùng góc a
+      const a = align.textRotation > 90 ? 90 - align.textRotation : align.textRotation;
+      s.tr = { a, v: 0 };
+    }
     const bd = buildBorders((cell as any).border);
     if (bd) s.bd = bd;
     const numFmt = (cell as any).numFmt;
@@ -152,6 +214,7 @@ export function excelToUniverSheets(workbook: ExcelJS.Workbook): {
         const ci = colNumber - 1;
         let v: any = cell.value;
         let f: string | undefined;
+        let p: any; // rich-text document (IDocumentData) khi ô có nhiều run định dạng khác nhau
 
         if (typeof v === 'object' && v !== null && ('formula' in v || 'sharedFormula' in v)) {
           // cell.formula resolves the master formula for shared-formula cells
@@ -161,19 +224,30 @@ export function excelToUniverSheets(workbook: ExcelJS.Workbook): {
           v = (v as any).result ?? '';
         }
         if (typeof v === 'object' && v !== null && 'richText' in v) {
-          v = ((v as any).richText as Array<{ text?: string }>).map((p) => p.text ?? '').join('');
+          const parts = (v as any).richText as Array<{ text?: string; font?: any }>;
+          const { doc, plain } = richTextToDoc(parts);
+          v = plain;
+          // Chỉ dùng rich-text doc khi thực sự có ≥1 run mang định dạng riêng
+          if (doc.body.textRuns.length) p = doc;
         }
         if (typeof v === 'object' && v !== null && 'text' in v) v = (v as any).text;
-        if (v instanceof Date) v = v.toLocaleDateString('vi-VN');
+        if (v instanceof Date) {
+          // Giữ serial number Excel để number format (dd/mm/yyyy…) render đúng;
+          // không có numFmt thì fallback chuỗi locale.
+          v = (cell as any).numFmt && (cell as any).numFmt !== 'General'
+            ? dateToExcelSerial(v)
+            : v.toLocaleDateString('vi-VN');
+        }
         if (typeof v === 'object' && v !== null) v = String(v);
 
         const sid = buildStyleId(cell);
         const hasValue = v !== null && v !== undefined && v !== '';
-        if (!hasValue && !f && !sid) return;
+        if (!hasValue && !f && !sid && !p) return;
 
         if (!cellData[String(ri)]) cellData[String(ri)] = {};
         const entry: any = f ? { v: v ?? '', f } : { v: v ?? '' };
         if (sid) entry.s = sid;
+        if (p) entry.p = p; // Univer render rich text từ p, v là plain fallback
         cellData[String(ri)][String(ci)] = entry;
 
         if (ri > maxRow) maxRow = ri;

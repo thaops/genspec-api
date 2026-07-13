@@ -111,7 +111,7 @@ export class ExportF1Service {
 
     // Group take-off rows by hạng mục, with a subtotal per group.
     const groups = new Map<string, typeof e.takeoff>();
-    for (const t of e.takeoff) {
+    for (const t of e.takeoff ?? []) {
       const g = t.group || 'Khác';
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g)!.push(t);
@@ -161,7 +161,7 @@ export class ExportF1Service {
       { header: 'Khối lượng', key: 'quantity', width: 14 },
     ];
     this.head(ws, 'BẢNG TIÊN LƯỢNG (BOQ)', 'A1:E1');
-    e.boq.forEach((b, i) => {
+    (e.boq ?? []).forEach((b, i) => {
       const r = ws.addRow({ stt: i + 1, code: b.code, name: b.name, unit: b.unit, quantity: b.quantity });
       r.getCell('quantity').numFmt = QTY;
       r.eachCell((c) => (c.border = thin()));
@@ -180,12 +180,12 @@ export class ExportF1Service {
     ];
     this.head(ws, 'PHÂN TÍCH ĐƠN GIÁ', 'A1:F1');
     const priceOf = this.priceResolver(e);
-    for (const a of e.analyses) {
+    for (const a of e.analyses ?? []) {
       const title = ws.addRow({ kind: `${a.code}`, ref: `${a.name} (${a.unit})` });
       title.font = { bold: true };
       title.eachCell((c) => (c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F4F8' } }));
       let unitTotal = 0;
-      for (const c of a.components) {
+      for (const c of a.components ?? []) {
         const price = priceOf(c.kind, c.ref);
         const amount = Math.round(price * c.norm);
         unitTotal += amount;
@@ -211,7 +211,7 @@ export class ExportF1Service {
       { header: 'Nguồn giá', key: 'source', width: 34 },
     ];
     this.head(ws, 'BẢNG GIÁ VẬT LIỆU', 'A1:E1');
-    e.materials.forEach((m) => {
+    (e.materials ?? []).forEach((m) => {
       const src = m.source ? [m.source.name, m.source.date, m.source.region].filter(Boolean).join(' · ') : '';
       const r = ws.addRow({ code: m.code, name: m.name, unit: m.unit, price: m.price, source: src });
       r.getCell('price').numFmt = MONEY;
@@ -227,7 +227,7 @@ export class ExportF1Service {
       { header: 'Lương ngày', key: 'dayRate', width: 16 },
     ];
     this.head(ws, 'BẢNG GIÁ NHÂN CÔNG', 'A1:C1');
-    e.labor.forEach((l) => {
+    (e.labor ?? []).forEach((l) => {
       const r = ws.addRow({ grade: l.grade, name: l.name, dayRate: l.dayRate });
       r.getCell('dayRate').numFmt = MONEY;
       r.eachCell((c) => (c.border = thin()));
@@ -243,7 +243,7 @@ export class ExportF1Service {
       { header: 'Đơn giá ca', key: 'shiftRate', width: 16 },
     ];
     this.head(ws, 'BẢNG GIÁ CA MÁY', 'A1:D1');
-    e.equipment.forEach((q) => {
+    (e.equipment ?? []).forEach((q) => {
       const r = ws.addRow({ code: q.code, name: q.name, unit: q.unit, shiftRate: q.shiftRate });
       r.getCell('shiftRate').numFmt = MONEY;
       r.eachCell((c) => (c.border = thin()));
@@ -261,7 +261,7 @@ export class ExportF1Service {
       { header: 'Thành tiền', key: 'amount', width: 16 },
     ];
     this.head(ws, 'TỔNG HỢP VẬT TƯ', 'A1:F1');
-    e.materialSummary.forEach((m) => {
+    (e.materialSummary ?? []).forEach((m) => {
       const r = ws.addRow({ kind: kindLabel(m.kind), name: m.name, unit: m.unit, quantity: m.quantity, price: m.price, amount: m.amount });
       r.getCell('quantity').numFmt = QTY;
       r.getCell('price').numFmt = MONEY;
@@ -301,9 +301,10 @@ export class ExportF1Service {
   }
 
   private priceResolver(e: ExportInput) {
-    const mat = new Map(e.materials.map((m) => [m.code.toLowerCase(), m.price]));
-    const lab = new Map(e.labor.map((l) => [l.grade.toLowerCase(), l.dayRate]));
-    const eq = new Map(e.equipment.map((q) => [q.code.toLowerCase(), q.shiftRate]));
+    const key = (v: unknown) => (v ?? '').toString().toLowerCase();
+    const mat = new Map((e.materials ?? []).map((m) => [key(m?.code), m?.price]));
+    const lab = new Map((e.labor ?? []).map((l) => [key(l?.grade), l?.dayRate]));
+    const eq = new Map((e.equipment ?? []).map((q) => [key(q?.code), q?.shiftRate]));
     return (kind: string, ref: string) => {
       const k = (ref ?? '').toLowerCase();
       if (kind === 'material') return mat.get(k) ?? 0;
