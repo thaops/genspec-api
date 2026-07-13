@@ -200,6 +200,33 @@ export class DrawingController {
     return this.graph.build(drawingId);
   }
 
+  // --- Building Graph (tầng ngữ nghĩa) ---
+  @Get(':drawingId/building')
+  building(@Param('drawingId') drawingId: string) {
+    return this.graph.building(drawingId);
+  }
+
+  @Get(':drawingId/building/floors')
+  floorSummary(@Param('drawingId') drawingId: string) {
+    return this.graph.floorSummary(drawingId);
+  }
+
+  /** "Tầng 3 bao nhiêu đèn?" → ?type=light&floor=3 */
+  @Get(':drawingId/building/count')
+  countObjects(
+    @Param('drawingId') drawingId: string,
+    @Query('type') type: string,
+    @Query('floor') floor?: string,
+  ) {
+    return this.graph.count(drawingId, type, floor);
+  }
+
+  /** "Phòng nào chưa có ổ cắm?" → ?type=socket */
+  @Get(':drawingId/building/rooms-missing')
+  roomsMissing(@Param('drawingId') drawingId: string, @Query('type') type: string) {
+    return this.graph.roomsMissing(drawingId, type);
+  }
+
   // --- Revisions ---
   @Get(':drawingId/revisions')
   listRevisions(@Param('drawingId') drawingId: string) {

@@ -5,6 +5,14 @@ import { Model } from 'mongoose';
 import { DrawingObject, DrawingObjectDocument } from '../schemas/drawing-object.schema';
 import { DrawingRelationship, DrawingRelationshipDocument } from '../schemas/drawing-relationship.schema';
 import { DrawingDetectedEvent, DrawingGraphBuiltEvent } from '../../events/domain-events';
+import {
+  GraphObject,
+  assembleBuilding,
+  assignObjectsToRooms,
+  perFloorTypeCounts,
+  countType,
+  roomsMissingType,
+} from '../building-graph';
 
 /**
  * Builds structural graph after AI detect completes.
@@ -104,6 +112,21 @@ export class DrawingGraphService {
       }
     }
 
+    // Room → object: 'contains' (tầng ngữ nghĩa). Chỉ sinh khi có object type='room';
+    // rỗng nếu chưa detect room (S3b) — không phá gì.
+    const roomMembers = assignObjectsToRooms(objects as unknown as GraphObject[]);
+    for (const [roomId, memberIds] of roomMembers) {
+      for (const memberId of memberIds) {
+        relationships.push({
+          drawingId,
+          fromStableId: roomId,
+          toStableId: memberId,
+          type: 'contains',
+          confidence: 0.8,
+        });
+      }
+    }
+
     if (relationships.length > 0) {
       await this.relModel.insertMany(relationships, { ordered: false });
     }
@@ -122,6 +145,32 @@ export class DrawingGraphService {
       this.relModel.find({ drawingId }).lean(),
     ]);
     return { drawingId, objects, relationships };
+  }
+
+  // ── Building Graph — tầng ngữ nghĩa (query cho Copilot) ────────────────────
+
+  private async load(drawingId: string): Promise<GraphObject[]> {
+    return (await this.objectModel.find({ drawingId }).lean()) as unknown as GraphObject[];
+  }
+
+  /** Cây Building → Floor → Room → Object. */
+  async building(drawingId: string) {
+    return assembleBuilding(await this.load(drawingId));
+  }
+
+  /** typeCounts theo từng tầng — "mỗi tầng có gì". */
+  async floorSummary(drawingId: string) {
+    return perFloorTypeCounts(await this.load(drawingId));
+  }
+
+  /** "Tầng 3 có bao nhiêu đèn?" — countType(drawingId, 'light', '3'). */
+  async count(drawingId: string, type: string, floor?: string) {
+    return { type, floor: floor ?? null, count: countType(await this.load(drawingId), type, floor ? { floor } : undefined) };
+  }
+
+  /** "Phòng nào chưa có ổ cắm?" — nền AI Review. Rỗng nếu chưa detect room. */
+  async roomsMissing(drawingId: string, requiredType: string) {
+    return roomsMissingType(await this.load(drawingId), requiredType);
   }
 
   private overlaps(
