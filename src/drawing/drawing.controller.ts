@@ -243,6 +243,12 @@ export class DrawingController {
     return this.graph.review(drawingId);
   }
 
+  /** Rebar takeoff — bóc cốt thép từ callout (Ø + số lượng + khoảng cách + đơn trọng). */
+  @Get(':drawingId/rebar')
+  rebar(@Param('drawingId') drawingId: string) {
+    return this.graph.rebarTakeoff(drawingId);
+  }
+
   // --- Revisions ---
   @Get(':drawingId/revisions')
   listRevisions(@Param('drawingId') drawingId: string) {

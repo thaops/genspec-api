@@ -75,6 +75,11 @@ const LAYER_TYPE_MAP: Record<string, string> = {
   FOOTING: 'footing', MONG: 'footing', 'KCC-MONG': 'footing', 'S-FNDTN': 'footing', 'KC-MONG': 'footing',
   // Pile
   PILE: 'pile', COC: 'pile', 'S-PILE': 'pile',
+  // Cốt thép (bản kết cấu) — nhận diện để lọc/hiển thị; khối lượng thép bóc từ
+  // callout text (%%C=Ø) qua rebar-takeoff, KHÔNG đo hình học ở đây.
+  THEP: 'rebar', 'THEP DAI': 'rebar', 'THEP DOC': 'rebar', 'THEP CHIU LUC': 'rebar',
+  TTHEP: 'rebar', NETTHEP: 'rebar', LONGTHEP: 'rebar', THEPTRON: 'rebar',
+  'KC-THEP': 'rebar', 'KC-THEPDAI': 'rebar', 'T-DAI': 'rebar', TTHEPDAI: 'rebar', NETFEDAI: 'rebar',
   // Door
   DOOR: 'door', CUA: 'door', 'A-DOOR': 'door', 'CUAN': 'door',
   // Window

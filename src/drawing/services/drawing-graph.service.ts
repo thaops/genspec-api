@@ -15,6 +15,7 @@ import {
 } from '../building-graph';
 import { mepTakeoff } from '../mep-takeoff';
 import { reviewBuilding } from '../building-review';
+import { aggregateRebar } from '../rebar-takeoff';
 
 /**
  * Builds structural graph after AI detect completes.
@@ -186,6 +187,16 @@ export class DrawingGraphService {
   /** AI Review: rà soát thiếu phạm vi (scope-gap) — human-in-the-loop, không tự sửa. */
   async review(drawingId: string) {
     return reviewBuilding(await this.load(drawingId));
+  }
+
+  /**
+   * Rebar takeoff: bóc cốt thép từ callout (%%C = Ø) trong text bản KẾT CẤU.
+   * Trả Ø + số lượng + khoảng cách + đơn trọng; KHÔNG suy kg (cần chiều dài).
+   */
+  async rebarTakeoff(drawingId: string) {
+    const objs = await this.objectModel.find({ drawingId }, { properties: 1 }).lean();
+    const texts = objs.map((o: any) => o.properties?.text).filter((t: unknown): t is string => typeof t === 'string' && !!t);
+    return aggregateRebar(texts);
   }
 
   private overlaps(
