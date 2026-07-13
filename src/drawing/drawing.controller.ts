@@ -227,6 +227,16 @@ export class DrawingController {
     return this.graph.roomsMissing(drawingId, type);
   }
 
+  /** MEP takeoff (đếm thiết bị + chiều dài tuyến) → ?factor=0.001&byFloor=true */
+  @Get(':drawingId/building/mep')
+  mep(
+    @Param('drawingId') drawingId: string,
+    @Query('factor') factor?: string,
+    @Query('byFloor') byFloor?: string,
+  ) {
+    return this.graph.mepTakeoff(drawingId, factor ? Number(factor) : 1, byFloor === 'true');
+  }
+
   // --- Revisions ---
   @Get(':drawingId/revisions')
   listRevisions(@Param('drawingId') drawingId: string) {

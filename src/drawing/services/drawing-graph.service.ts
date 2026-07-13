@@ -13,6 +13,7 @@ import {
   countType,
   roomsMissingType,
 } from '../building-graph';
+import { mepTakeoff } from '../mep-takeoff';
 
 /**
  * Builds structural graph after AI detect completes.
@@ -171,6 +172,14 @@ export class DrawingGraphService {
   /** "Phòng nào chưa có ổ cắm?" — nền AI Review. Rỗng nếu chưa detect room. */
   async roomsMissing(drawingId: string, requiredType: string) {
     return roomsMissingType(await this.load(drawingId), requiredType);
+  }
+
+  /**
+   * MEP takeoff: đếm thiết bị (đèn/ổ cắm/…) + đo chiều dài tuyến (ống/dây/máng).
+   * `factor` = m/đơn-vị-vẽ (mm→m = 0.001). byFloor=true tách theo tầng.
+   */
+  async mepTakeoff(drawingId: string, factor = 1, byFloor = false) {
+    return mepTakeoff(await this.load(drawingId), factor, byFloor);
   }
 
   private overlaps(

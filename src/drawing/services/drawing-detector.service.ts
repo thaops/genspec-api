@@ -90,7 +90,35 @@ const LAYER_TYPE_MAP: Record<string, string> = {
   HATCH: 'hatch', 'A-HATCH': 'hatch', 'CAT': 'hatch',
   // Symbols
   SYMBOL: 'symbol', 'A-SYMB': 'symbol', 'KY-HIEU': 'symbol',
+
+  // ===== MEP — Điện (Electrical) =====
+  // Thiết bị = block/INSERT trên layer điện → đếm số lượng (Building Graph).
+  DEN: 'light', LIGHT: 'light', 'E-LIGHT': 'light', 'E-LITE': 'light', LIGHTING: 'light', 'DEN-CHIEU-SANG': 'light',
+  OCAM: 'socket', 'O-CAM': 'socket', SOCKET: 'socket', 'E-SOCKET': 'socket', 'E-POWER': 'socket', 'OCAM-DIEN': 'socket',
+  CONGTAC: 'switch', 'CONG-TAC': 'switch', SWITCH: 'switch', 'E-SWITCH': 'switch',
+  TUDIEN: 'electric_panel', 'TU-DIEN': 'electric_panel', PANEL: 'electric_panel', 'E-PANEL': 'electric_panel', MDB: 'electric_panel', SMDB: 'electric_panel',
+  MANGCAP: 'cable_tray', 'MANG-CAP': 'cable_tray', CABLETRAY: 'cable_tray', 'CABLE-TRAY': 'cable_tray', 'E-TRAY': 'cable_tray',
+  ONGDIEN: 'conduit', 'ONG-DIEN': 'conduit', CONDUIT: 'conduit', 'E-COND': 'conduit',
+  DAYDIEN: 'wire', 'DAY-DIEN': 'wire', WIRE: 'wire', 'E-WIRE': 'wire', 'E-CABLE': 'wire',
+  // PCCC / báo cháy
+  BAOCHAY: 'smoke_detector', 'DAU-BAO-CHAY': 'smoke_detector', SMOKE: 'smoke_detector', 'SMOKE-DETECTOR': 'smoke_detector',
+
+  // ===== MEP — Nước (Plumbing) =====
+  ONGNUOC: 'pipe', 'ONG-NUOC': 'pipe', PIPE: 'pipe', 'P-PIPE': 'pipe', 'CAP-NUOC': 'pipe', 'THOAT-NUOC': 'pipe',
+  VAN: 'valve', VALVE: 'valve', 'P-VALVE': 'valve',
+  'TB-VS': 'sanitary', 'THIET-BI-VS': 'sanitary', SANITARY: 'sanitary', LAVABO: 'sanitary', 'BON-CAU': 'sanitary', 'THIET-BI-VE-SINH': 'sanitary',
+  HOGA: 'floor_drain', 'HO-GA': 'floor_drain', 'THOAT-SAN': 'floor_drain', 'FLOOR-DRAIN': 'floor_drain', DRAIN: 'floor_drain',
+
+  // ===== MEP — HVAC (điều hòa/thông gió) =====
+  ONGGIO: 'duct', 'ONG-GIO': 'duct', DUCT: 'duct', 'H-DUCT': 'duct',
+  MIENGGIO: 'diffuser', 'MIENG-GIO': 'diffuser', DIFFUSER: 'diffuser', GRILLE: 'diffuser',
+  DIEUHOA: 'hvac_unit', 'DIEU-HOA': 'hvac_unit', 'MAY-LANH': 'hvac_unit', FCU: 'hvac_unit', AHU: 'hvac_unit', CHILLER: 'hvac_unit', HVAC: 'hvac_unit',
 };
+
+/** Loại đối tượng MEP đếm theo SỐ LƯỢNG (block/fixture) — không đo diện tích/thể tích. */
+export const MEP_COUNT_TYPES = new Set(['light', 'socket', 'switch', 'electric_panel', 'sanitary', 'valve', 'floor_drain', 'diffuser', 'hvac_unit', 'smoke_detector']);
+/** Loại đối tượng MEP đo theo CHIỀU DÀI (tuyến ống/dây/máng) — polyline length. */
+export const MEP_LENGTH_TYPES = new Set(['wire', 'conduit', 'cable_tray', 'pipe', 'duct']);
 
 const LABEL_PATTERNS: Array<{ pattern: RegExp; type: string; hint: string }> = [
   { pattern: /^[Bb]\d/, type: 'beam',    hint: 'Label matches beam pattern (B + digit)' },

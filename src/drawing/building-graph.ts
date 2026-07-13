@@ -17,6 +17,7 @@ export interface GraphObject {
   type: string;
   floor?: string;
   layer?: string;
+  geometry?: number[][];
   boundingBox: { x: number; y: number; w: number; h: number; page?: number };
   ambiguous?: boolean;
 }
