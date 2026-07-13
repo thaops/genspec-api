@@ -156,16 +156,34 @@ export class ExportF1Service {
     ws.columns = [
       { header: 'STT', key: 'stt', width: 6 },
       { header: 'Mã hiệu', key: 'code', width: 14 },
-      { header: 'Công tác', key: 'name', width: 46 },
+      { header: 'Công tác', key: 'name', width: 40 },
       { header: 'Đơn vị', key: 'unit', width: 9 },
-      { header: 'Khối lượng', key: 'quantity', width: 14 },
+      { header: 'Khối lượng', key: 'quantity', width: 13 },
+      { header: 'Đơn giá VL', key: 'material', width: 14 },
+      { header: 'Đơn giá NC', key: 'labor', width: 14 },
+      { header: 'Đơn giá Máy', key: 'machine', width: 14 },
+      { header: 'Đơn giá', key: 'unitPrice', width: 15 },
+      { header: 'Thành tiền', key: 'total', width: 17 },
     ];
-    this.head(ws, 'BẢNG TIÊN LƯỢNG (BOQ)', 'A1:E1');
+    this.head(ws, 'BẢNG DỰ TOÁN CHI TIẾT (BOQ)', 'A1:J1');
+    let grand = 0;
     (e.boq ?? []).forEach((b, i) => {
-      const r = ws.addRow({ stt: i + 1, code: b.code, name: b.name, unit: b.unit, quantity: b.quantity });
+      // Đơn giá để trống (không phải 0) khi chưa có giá — tránh hiểu nhầm "miễn phí".
+      const r = ws.addRow({
+        stt: i + 1, code: b.code, name: b.name, unit: b.unit, quantity: b.quantity,
+        material: b.material || null, labor: b.labor || null, machine: b.machine || null,
+        unitPrice: b.unitPrice || null, total: b.total || null,
+      });
       r.getCell('quantity').numFmt = QTY;
+      for (const key of ['material', 'labor', 'machine', 'unitPrice', 'total']) r.getCell(key).numFmt = MONEY;
       r.eachCell((c) => (c.border = thin()));
+      grand += b.total || 0;
     });
+    // Dòng tổng cộng
+    const totalRow = ws.addRow({ name: 'TỔNG CỘNG', total: grand || null });
+    totalRow.font = { bold: true };
+    totalRow.getCell('total').numFmt = MONEY;
+    totalRow.eachCell((c) => (c.border = thin()));
   }
 
   private analysisSheet(wb: ExcelJS.Workbook, e: ExportInput) {

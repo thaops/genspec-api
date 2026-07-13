@@ -21,7 +21,11 @@ export interface TakeoffAssumptions {
   floorHeight: number; // m
   wallThickness: number; // m
   beamDepth: number; // m
+  footingDepth?: number; // m — chiều cao móng (giả định, mặc định 0.4m); mặt bằng không có → công khai trong ghi chú
 }
+
+/** Chiều cao móng giả định (m) khi assumptions.footingDepth trống — ghi rõ trong Ghi chú mỗi dòng móng. */
+export const DEFAULT_FOOTING_DEPTH = 0.4;
 
 export interface EngineDrawingObject {
   type: string;
@@ -65,6 +69,8 @@ export const COMMON_FALLBACK_CODES: Record<TakeoffRowKey, { code: string; name: 
   column_formwork: { code: 'AF.86411', name: 'Ván khuôn cột' },
   beam_concrete: { code: 'AF.61620', name: 'Bê tông dầm đá 1x2 M250' },
   beam_formwork: { code: 'AF.86511', name: 'Ván khuôn dầm' },
+  footing_concrete: { code: 'AF.61120', name: 'Bê tông móng đá 1x2 M250' },
+  footing_formwork: { code: 'AF.86111', name: 'Ván khuôn móng' },
   wall_paint: { code: 'AK.84210', name: 'Bả + sơn tường' },
   door: { code: 'AH.11120', name: 'Cửa đi' },
   window: { code: 'AH.12110', name: 'Cửa sổ' },
@@ -84,6 +90,8 @@ export type TakeoffRowKey =
   | 'column_formwork'
   | 'beam_concrete'
   | 'beam_formwork'
+  | 'footing_concrete'   // bê tông móng (= diện tích móng × chiều cao giả định)
+  | 'footing_formwork'   // ván khuôn móng (= chu vi móng × chiều cao)
   | 'door'
   | 'window'
   | 'slab'
@@ -110,7 +118,7 @@ export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
  */
 export const DISCIPLINE_ROWKEYS: Record<Discipline, TakeoffRowKey[] | null> = {
   KT: ['wall_area', 'wall_volume', 'wall_paint', 'door', 'window', 'floor_screed', 'floor_finish', 'ceiling', 'ceiling_paint', 'skirting'],
-  KC: ['column_concrete', 'column_formwork', 'beam_concrete', 'beam_formwork', 'slab'],
+  KC: ['footing_concrete', 'footing_formwork', 'column_concrete', 'column_formwork', 'beam_concrete', 'beam_formwork', 'slab'],
   DIEN: [],
   NUOC: [],
   KHAC: null,
@@ -234,6 +242,8 @@ export const NORM_KEYWORDS: Record<TakeoffRowKey, string[]> = {
   column_formwork: ['ván khuôn.*cột'],
   beam_concrete: ['bê tông.*dầm'],
   beam_formwork: ['ván khuôn.*dầm'],
+  footing_concrete: ['bê tông.*móng', 'bê tông.*đài'],
+  footing_formwork: ['ván khuôn.*móng', 'ván khuôn.*đài'],
   door: ['cửa đi', 'cửa'],
   window: ['cửa sổ', 'cửa'],
   slab: ['bê tông.*sàn'],
@@ -251,6 +261,8 @@ export const BOQ_GROUP_OTHER = 'PHẦN KHÁC';
 
 const BOQ_GROUP: Record<TakeoffRowKey, string> = {
   wall_volume: BOQ_GROUP_THO,
+  footing_concrete: BOQ_GROUP_THO,
+  footing_formwork: BOQ_GROUP_THO,
   column_concrete: BOQ_GROUP_THO,
   column_formwork: BOQ_GROUP_THO,
   beam_concrete: BOQ_GROUP_THO,
@@ -300,6 +312,8 @@ export const BOQ_SHEET_NAMES = BOQ_SHEETS.map((s) => s.name);
 const ROWKEY_SHEET: Record<TakeoffRowKey, string> = {
   wall_volume: 'structure',
   wall_area: 'structure',
+  footing_concrete: 'structure',
+  footing_formwork: 'structure',
   column_concrete: 'structure',
   column_formwork: 'structure',
   beam_concrete: 'structure',
@@ -394,6 +408,8 @@ const DEFAULT_NAMES: Record<TakeoffRowKey, string> = {
   column_formwork: 'Ván khuôn cột',
   beam_concrete: 'Bê tông dầm',
   beam_formwork: 'Ván khuôn dầm',
+  footing_concrete: 'Bê tông móng',
+  footing_formwork: 'Ván khuôn móng',
   door: 'Cửa đi',
   window: 'Cửa sổ',
   slab: 'Sàn (bê tông)',
@@ -409,6 +425,7 @@ const OBJECT_GROUP_LABEL: Record<string, string> = {
   wall: 'Tường (wall)',
   column: 'Cột (column)',
   beam: 'Dầm (beam)',
+  footing: 'Móng (footing)',
   door: 'Cửa đi (door)',
   window: 'Cửa sổ (window)',
   slab: 'Sàn/nền (slab)',
@@ -589,7 +606,7 @@ export function computeTakeoffRows(
 ): TakeoffEngineRow[] {
   // Ngoài MEASURED_TYPES, còn gom 'opening' (lỗ mở/cửa sổ) và 'slab' (sàn vẽ
   // dạng polygon) để có nhánh đo — tăng coverage cho type đã nhận diện.
-  const AGG_TYPES = new Set<string>([...MEASURED_TYPES, 'opening', 'slab']);
+  const AGG_TYPES = new Set<string>([...MEASURED_TYPES, 'opening', 'slab', 'footing']);
   const totals = new Map<string, GroupTotals>();
   for (const obj of objects) {
     if (!isCountableObject(obj)) continue;
@@ -709,6 +726,29 @@ export function computeTakeoffRows(
       'm2',
       beam.length * fw,
       `${f3(beam.length)}m × (${f3(D)}×2 + ${f3(W)})m = ${f3(beam.length * fw)} m²`,
+    );
+  }
+
+  // Móng (đơn/băng/đài): diện tích mặt bằng × chiều cao giả định = m³ bê tông;
+  // chu vi × chiều cao = m² ván khuôn. Chiều cao KHÔNG có trên mặt bằng → giả
+  // định công khai (mặc định 0.4m), QS đối chiếu mặt cắt. Cọc/đài cọc cần chiều
+  // dài từ mặt cắt/thống kê cọc → vẫn để trong CHECKLIST_QS, không bịa thể tích.
+  const footing = totals.get('footing');
+  if (footing && footing.area > 0) {
+    const FD = assumptions.footingDepth ?? DEFAULT_FOOTING_DEPTH;
+    push(
+      'footing_concrete',
+      'footing',
+      'm3',
+      footing.area * FD,
+      `${f3(footing.area)} m² (${footing.count} móng) × ${f3(FD)}m cao (giả định) = ${f3(footing.area * FD)} m³`,
+    );
+    push(
+      'footing_formwork',
+      'footing',
+      'm2',
+      footing.perimeter * FD,
+      `chu vi ${f3(footing.perimeter)}m × ${f3(FD)}m cao = ${f3(footing.perimeter * FD)} m²`,
     );
   }
 

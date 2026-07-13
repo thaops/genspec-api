@@ -3,9 +3,11 @@ export interface CatalogItem {
   name: string; // tên công tác
   unit: string; // đơn vị, e.g. "m3"
   group: string; // nhóm: Móng | Thân | Mái | Hoàn thiện | MEP ...
-  material: number; // đơn giá vật liệu / đơn vị (VND)
-  labor: number; // đơn giá nhân công / đơn vị (VND)
-  machine: number; // đơn giá máy / đơn vị (VND)
+  // ⚠️ Đơn giá seed KHÔNG phải công bố giá chính thống — optional, KHÔNG surface ra người dùng.
+  // Giá thật chỉ đến từ price_sets/price_items (import) hoặc data-hub material_prices (có nguồn).
+  material?: number; // đơn giá vật liệu / đơn vị (VND) — chỉ dùng nội bộ, không authoritative
+  labor?: number;
+  machine?: number;
 }
 
 import type { NormComponent } from './catalog-db.schemas';

@@ -84,16 +84,15 @@ export class CatalogDbService implements OnModuleInit {
   // ── Seed ────────────────────────────────────────────────────────────────
 
   private async seedFromLegacy() {
+    // Seed CHỈ danh mục mã hiệu (tra cứu/gợi ý). KHÔNG seed material/labor/machine —
+    // đơn giá seed là số bịa không nguồn. trust:0 để không lớp nào coi là giá thật.
     const docs = CATALOG.map((c) => ({
       code: c.code.toUpperCase(),
       name: c.name,
       unit: c.unit,
       group: c.group,
-      material: c.material,
-      labor: c.labor,
-      machine: c.machine,
-      sourceId: 'seed',
-      trust: 50,
+      sourceId: 'seed-catalog',
+      trust: 0,
       active: true,
     }));
     await this.model.insertMany(docs, { ordered: false }).catch(() => {});

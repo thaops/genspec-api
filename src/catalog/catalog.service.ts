@@ -161,7 +161,15 @@ export class CatalogService {
             );
           })
           .slice(0, limit);
-    return base.map((it) => ({ ...it, source: 'seed' as const }));
+    // CHỈ trả danh mục (mã/tên/đơn vị/nhóm). KHÔNG trả material/labor/machine seed —
+    // đó là số bịa, không có nguồn. Giá thật chỉ đến từ norm_items + price_sets đã import.
+    return base.map((it) => ({
+      code: it.code,
+      name: it.name,
+      unit: it.unit,
+      group: it.group,
+      source: 'seed' as const,
+    }));
   }
 
   private async loadPriceContext(

@@ -157,9 +157,10 @@ export class EditModeHandler {
     research: { text: string; sources: { title?: string; uri?: string }[] },
     history = '',
   ): AsyncGenerator<StreamEvent> {
-    const k = (n: number) => (n > 0 ? Math.round(n).toLocaleString('vi-VN') : '—');
-    const fmtCode = (c: { code: string; name: string; unit: string; material: number; labor: number; machine: number }) =>
-      `${c.code} | ${c.name} | ${c.unit} | VL ${k(c.material)} · NC ${k(c.labor)} · Máy ${k(c.machine)}`;
+    // CHỈ liệt kê mã/tên/đơn vị để LLM chọn mã hiệu. KHÔNG in đơn giá ở đây —
+    // giá seed là số bịa; giá thật chỉ lấy từ normRef (import) + priceCtxLite bên dưới.
+    const fmtCode = (c: { code: string; name: string; unit: string }) =>
+      `${c.code} | ${c.name} | ${c.unit}`;
 
     // Tra mã hiệu CÓ INDEX (norm_items đã import ưu tiên, fallback seed) theo tên công tác
     // đang có + yêu cầu — thay vì dump toàn bộ danh mục (nhanh hơn, sát công tác hơn, ưu
@@ -168,7 +169,7 @@ export class EditModeHandler {
       .slice(0, 12)
       .join(' ');
     const catalogQuery = [message, workTerms].filter(Boolean).join(' ').slice(0, 400).trim();
-    type CodeRow = { code: string; name: string; unit: string; material: number; labor: number; machine: number };
+    type CodeRow = { code: string; name: string; unit: string };
     let candidates: CodeRow[] = catalogQuery
       ? await this.catalog.search(catalogQuery, 40, state.projectInfo.location).catch(() => [] as CodeRow[])
       : [];
