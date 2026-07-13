@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { NormComponent, NormItem, PriceItem, PriceSet } from './catalog-db.schemas';
+import { MaterialPrice } from '../data-hub/prices/material-price.schema';
 import { CATALOG } from './catalog.seed';
 import { CatalogItem, CatalogSearchResult } from './catalog.types';
 import { extractProvinceFromText } from './province-aliases';
@@ -51,6 +52,7 @@ export class CatalogService {
     @InjectModel(NormItem.name) private readonly norms: Model<NormItem>,
     @InjectModel(PriceSet.name) private readonly priceSets: Model<PriceSet>,
     @InjectModel(PriceItem.name) private readonly priceItems: Model<PriceItem>,
+    @InjectModel(MaterialPrice.name) private readonly materialPrices: Model<MaterialPrice>,
   ) {}
 
   all(): CatalogItem[] {
@@ -177,13 +179,43 @@ export class CatalogService {
   ): Promise<{ set: PriceSet; prices: PriceItem[] } | null> {
     if (!province?.trim()) return null;
     try {
-      const set = await this.priceSets
-        .findOne({ province: new RegExp(`^${province.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') })
-        .sort({ effectiveDate: -1 })
-        .lean<PriceSet>();
-      if (!set) return null;
-      const prices = await this.priceItems.find({ priceSetId: set._id as Types.ObjectId }).lean<PriceItem[]>();
-      return { set, prices };
+      const rx = new RegExp(`^${province.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+
+      // Nguồn 1: price_set import tay (ưu tiên khớp — đặt trước để match trúng trước).
+      const set = await this.priceSets.findOne({ province: rx }).sort({ effectiveDate: -1 }).lean<PriceSet>();
+      const manualPrices = set
+        ? await this.priceItems.find({ priceSetId: set._id as Types.ObjectId }).lean<PriceItem[]>()
+        : [];
+
+      // Nguồn 2: material_prices (Data-Hub crawler) — bổ sung/thay thế, có trust+sourceId+effectiveDate.
+      const mpDocs = await this.materialPrices
+        .find({ province: rx, active: true })
+        .sort({ trust: -1, effectiveDate: -1 })
+        .lean<MaterialPrice[]>();
+      // Dedupe theo materialId, giữ bản tốt nhất (đã sort trust/date). Chuyển về shape PriceItem.
+      const seen = new Set<string>();
+      const mpPrices: PriceItem[] = [];
+      for (const d of mpDocs) {
+        const id = (d as any).materialId as string;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const kind = (d as any).category === 'labor' ? 'labor' : (d as any).category === 'equipment' ? 'machine' : 'material';
+        mpPrices.push({ name: (d as any).name, price: (d as any).price, unit: (d as any).unit, kind } as unknown as PriceItem);
+      }
+
+      if (!set && mpPrices.length === 0) return null;
+
+      // Ưu tiên manual: đặt trước để lookupComponentPrice (fuzzy name) trúng manual trước.
+      const prices = [...manualPrices, ...mpPrices];
+
+      // Set: dùng manual nếu có; nếu không, synthesize từ material_prices (bản mới nhất/tin nhất).
+      const resolvedSet: PriceSet = set ?? ({
+        province: (mpDocs[0] as any)?.province ?? province,
+        effectiveDate: (mpDocs[0] as any)?.effectiveDate ?? new Date(),
+        sourceDoc: (mpDocs[0] as any)?.documentNumber || 'Data-Hub (giá crawl — cần kiểm chứng)',
+      } as unknown as PriceSet);
+
+      return { set: resolvedSet, prices };
     } catch {
       return null;
     }
@@ -225,10 +257,19 @@ export class CatalogService {
    * Tìm tỉnh có price_sets trong DB. Ưu tiên tỉnh nhắc trong message,
    * rồi tới projectInfo.location; chỉ trả tỉnh THẬT SỰ có dữ liệu (distinct).
    */
+  /** Tỉnh có DỮ LIỆU GIÁ — union từ price_sets (import tay) + material_prices (Data-Hub crawler). */
+  private async provincePool(): Promise<string[]> {
+    const [a, b] = await Promise.all([
+      this.priceSets.distinct('province') as Promise<string[]>,
+      this.materialPrices.distinct('province') as Promise<string[]>,
+    ]);
+    return [...new Set([...a, ...b].filter((p) => p && p.trim()))];
+  }
+
   private async matchProvince(message?: string, location?: string): Promise<string | null> {
     if (!message?.trim() && !location?.trim()) return null;
     try {
-      const provinces = (await this.priceSets.distinct('province')) as string[];
+      const provinces = await this.provincePool();
       if (!provinces.length) return null;
 
       const canonical = extractProvinceFromText(message) ?? extractProvinceFromText(location);
