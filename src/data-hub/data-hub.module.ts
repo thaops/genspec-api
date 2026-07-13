@@ -47,6 +47,10 @@ import { ReviewAgentService } from './agents/review-agent.service';
 import { PriceAgentService } from './agents/price-agent.service';
 import { LegalAgentService } from './agents/legal-agent.service';
 
+// Knowledge Graph (Sprint 5)
+import { KnowledgeGraphService } from './knowledge/knowledge-graph.service';
+import { KnowledgeController } from './knowledge/knowledge.controller';
+
 // Controllers
 import { SuggestController } from './suggest/suggest.controller';
 import { DataHubAdminController } from './admin/data-hub-admin.controller';
@@ -67,7 +71,7 @@ const CRAWLERS = [
       { name: DocumentChunk.name, schema: DocumentChunkSchema },
     ]),
   ],
-  controllers: [SuggestController, DataHubAdminController],
+  controllers: [SuggestController, DataHubAdminController, KnowledgeController],
   providers: [
     // Sources
     SourceRegistryService,
@@ -88,6 +92,8 @@ const CRAWLERS = [
     ReviewAgentService,
     PriceAgentService,
     LegalAgentService,
+    // Knowledge Graph
+    KnowledgeGraphService,
   ],
   exports: [
     CatalogDbService,
