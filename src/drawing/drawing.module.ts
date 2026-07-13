@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AiModule } from '../ai/ai.module';
+import { CatalogModule } from '../catalog/catalog.module';
 import { DrawingController } from './drawing.controller';
 // Pipeline
 import { DrawingParserService } from './services/drawing-parser.service';
@@ -46,6 +47,7 @@ import { DrawingObjectOverride, DrawingObjectOverrideSchema } from './schemas/dr
 @Module({
   imports: [
     AiModule,
+    CatalogModule,
     MongooseModule.forFeature([
       { name: Drawing.name,             schema: DrawingSchema },
       { name: DrawingObject.name,       schema: DrawingObjectSchema },

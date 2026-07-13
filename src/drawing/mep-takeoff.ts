@@ -20,11 +20,24 @@ export interface MepObject {
 
 export interface MepRow {
   type: string;
+  label: string; // tên tiếng Việt (dùng để khớp giá theo tên)
   kind: 'count' | 'length';
-  unit: string; // 'cái' | 'm'
+  unit: string; // bộ | cái | m …
   quantity: number;
   floor?: string;
+  /** Đơn giá khớp từ price DB theo tên (undefined = chưa có giá, KHÔNG bịa). */
+  unitPrice?: number;
+  totalPrice?: number;
+  priceSource?: string;
 }
+
+/** Đơn vị chuẩn theo loại MEP (VN). */
+export const MEP_UNIT: Record<string, string> = {
+  light: 'bộ', socket: 'cái', switch: 'cái', electric_panel: 'cái',
+  sanitary: 'bộ', valve: 'cái', floor_drain: 'cái', diffuser: 'cái',
+  hvac_unit: 'bộ', smoke_detector: 'cái',
+  wire: 'm', conduit: 'm', cable_tray: 'm', pipe: 'm', duct: 'm',
+};
 
 /** Nhãn tiếng Việt cho từng loại MEP (hiển thị BOQ). */
 export const MEP_LABEL: Record<string, string> = {
@@ -67,8 +80,31 @@ export function mepTakeoff(objects: MepObject[], factor: number, byFloor = false
 
   const rows: MepRow[] = [];
   const split = (k: string) => { const [type, floor] = k.split('@@'); return { type, floor: byFloor ? floor : undefined }; };
-  for (const [k, q] of counts) { const { type, floor } = split(k); rows.push({ type, kind: 'count', unit: 'cái', quantity: q, floor }); }
-  for (const [k, q] of lengths) { const { type, floor } = split(k); rows.push({ type, kind: 'length', unit: 'm', quantity: Math.round(q * 1000) / 1000, floor }); }
+  const label = (type: string) => MEP_LABEL[type] ?? type;
+  const unit = (type: string, fallback: string) => MEP_UNIT[type] ?? fallback;
+  for (const [k, q] of counts) { const { type, floor } = split(k); rows.push({ type, label: label(type), kind: 'count', unit: unit(type, 'cái'), quantity: q, floor }); }
+  for (const [k, q] of lengths) { const { type, floor } = split(k); rows.push({ type, label: label(type), kind: 'length', unit: unit(type, 'm'), quantity: Math.round(q * 1000) / 1000, floor }); }
   // Ổn định: count trước, rồi length; trong nhóm theo tên
   return rows.sort((a, b) => (a.kind === b.kind ? a.type.localeCompare(b.type) : a.kind === 'count' ? -1 : 1));
+}
+
+function normalizeName(s: string): string {
+  return (s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Định giá MEP theo TÊN fixture khớp price DB (fuzzy 2 chiều) — giống pricing vật
+ * tư, KHÔNG bịa mã/giá. Không khớp → để trống (đúng nguyên tắc). PURE.
+ * `prices`: từ price_items/material_prices (đã có nguồn).
+ */
+export function priceMepRows(
+  rows: MepRow[],
+  prices: { name: string; price: number; source?: string }[],
+): MepRow[] {
+  return rows.map((r) => {
+    const q = normalizeName(r.label);
+    const hit = prices.find((p) => { const pn = normalizeName(p.name); return pn === q || pn.includes(q) || q.includes(pn); });
+    if (!hit) return r;
+    return { ...r, unitPrice: hit.price, totalPrice: Math.round(hit.price * r.quantity), priceSource: hit.source ?? 'price DB' };
+  });
 }

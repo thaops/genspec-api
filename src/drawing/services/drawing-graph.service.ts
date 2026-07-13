@@ -13,9 +13,10 @@ import {
   countType,
   roomsMissingType,
 } from '../building-graph';
-import { mepTakeoff } from '../mep-takeoff';
+import { mepTakeoff, priceMepRows } from '../mep-takeoff';
 import { reviewBuilding } from '../building-review';
-import { aggregateRebar } from '../rebar-takeoff';
+import { aggregateRebar, computeRebarWeight, RebarLengthInput } from '../rebar-takeoff';
+import { CatalogService } from '../../catalog/catalog.service';
 
 /**
  * Builds structural graph after AI detect completes.
@@ -35,6 +36,7 @@ export class DrawingGraphService {
     @InjectModel(DrawingObject.name) private objectModel: Model<DrawingObjectDocument>,
     @InjectModel(DrawingRelationship.name) private relModel: Model<DrawingRelationshipDocument>,
     private readonly events: EventEmitter2,
+    private readonly catalog: CatalogService,
   ) {}
 
   @OnEvent(DrawingDetectedEvent.EVENT)
@@ -180,8 +182,17 @@ export class DrawingGraphService {
    * MEP takeoff: đếm thiết bị (đèn/ổ cắm/…) + đo chiều dài tuyến (ống/dây/máng).
    * `factor` = m/đơn-vị-vẽ (mm→m = 0.001). byFloor=true tách theo tầng.
    */
-  async mepTakeoff(drawingId: string, factor = 1, byFloor = false) {
-    return mepTakeoff(await this.load(drawingId), factor, byFloor);
+  async mepTakeoff(drawingId: string, factor = 1, byFloor = false, location?: string) {
+    const rows = mepTakeoff(await this.load(drawingId), factor, byFloor);
+    // Định giá theo TÊN fixture khớp price DB tỉnh (nếu có location) — không match thì để trống.
+    if (location?.trim()) {
+      const ctx = await this.catalog.priceContextForLocation(location).catch(() => null);
+      if (ctx) {
+        const prices = ctx.prices.map((p: any) => ({ name: p.name, price: p.price, source: (ctx.set as any).sourceDoc || 'price DB' }));
+        return priceMepRows(rows, prices);
+      }
+    }
+    return rows;
   }
 
   /** AI Review: rà soát thiếu phạm vi (scope-gap) — human-in-the-loop, không tự sửa. */
@@ -197,6 +208,11 @@ export class DrawingGraphService {
     const objs = await this.objectModel.find({ drawingId }, { properties: 1 }).lean();
     const texts = objs.map((o: any) => o.properties?.text).filter((t: unknown): t is string => typeof t === 'string' && !!t);
     return aggregateRebar(texts);
+  }
+
+  /** kg thép khi ĐÃ có chiều dài (từ bảng thống kê/cấu kiện) — không bịa chiều dài. */
+  rebarWeight(lengths: RebarLengthInput[], wasteFactor = 1.0) {
+    return computeRebarWeight(lengths ?? [], wasteFactor);
   }
 
   private overlaps(

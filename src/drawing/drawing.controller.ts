@@ -233,8 +233,9 @@ export class DrawingController {
     @Param('drawingId') drawingId: string,
     @Query('factor') factor?: string,
     @Query('byFloor') byFloor?: string,
+    @Query('location') location?: string,
   ) {
-    return this.graph.mepTakeoff(drawingId, factor ? Number(factor) : 1, byFloor === 'true');
+    return this.graph.mepTakeoff(drawingId, factor ? Number(factor) : 1, byFloor === 'true', location);
   }
 
   /** AI Review — phát hiện thiếu phạm vi (scope-gap). */
@@ -247,6 +248,12 @@ export class DrawingController {
   @Get(':drawingId/rebar')
   rebar(@Param('drawingId') drawingId: string) {
     return this.graph.rebarTakeoff(drawingId);
+  }
+
+  /** kg thép khi có chiều dài → body { lengths:[{diameter,totalLengthM}], wasteFactor? } */
+  @Post(':drawingId/rebar/weight')
+  rebarWeight(@Body() body: { lengths: { diameter: number; totalLengthM: number }[]; wasteFactor?: number }) {
+    return this.graph.rebarWeight(body?.lengths ?? [], body?.wasteFactor ?? 1.0);
   }
 
   // --- Revisions ---

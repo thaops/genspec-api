@@ -95,3 +95,51 @@ export function aggregateRebar(texts: string[]): RebarTakeoff {
     note: 'Đã bóc Ø + số lượng + khoảng cách từ callout. TỔNG KG cần CHIỀU DÀI thanh (bảng thống kê thép hoặc kích thước cấu kiện) — chưa suy ra để tránh sai khối lượng. kg = Σ(chiều dài × đơn trọng) sau khi có chiều dài.',
   };
 }
+
+// ===== Bước sau: KG khi ĐÃ CÓ chiều dài (không bịa — chiều dài do QS/bảng TK cấp) =====
+
+export interface RebarLengthInput {
+  diameter: number;
+  /** Tổng chiều dài thanh Ø này (m) — từ bảng thống kê thép hoặc Σ(chiều dài × số thanh). */
+  totalLengthM: number;
+}
+
+export interface RebarWeightRow {
+  diameter: number;
+  totalLengthM: number;
+  unitWeightKgM: number;
+  weightKg: number;
+}
+
+export interface RebarWeightResult {
+  rows: RebarWeightRow[];
+  totalKg: number;
+  /** Hao hụt/nối chồng nếu áp (mặc định 1.0 = không cộng — QS tự quyết hệ số). */
+  wasteFactor: number;
+}
+
+/**
+ * kg = Σ(chiều dài × đơn trọng). Chiều dài do NGƯỜI DÙNG/bảng thống kê cấp — hàm
+ * này KHÔNG bịa chiều dài. `wasteFactor` (nối chồng+hao hụt, vd 1.05) mặc định 1.0
+ * để không tự cộng khống; QS chủ động áp. PURE.
+ */
+export function computeRebarWeight(inputs: RebarLengthInput[], wasteFactor = 1.0): RebarWeightResult {
+  const rows: RebarWeightRow[] = inputs
+    .filter((i) => i.totalLengthM > 0 && i.diameter > 0)
+    .map((i) => {
+      const uw = unitWeightOf(i.diameter);
+      return { diameter: i.diameter, totalLengthM: i.totalLengthM, unitWeightKgM: uw, weightKg: Math.round(i.totalLengthM * uw * wasteFactor * 100) / 100 };
+    })
+    .sort((a, b) => a.diameter - b.diameter);
+  const totalKg = Math.round(rows.reduce((s, r) => s + r.weightKg, 0) * 100) / 100;
+  return { rows, totalKg, wasteFactor };
+}
+
+/**
+ * Số đai trên 1 cấu kiện = floor(L/a) + 1 (công thức chuẩn). Deterministic khi ĐÃ
+ * biết chiều dài cấu kiện L (mm) và khoảng cách a (mm). Không có L → không suy.
+ */
+export function stirrupCount(memberLengthMm: number, spacingMm: number): number {
+  if (memberLengthMm <= 0 || spacingMm <= 0) return 0;
+  return Math.floor(memberLengthMm / spacingMm) + 1;
+}
