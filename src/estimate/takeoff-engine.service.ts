@@ -470,6 +470,83 @@ interface GroupTotals {
   perimeter: number;
 }
 
+// ===== RULE ENGINE — 1 đối tượng → N công tác (khai báo, không hardcode nhánh) =====
+// QS không đo từng công tác riêng: 1 tường → xây + trát + sơn + len; 1 cột → bê
+// tông + ván khuôn. Trước đây các suy diễn này nằm rải trong computeTakeoffRows.
+// Nay khai báo thành bảng: thêm 1 công tác dẫn xuất = thêm 1 dòng, KHÔNG sửa code.
+// Công thức + ghi chú giữ NGUYÊN VĂN (không đổi số/diễn giải) để không phá test.
+
+/** Giả định đã resolve (m) truyền vào từng rule. */
+export interface ResolvedAssumptions {
+  H: number;  // cao tầng
+  T: number;  // dày tường
+  D: number;  // cao dầm
+  W: number;  // bề rộng dầm
+  FD: number; // cao móng
+}
+
+export interface DeriveRule {
+  key: TakeoffRowKey;
+  group: string; // nhóm hình học nguồn (wall/column/beam/footing/door)
+  unit: string;
+  /** Khối lượng từ tổng đo được của nhóm + giả định. */
+  qty: (t: GroupTotals, a: ResolvedAssumptions) => number;
+  /** Diễn giải công thức (chỉ số + đơn vị) — QS truy vết. */
+  note: (t: GroupTotals, a: ResolvedAssumptions) => string;
+}
+
+/** nhóm hình học → danh sách công tác dẫn xuất. Slab/window có logic đặc thù (đo chéo nhóm) nên KHÔNG ở đây. */
+export const DERIVE_RULES: Record<string, DeriveRule[]> = {
+  wall: [
+    { key: 'wall_area', group: 'wall', unit: 'm2',
+      qty: (t, a) => round3(t.length * a.H),
+      note: (t, a) => `${f3(t.length)}m × ${f3(a.H)}m = ${f3(round3(t.length * a.H))} m²` },
+    { key: 'wall_volume', group: 'wall', unit: 'm3',
+      qty: (t, a) => round3(t.length * a.H) * a.T,
+      note: (t, a) => { const m2 = round3(t.length * a.H); return `${f3(m2)} m² × ${f3(a.T)}m = ${f3(m2 * a.T)} m³`; } },
+    // Bả + sơn: cùng diện tích bề mặt trát (hệ số 1:1 ghi rõ, không nhân khống).
+    { key: 'wall_paint', group: 'wall', unit: 'm2',
+      qty: (t, a) => round3(t.length * a.H),
+      note: (t, a) => { const m2 = round3(t.length * a.H); return `bả+sơn theo diện tích trát: ${f3(m2)} m² × 1 (hệ số 1:1) = ${f3(m2)} m²`; } },
+    // Len/chân tường: chạy dọc chân tường ≈ chiều dài tường (suy ra, cần đối chiếu).
+    { key: 'skirting', group: 'wall', unit: 'm',
+      qty: (t) => t.length,
+      note: (t) => `len/chân tường theo chiều dài tường = ${f3(t.length)} m` },
+  ],
+  column: [
+    { key: 'column_concrete', group: 'column', unit: 'm3',
+      qty: (t, a) => t.area * a.H,
+      note: (t, a) => `${f3(t.area)} m² tiết diện (${t.count} cột) × ${f3(a.H)}m = ${f3(t.area * a.H)} m³` },
+    { key: 'column_formwork', group: 'column', unit: 'm2',
+      qty: (t, a) => t.perimeter * a.H,
+      note: (t, a) => `chu vi ${f3(t.perimeter)}m (≈2×(w+h) bbox mỗi cột) × ${f3(a.H)}m = ${f3(t.perimeter * a.H)} m²` },
+  ],
+  beam: [
+    { key: 'beam_concrete', group: 'beam', unit: 'm3',
+      qty: (t, a) => t.length * a.D * a.W,
+      note: (t, a) => `${f3(t.length)}m × ${f3(a.D)}m × ${f3(a.W)}m = ${f3(t.length * a.D * a.W)} m³` },
+    { key: 'beam_formwork', group: 'beam', unit: 'm2',
+      qty: (t, a) => t.length * (a.D * 2 + a.W),
+      note: (t, a) => `${f3(t.length)}m × (${f3(a.D)}×2 + ${f3(a.W)})m = ${f3(t.length * (a.D * 2 + a.W))} m²` },
+  ],
+  footing: [
+    { key: 'footing_concrete', group: 'footing', unit: 'm3',
+      qty: (t, a) => t.area * a.FD,
+      note: (t, a) => `${f3(t.area)} m² (${t.count} móng) × ${f3(a.FD)}m cao (giả định) = ${f3(t.area * a.FD)} m³` },
+    { key: 'footing_formwork', group: 'footing', unit: 'm2',
+      qty: (t, a) => t.perimeter * a.FD,
+      note: (t, a) => `chu vi ${f3(t.perimeter)}m × ${f3(a.FD)}m cao = ${f3(t.perimeter * a.FD)} m²` },
+  ],
+  door: [
+    { key: 'door', group: 'door', unit: 'm2',
+      qty: (t) => t.area,
+      note: (t) => `tổng diện tích ${t.count} cửa = ${f3(t.area)} m²` },
+  ],
+};
+
+/** Thứ tự chạy nhóm (giữ đúng thứ tự phát sinh cũ để STT ổn định). */
+const DERIVE_GROUP_ORDER = ['wall', 'column', 'beam', 'footing', 'door'];
+
 export interface HatchSlabStats {
   /** Số hatch có diện tích > 0. */
   count: number;
@@ -662,99 +739,20 @@ export function computeTakeoffRows(
     rows.push({ key, group, boqGroup: BOQ_GROUP[key], code, name, unit, quantity: q, note, source, ...(webSourced && { webSourced }), ...(fallback && { fallback }) });
   };
 
-  const wall = totals.get('wall');
-  if (wall) {
-    const m2 = round3(wall.length * H);
-    push('wall_area', 'wall', 'm2', m2, `${f3(wall.length)}m × ${f3(H)}m = ${f3(m2)} m²`);
-    push(
-      'wall_volume',
-      'wall',
-      'm3',
-      m2 * T,
-      `${f3(m2)} m² × ${f3(T)}m = ${f3(m2 * T)} m³`,
-    );
-    // Bả + sơn: cùng diện tích bề mặt trát (hệ số 1:1 ghi rõ, không nhân khống).
-    push(
-      'wall_paint',
-      'wall',
-      'm2',
-      m2,
-      `bả+sơn theo diện tích trát: ${f3(m2)} m² × 1 (hệ số 1:1) = ${f3(m2)} m²`,
-    );
-    // Len/chân tường: chạy dọc chân tường ≈ chiều dài tường (suy ra, cần đối chiếu).
-    push(
-      'skirting',
-      'wall',
-      'm',
-      wall.length,
-      `len/chân tường theo chiều dài tường = ${f3(wall.length)} m`,
-    );
-  }
-
-  const column = totals.get('column');
-  if (column) {
-    push(
-      'column_concrete',
-      'column',
-      'm3',
-      column.area * H,
-      `${f3(column.area)} m² tiết diện (${column.count} cột) × ${f3(H)}m = ${f3(column.area * H)} m³`,
-    );
-    push(
-      'column_formwork',
-      'column',
-      'm2',
-      column.perimeter * H,
-      `chu vi ${f3(column.perimeter)}m (≈2×(w+h) bbox mỗi cột) × ${f3(H)}m = ${f3(column.perimeter * H)} m²`,
-    );
-  }
-
-  const beam = totals.get('beam');
-  if (beam) {
-    const W = ASSUMED_BEAM_WIDTH;
-    push(
-      'beam_concrete',
-      'beam',
-      'm3',
-      beam.length * D * W,
-      `${f3(beam.length)}m × ${f3(D)}m × ${f3(W)}m = ${f3(beam.length * D * W)} m³`,
-    );
-    const fw = D * 2 + W;
-    push(
-      'beam_formwork',
-      'beam',
-      'm2',
-      beam.length * fw,
-      `${f3(beam.length)}m × (${f3(D)}×2 + ${f3(W)})m = ${f3(beam.length * fw)} m²`,
-    );
-  }
-
-  // Móng (đơn/băng/đài): diện tích mặt bằng × chiều cao giả định = m³ bê tông;
-  // chu vi × chiều cao = m² ván khuôn. Chiều cao KHÔNG có trên mặt bằng → giả
-  // định công khai (mặc định 0.4m), QS đối chiếu mặt cắt. Cọc/đài cọc cần chiều
-  // dài từ mặt cắt/thống kê cọc → vẫn để trong CHECKLIST_QS, không bịa thể tích.
-  const footing = totals.get('footing');
-  if (footing && footing.area > 0) {
-    const FD = assumptions.footingDepth ?? DEFAULT_FOOTING_DEPTH;
-    push(
-      'footing_concrete',
-      'footing',
-      'm3',
-      footing.area * FD,
-      `${f3(footing.area)} m² (${footing.count} móng) × ${f3(FD)}m cao (giả định) = ${f3(footing.area * FD)} m³`,
-    );
-    push(
-      'footing_formwork',
-      'footing',
-      'm2',
-      footing.perimeter * FD,
-      `chu vi ${f3(footing.perimeter)}m × ${f3(FD)}m cao = ${f3(footing.perimeter * FD)} m²`,
-    );
-  }
-
-  const door = totals.get('door');
-  if (door) {
-    push('door', 'door', 'm2', door.area, `tổng diện tích ${door.count} cửa = ${f3(door.area)} m²`);
+  // RULE ENGINE: mỗi nhóm hình học chạy bảng công tác dẫn xuất (DERIVE_RULES).
+  // Móng (đơn/băng/đài): chỉ chạy khi có diện tích mặt bằng — chiều cao giả định
+  // công khai trong ghi chú; cọc/đài cọc cần mặt cắt → vẫn ở CHECKLIST_QS, không bịa.
+  const resolved: ResolvedAssumptions = {
+    H, T, D, W: ASSUMED_BEAM_WIDTH,
+    FD: assumptions.footingDepth ?? DEFAULT_FOOTING_DEPTH,
+  };
+  for (const grp of DERIVE_GROUP_ORDER) {
+    const t = totals.get(grp);
+    if (!t) continue;
+    if (grp === 'footing' && !(t.area > 0)) continue; // móng cần diện tích mặt bằng
+    for (const rule of DERIVE_RULES[grp]) {
+      push(rule.key, rule.group, rule.unit, rule.qty(t, resolved), rule.note(t, resolved));
+    }
   }
 
   // Cửa sổ + lỗ mở (opening): gộp diện tích — opening trên mặt bằng không có cánh
