@@ -41,45 +41,53 @@ export class UnitPriceService implements OnModuleInit {
     }
   }
 
-  /** Nạp giá Vật liệu/Nhân công/Ca máy (từ JSON tài nguyên) vào material_prices. */
+  /** Nạp MỌI file gia-*.json (giá VL/NC/Máy) vào material_prices. Hỗ trợ 2 shape:
+   *  { materials, labor, machines:[{name,unit,price}] } và { machines:[{code,type,unit,price}] }. */
   private async seedResourcePrices() {
-    const file = path.join(__dirname, 'data', 'gia-taiguyen-hanoi.json');
-    if (!fs.existsSync(file)) return;
+    const dir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir).filter((f) => /^gia-.*\.json$/.test(f));
+    for (const f of files) {
+      try {
+        await this.seedResourceFile(path.join(dir, f));
+      } catch (err) {
+        this.logger.warn(`resource seed ${f}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private async seedResourceFile(file: string) {
     const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
-      source: { province: string; document: string; priceLevel?: string };
-      materials: Array<{ name: string; unit: string; price: number }>;
-      labor: Array<{ name: string; unit: string; price: number }>;
-      machines: Array<{ name: string; unit: string; price: number }>;
+      source: { province: string; document: string };
+      materials?: Array<{ name: string; unit: string; price: number }>;
+      labor?: Array<{ name: string; unit: string; price: number }>;
+      machines?: Array<{ name?: string; type?: string; code?: string; unit: string; price: number }>;
     };
-    const province = data.source?.province || 'Hà Nội';
-    const sourceId = data.source?.document || 'Đơn giá tỉnh';
-    // Đã seed cho tỉnh này rồi → bỏ qua (tránh nạp lại mỗi lần khởi động).
-    const existing = await this.matPrices.countDocuments({ province, sourceId });
-    if (existing > 0) return;
-    // Q2/2022 (không dùng Date.now để deterministic)
-    const effectiveDate = new Date('2022-06-30T00:00:00Z');
+    const province = data.source?.province || 'Không rõ';
+    const sourceId = data.source?.document || 'Công bố giá';
+    if ((await this.matPrices.countDocuments({ province, sourceId })) > 0) return; // idempotent theo (tỉnh, nguồn)
+    const effectiveDate = new Date('2022-06-30T00:00:00Z'); // deterministic; đối chiếu note trong nguồn
     const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    const groups: Array<[Array<{ name: string; unit: string; price: number }>, string]> = [
-      [data.materials ?? [], 'material'],
-      [data.labor ?? [], 'labor'],
-      [data.machines ?? [], 'equipment'],
-    ];
-    const ops = groups.flatMap(([arr, category]) =>
-      arr.filter((x) => x.name && x.price > 0).map((x) => ({
-        insertOne: {
-          document: {
-            materialId: `${category}-${norm(x.name)}`, name: x.name, category,
-            unit: x.unit, price: x.price, province, sourceId, trust: 90,
-            effectiveDate, documentNumber: sourceId, active: true,
-          },
-        },
-      })),
-    );
+    const ops: any[] = [];
+    const push = (name: string, unit: string, price: number, category: string, materialId: string) => {
+      ops.push({ insertOne: { document: {
+        materialId, name, category, unit, price, province, sourceId, trust: 90,
+        effectiveDate, documentNumber: sourceId, active: true,
+      } } });
+    };
+    for (const x of data.materials ?? []) if (x.name && x.price > 0) push(x.name, x.unit, x.price, 'material', `material-${norm(x.name)}`);
+    for (const x of data.labor ?? []) if (x.name && x.price > 0) push(x.name, x.unit, x.price, 'labor', `labor-${norm(x.name)}`);
+    for (const x of data.machines ?? []) {
+      const nm = x.name || x.type || x.code || '';
+      if (!nm || !(x.price > 0)) continue;
+      // Ca máy: giữ MÃ (M-code) làm materialId để tra theo mã; tên OCR để hiển thị.
+      push(x.code ? `${x.code} ${x.type ?? ''}`.trim() : nm, x.unit, x.price, 'equipment', x.code ? `M-${x.code}` : `equipment-${norm(nm)}`);
+    }
     if (ops.length === 0) return;
     for (let i = 0; i < ops.length; i += 1000) {
-      await this.matPrices.bulkWrite(ops.slice(i, i + 1000) as any, { ordered: false }).catch(() => {});
+      await this.matPrices.bulkWrite(ops.slice(i, i + 1000), { ordered: false }).catch(() => {});
     }
-    this.logger.log(`Seeded ${ops.length} giá tài nguyên (VL/NC/Máy) — ${province}, ${sourceId}`);
+    this.logger.log(`Seeded ${ops.length} giá tài nguyên — ${province}, ${sourceId}`);
   }
 
   /** Nạp MỌI file dongia-*.json (mỗi tỉnh 1 file) vào unit_prices — guard theo tỉnh. */

@@ -1,0 +1,470 @@
+{
+ "source": {
+  "title": "Bảng giá ca máy và thiết bị thi công TP.HCM",
+  "document": "QĐ 1491/QĐ-SXD-KT&VLXD ngày 31/12/2024 - Sở XD TP.HCM (năm 2024)",
+  "province": "Hồ Chí Minh",
+  "currency": "VND",
+  "priceCol": "Giá ca máy Vùng I (cột [13])",
+  "origin": "DOCX (OCR) — giá lấy theo cột đánh số [13], deterministic",
+  "note": "Giá ca máy Vùng I map theo DÒNG ĐÁNH SỐ CỘT [13] (chuẩn TT13). Tên máy OCR — cần kiểm chứng. Đối chiếu công bố giá mới nhất."
+ },
+ "count": 76,
+ "machines": [
+  {
+   "code": "M101.1102",
+   "type": "8,5 t + 9 t",
+   "unit": "ca",
+   "price": 1015755
+  },
+  {
+   "code": "M101.1202",
+   "type": "20 t",
+   "unit": "ca",
+   "price": 2676252
+  },
+  {
+   "code": "M102.0104",
+   "type": "6t",
+   "unit": "ca",
+   "price": 1831017
+  },
+  {
+   "code": "M102.0303",
+   "type": "16 t",
+   "unit": "ca",
+   "price": 2449290
+  },
+  {
+   "code": "M102.0304",
+   "type": "25 t",
+   "unit": "ca",
+   "price": 2833235
+  },
+  {
+   "code": "M102.0313",
+   "type": "125 t + 130 t",
+   "unit": "ca",
+   "price": 8818340
+  },
+  {
+   "code": "M102.0315",
+   "type": "250 t",
+   "unit": "ca",
+   "price": 22955255
+  },
+  {
+   "code": "M102.0316",
+   "type": "300 t",
+   "unit": "ca",
+   "price": 30454876
+  },
+  {
+   "code": "M102.0401",
+   "type": "st",
+   "unit": "ca",
+   "price": 1393966
+  },
+  {
+   "code": "M102.0405",
+   "type": "20 t",
+   "unit": "ca",
+   "price": 2410797
+  },
+  {
+   "code": "M102.0407",
+   "type": "30 I",
+   "unit": "ca",
+   "price": 3652236
+  },
+  {
+   "code": "M102.0410",
+   "type": "60 t",
+   "unit": "ca",
+   "price": 5973488
+  },
+  {
+   "code": "M102.0501",
+   "type": "Keo theo - sue nang 30 t",
+   "unit": "ca",
+   "price": 7252638
+  },
+  {
+   "code": "M102.0502",
+   "type": "T\\f hanh - sue nang I00 t",
+   "unit": "ca",
+   "price": 10430299
+  },
+  {
+   "code": "M102.0702",
+   "type": "Thi�t bi nang h;_dt im 90 t",
+   "unit": "ca",
+   "price": 4875826
+  },
+  {
+   "code": "M102.0703",
+   "type": "Hf th�ng xe goong di chuy�n d�m (g6m mo to- difn 3,5 kW va con Ian)",
+   "unit": "ca",
+   "price": 361750
+  },
+  {
+   "code": "M102.0805",
+   "type": "90 t",
+   "unit": "ca",
+   "price": 1381891
+  },
+  {
+   "code": "M102.1202",
+   "type": "5,0 t",
+   "unit": "ca",
+   "price": 275775
+  },
+  {
+   "code": "M102.1304",
+   "type": "50 t",
+   "unit": "ca",
+   "price": 326074
+  },
+  {
+   "code": "M102.1403",
+   "type": "YCW -250 t",
+   "unit": "ca",
+   "price": 334792
+  },
+  {
+   "code": "M102.1501",
+   "type": "Kich diy lien t1_1c t1_1· dqng ZLD-60 (60t, 6c)",
+   "unit": "ca",
+   "price": 1002566
+  },
+  {
+   "code": "M102.1601",
+   "type": "Kich sqi dO'n YDC - 500 t",
+   "unit": "ca",
+   "price": 337108
+  },
+  {
+   "code": "M102.1702",
+   "type": "50 MPa (ZB4 - 500)",
+   "unit": "ca",
+   "price": 397043
+  },
+  {
+   "code": "M102.1801",
+   "type": "9m",
+   "unit": "ca",
+   "price": 1345598
+  },
+  {
+   "code": "M102.1804",
+   "type": "24m",
+   "unit": "ca",
+   "price": 2073876
+  },
+  {
+   "code": "M102.1901",
+   "type": "9m",
+   "unit": "ca",
+   "price": 1825556
+  },
+  {
+   "code": "M103.0102",
+   "type": "1,8 t",
+   "unit": "ca",
+   "price": 2423364
+  },
+  {
+   "code": "M103.0105",
+   "type": "8,0 t",
+   "unit": "ca",
+   "price": 13027917
+  },
+  {
+   "code": "M103.0504",
+   "type": "3,5 t",
+   "unit": "ca",
+   "price": 6589238
+  },
+  {
+   "code": "M103.0701",
+   "type": "60 t",
+   "unit": "ca",
+   "price": 551832
+  },
+  {
+   "code": "M103.1301",
+   "type": "May khoan CQC d§t (I c§n)",
+   "unit": "ca",
+   "price": 6165564
+  },
+  {
+   "code": "M103.1302",
+   "type": "May khoan CQC d§t (2 dn)",
+   "unit": "ca",
+   "price": 6968253
+  },
+  {
+   "code": "M103.1601",
+   "type": "100m3/h",
+   "unit": "ca",
+   "price": 643771
+  },
+  {
+   "code": "M104.0203",
+   "type": "250 lit",
+   "unit": "ca",
+   "price": 329254
+  },
+  {
+   "code": "M104.0301",
+   "type": "1200 lit",
+   "unit": "ca",
+   "price": 587960
+  },
+  {
+   "code": "M104.0405",
+   "type": "60 m3/h",
+   "unit": "ca",
+   "price": 3731779
+  },
+  {
+   "code": "M104.0407",
+   "type": "90 m3/h",
+   "unit": "ca",
+   "price": 5690955
+  },
+  {
+   "code": "M105.0101",
+   "type": "190 CV",
+   "unit": "ca",
+   "price": 3010335
+  },
+  {
+   "code": "M105.0301",
+   "type": "May rai Novachip 170 CV",
+   "unit": "ca",
+   "price": 17680391
+  },
+  {
+   "code": "M105.0402",
+   "type": "May rai xi miing SW16TC (16m3)",
+   "unit": "ca",
+   "price": 10349994
+  },
+  {
+   "code": "M105.0503",
+   "type": "May cao b6c tai sinh, cong su§t >450 HP",
+   "unit": "ca",
+   "price": 33571500
+  },
+  {
+   "code": "M106.0107",
+   "type": "10 t",
+   "unit": "ca",
+   "price": 1536253
+  },
+  {
+   "code": "M106.0110",
+   "type": "20 t",
+   "unit": "ca",
+   "price": 2411634
+  },
+  {
+   "code": "M106.0204",
+   "type": "10 t",
+   "unit": "ca",
+   "price": 1984000
+  },
+  {
+   "code": "M106.0205",
+   "type": "12 t",
+   "unit": "ca",
+   "price": 2285590
+  },
+  {
+   "code": "M106.0301",
+   "type": "150 CV",
+   "unit": "ca",
+   "price": 1363957
+  },
+  {
+   "code": "M106.0303",
+   "type": "255 CV",
+   "unit": "ca",
+   "price": 2147522
+  },
+  {
+   "code": "M106.0305",
+   "type": "360 CV",
+   "unit": "ca",
+   "price": 2368050
+  },
+  {
+   "code": "M106.0402",
+   "type": "10,7 m3",
+   "unit": "ca",
+   "price": 3702793
+  },
+  {
+   "code": "M106.0403",
+   "type": "14,5 m3",
+   "unit": "ca",
+   "price": 4537754
+  },
+  {
+   "code": "M106.0502",
+   "type": "Sm 3",
+   "unit": "ca",
+   "price": 1143668
+  },
+  {
+   "code": "M106.0503",
+   "type": "6m 3",
+   "unit": "ca",
+   "price": 1220961
+  },
+  {
+   "code": "M106.0505",
+   "type": "9 m1",
+   "unit": "ca",
+   "price": 1418894
+  },
+  {
+   "code": "M106.0601",
+   "type": "2 m1",
+   "unit": "ca",
+   "price": 999147
+  },
+  {
+   "code": "M106.0701",
+   "type": "1,5 t",
+   "unit": "ca",
+   "price": 980553
+  },
+  {
+   "code": "M106.0801",
+   "type": "15 t",
+   "unit": "ca",
+   "price": 143429
+  },
+  {
+   "code": "M106.0802",
+   "type": "21 t",
+   "unit": "ca",
+   "price": 166430
+  },
+  {
+   "code": "M106.0805",
+   "type": "60 t",
+   "unit": "ca",
+   "price": 289308
+  },
+  {
+   "code": "M107.0101",
+   "type": "D '.:o 42 mm (di)ng co di�n-1,2 kW)",
+   "unit": "ca",
+   "price": 293550
+  },
+  {
+   "code": "M107.0102",
+   "type": "D '.:o 42 mm (truy€n di)ng khi nen - chua tinh khi nen)",
+   "unit": "ca",
+   "price": 300675
+  },
+  {
+   "code": "M107.0103",
+   "type": "D '.:o 42 mm (khoan SIG - chua tinh khi nen)",
+   "unit": "ca",
+   "price": 412268
+  },
+  {
+   "code": "M112.0201",
+   "type": "5 CV",
+   "unit": "ca",
+   "price": 72397
+  },
+  {
+   "code": "M201.0019",
+   "type": "May, thi€l bi tham do dia chfin - lo�i 24 m�ch (Triosx-24)",
+   "unit": "ca",
+   "price": 343379
+  },
+  {
+   "code": "M201.0025",
+   "type": "Kfnh hi€n vi di¢n ttr quet",
+   "unit": "ca",
+   "price": 2287396
+  },
+  {
+   "code": "M202.0002",
+   "type": "Thi€t bi d�m ph6ng x�",
+   "unit": "ca",
+   "price": 120343
+  },
+  {
+   "code": "M202.0003",
+   "type": "TRL Profile Beam",
+   "unit": "ca",
+   "price": 328431
+  },
+  {
+   "code": "M202.0004",
+   "type": "May FWD",
+   "unit": "ca",
+   "price": 1645466
+  },
+  {
+   "code": "M202.0005",
+   "type": "Thiat bi do phan (mg Romdas",
+   "unit": "ca",
+   "price": 82140
+  },
+  {
+   "code": "M202.0006",
+   "type": "B◊ thi€t bi PIT (do bian d�ng nho)",
+   "unit": "ca",
+   "price": 294514
+  },
+  {
+   "code": "M202.0007",
+   "type": "B◊ thiat bi do PDA (do bi€n d�ng Ian)",
+   "unit": "ca",
+   "price": 1096978
+  },
+  {
+   "code": "M202.0008",
+   "type": "139 thi€t bi sieu am",
+   "unit": "ca",
+   "price": 478189
+  },
+  {
+   "code": "M202.0130",
+   "type": "May keo, nen WDW- 100",
+   "unit": "ca",
+   "price": 170500
+  },
+  {
+   "code": "M202.0169",
+   "type": "B(> thi�t bi thi nghi�m di�m h6a m�m (ELE)",
+   "unit": "ca",
+   "price": 234848
+  },
+  {
+   "code": "M202.0179",
+   "type": "MaySHWD",
+   "unit": "ca",
+   "price": 1645466
+  },
+  {
+   "code": "M202.0184",
+   "type": "May do chi�u day lop be tong bao v� va do du<Yllg kinh c6t thep",
+   "unit": "ca",
+   "price": 88621
+  },
+  {
+   "code": "M202.0206",
+   "type": "Thi€t bi whed tracking",
+   "unit": "ca",
+   "price": 1075080
+  }
+ ]
+}
