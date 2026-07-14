@@ -5,6 +5,7 @@ import {
 import type { Response } from 'express';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
+import { Public } from '../common/public.decorator';
 import { DrawingSceneService } from './services/drawing-scene.service';
 import { DrawingUploadService } from './services/drawing-upload.service';
 import { DrawingSearchService } from './services/drawing-search.service';
@@ -18,6 +19,7 @@ import { DrawingAnnotationService } from './services/drawing-annotation.service'
 import { DrawingGraphService } from './services/drawing-graph.service';
 import { DrawingThumbnailService } from './services/drawing-thumbnail.service';
 
+@UseGuards(JwtAuthGuard)
 @Controller('estimates/:estimateId/drawings')
 export class DrawingController {
   constructor(
@@ -104,6 +106,8 @@ export class DrawingController {
     return this.upload.getWithObjects(estimateId, drawingId);
   }
 
+  // Public: file được load qua URL trực tiếp (img/iframe/viewer) — không kèm Bearer token.
+  @Public()
   @Get(':drawingId/file')
   async downloadFile(
     @Param('estimateId') estimateId: string,

@@ -1,6 +1,8 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../common/jwt-auth.guard';
 import { KnowledgeGraphService } from './knowledge-graph.service';
 
+@UseGuards(JwtAuthGuard)
 @Controller('data-hub/knowledge')
 export class KnowledgeController {
   constructor(private readonly svc: KnowledgeGraphService) {}
