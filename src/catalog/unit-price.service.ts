@@ -23,7 +23,10 @@ interface DongiaFile {
 export class UnitPriceService implements OnModuleInit {
   private readonly logger = new Logger(UnitPriceService.name);
 
-  constructor(@InjectModel(UnitPrice.name) private readonly model: Model<UnitPrice>) {}
+  constructor(
+    @InjectModel(UnitPrice.name) private readonly model: Model<UnitPrice>,
+    @InjectModel(MaterialPrice.name) private readonly matPrices: Model<MaterialPrice>,
+  ) {}
 
   async onModuleInit() {
     try {
@@ -32,6 +35,52 @@ export class UnitPriceService implements OnModuleInit {
     } catch (err) {
       this.logger.warn(`unit_prices seed skipped: ${(err as Error).message}`);
     }
+    try {
+      await this.seedResourcePrices();
+    } catch (err) {
+      this.logger.warn(`resource prices seed skipped: ${(err as Error).message}`);
+    }
+  }
+
+  /** Nạp giá Vật liệu/Nhân công/Ca máy (từ JSON tài nguyên) vào material_prices. */
+  private async seedResourcePrices() {
+    const file = path.join(__dirname, 'data', 'gia-taiguyen-hanoi.json');
+    if (!fs.existsSync(file)) return;
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
+      source: { province: string; document: string; priceLevel?: string };
+      materials: Array<{ name: string; unit: string; price: number }>;
+      labor: Array<{ name: string; unit: string; price: number }>;
+      machines: Array<{ name: string; unit: string; price: number }>;
+    };
+    const province = data.source?.province || 'Hà Nội';
+    const sourceId = data.source?.document || 'Đơn giá tỉnh';
+    // Đã seed cho tỉnh này rồi → bỏ qua (tránh nạp lại mỗi lần khởi động).
+    const existing = await this.matPrices.countDocuments({ province, sourceId });
+    if (existing > 0) return;
+    // Q2/2022 (không dùng Date.now để deterministic)
+    const effectiveDate = new Date('2022-06-30T00:00:00Z');
+    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const groups: Array<[Array<{ name: string; unit: string; price: number }>, string]> = [
+      [data.materials ?? [], 'material'],
+      [data.labor ?? [], 'labor'],
+      [data.machines ?? [], 'equipment'],
+    ];
+    const ops = groups.flatMap(([arr, category]) =>
+      arr.filter((x) => x.name && x.price > 0).map((x) => ({
+        insertOne: {
+          document: {
+            materialId: `${category}-${norm(x.name)}`, name: x.name, category,
+            unit: x.unit, price: x.price, province, sourceId, trust: 90,
+            effectiveDate, documentNumber: sourceId, active: true,
+          },
+        },
+      })),
+    );
+    if (ops.length === 0) return;
+    for (let i = 0; i < ops.length; i += 1000) {
+      await this.matPrices.bulkWrite(ops.slice(i, i + 1000) as any, { ordered: false }).catch(() => {});
+    }
+    this.logger.log(`Seeded ${ops.length} giá tài nguyên (VL/NC/Máy) — ${province}, ${sourceId}`);
   }
 
   /** Đọc file JSON (được copy vào dist qua nest-cli assets) và bulk upsert. */
