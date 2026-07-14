@@ -1,0 +1,3632 @@
+{
+ "source": {
+  "title": "Bảng giá Vật liệu / Nhân công / Ca máy — Đơn giá XDCT TP Hà Nội",
+  "document": "QĐ 1266/QĐ-SXD ngày 31/12/2021 (Sở Xây dựng Hà Nội)",
+  "province": "Hà Nội",
+  "priceLevel": "Quý II/2022 (chưa gồm VAT)",
+  "origin": "luatvietnam.vn",
+  "currency": "VND",
+  "note": "NHÃN file gốc ghi \"HCM\" nhưng nội dung là HÀ NỘI (mọi căn cứ là Sở XD Hà Nội, QĐ 1266). Đối chiếu công bố giá quý mới nhất."
+ },
+ "counts": {
+  "material": 501,
+  "labor": 8,
+  "machine": 213
+ },
+ "materials": [
+  {
+   "name": "Bấc thấm",
+   "unit": "m",
+   "price": 3000
+  },
+  {
+   "name": "Backer rod 13mm",
+   "unit": "m",
+   "price": 2200
+  },
+  {
+   "name": "Backer rod 25mm",
+   "unit": "m",
+   "price": 4900
+  },
+  {
+   "name": "Bản chịu tải",
+   "unit": "cái",
+   "price": 45000
+  },
+  {
+   "name": "Bản đệm neo",
+   "unit": "cái",
+   "price": 10000
+  },
+  {
+   "name": "Bản lề thường",
+   "unit": "cái",
+   "price": 9900
+  },
+  {
+   "name": "Bao tải đay 1m x 0,6m",
+   "unit": "cái",
+   "price": 7000
+  },
+  {
+   "name": "Bao tải",
+   "unit": "m2",
+   "price": 2000
+  },
+  {
+   "name": "Bật sắt 3x30x250",
+   "unit": "cái",
+   "price": 3000
+  },
+  {
+   "name": "Bật sắt fi 6",
+   "unit": "cái",
+   "price": 1500
+  },
+  {
+   "name": "Bật sắt fi 10",
+   "unit": "cái",
+   "price": 2000
+  },
+  {
+   "name": "Bật sắt 20x4x250",
+   "unit": "cái",
+   "price": 3000
+  },
+  {
+   "name": "Bầu cỏ Vetiver",
+   "unit": "bầu",
+   "price": 1300
+  },
+  {
+   "name": "Bê tông nhựa C ≤ 12,5",
+   "unit": "tấn",
+   "price": 1152727
+  },
+  {
+   "name": "Bê tông nhựa C19, R19",
+   "unit": "tấn",
+   "price": 1040909
+  },
+  {
+   "name": "Bê tông nhựa độ nhám cao",
+   "unit": "tấn",
+   "price": 1040909
+  },
+  {
+   "name": "Bê tông nhựa R ≥ 25",
+   "unit": "tấn",
+   "price": 1022727
+  },
+  {
+   "name": "Bê tông nhựa rỗng C ≤ 12,5",
+   "unit": "tấn",
+   "price": 1152727
+  },
+  {
+   "name": "Bentonite",
+   "unit": "kg",
+   "price": 1700
+  },
+  {
+   "name": "Bộ choòng nón xoay loại M",
+   "unit": "cái",
+   "price": 350000
+  },
+  {
+   "name": "Bộ phòng mối đường ống kỹ thuật",
+   "unit": "bộ",
+   "price": 150000
+  },
+  {
+   "name": "Bông thủy tinh 50mm",
+   "unit": "m2",
+   "price": 21667
+  },
+  {
+   "name": "Bột bả",
+   "unit": "kg",
+   "price": 6100
+  },
+  {
+   "name": "Bột đá",
+   "unit": "kg",
+   "price": 1800
+  },
+  {
+   "name": "Bột màu",
+   "unit": "kg",
+   "price": 10000
+  },
+  {
+   "name": "Bột thạch anh",
+   "unit": "kg",
+   "price": 3727
+  },
+  {
+   "name": "Bu lông Fi 22-27mm",
+   "unit": "cái",
+   "price": 5500
+  },
+  {
+   "name": "Bu lông các loại",
+   "unit": "cái",
+   "price": 5000
+  },
+  {
+   "name": "Bu lông cường độ cao M16-M50",
+   "unit": "kg",
+   "price": 104400
+  },
+  {
+   "name": "Bu lông M10",
+   "unit": "cái",
+   "price": 580
+  },
+  {
+   "name": "Bu lông M12x200",
+   "unit": "cái",
+   "price": 7049
+  },
+  {
+   "name": "Bu lông M12x250",
+   "unit": "cái",
+   "price": 8500
+  },
+  {
+   "name": "Bu lông M16x150",
+   "unit": "cái",
+   "price": 7190
+  },
+  {
+   "name": "Bu lông M16x250",
+   "unit": "cái",
+   "price": 20385
+  },
+  {
+   "name": "Bu lông M16x320",
+   "unit": "cái",
+   "price": 38676
+  },
+  {
+   "name": "Bu lông M16x330",
+   "unit": "cái",
+   "price": 38676
+  },
+  {
+   "name": "Bu lông M16",
+   "unit": "cái",
+   "price": 2380
+  },
+  {
+   "name": "Bu lông M18x20",
+   "unit": "cái",
+   "price": 5885
+  },
+  {
+   "name": "Bu lông M20x48",
+   "unit": "cái",
+   "price": 4880
+  },
+  {
+   "name": "Bu lông M20x200",
+   "unit": "cái",
+   "price": 14117
+  },
+  {
+   "name": "Bu lông M20x500",
+   "unit": "cái",
+   "price": 23528
+  },
+  {
+   "name": "Bu lông M20x1200",
+   "unit": "cái",
+   "price": 56468
+  },
+  {
+   "name": "Bu lông M24x85",
+   "unit": "bộ",
+   "price": 22077
+  },
+  {
+   "name": "Bu lông M24x100",
+   "unit": "cái",
+   "price": 23788
+  },
+  {
+   "name": "Bu lông thép cường độ cao Fi 36mm, L=5-8m",
+   "unit": "kg",
+   "price": 104400
+  },
+  {
+   "name": "Bu lông",
+   "unit": "cái",
+   "price": 5000
+  },
+  {
+   "name": "Cao su đệm khe giãn",
+   "unit": "m",
+   "price": 5000
+  },
+  {
+   "name": "Cấp phối đá dăm 0,075-50mm",
+   "unit": "m3",
+   "price": 244000
+  },
+  {
+   "name": "Cáp thép",
+   "unit": "kg",
+   "price": 11818
+  },
+  {
+   "name": "Carboncor Asphalt (loại CA 9,5)",
+   "unit": "tấn",
+   "price": 3290000
+  },
+  {
+   "name": "Cát mịn ML=0,7÷1,4",
+   "unit": "m3",
+   "price": 110000
+  },
+  {
+   "name": "Cát mịn ML=1,5÷2,0",
+   "unit": "m3",
+   "price": 110000
+  },
+  {
+   "name": "Cát mịn",
+   "unit": "m3",
+   "price": 110000
+  },
+  {
+   "name": "Cát nền",
+   "unit": "m3",
+   "price": 93000
+  },
+  {
+   "name": "Cát sạn",
+   "unit": "m3",
+   "price": 110000
+  },
+  {
+   "name": "Cát thạch anh",
+   "unit": "kg",
+   "price": 900
+  },
+  {
+   "name": "Cát vàng",
+   "unit": "m3",
+   "price": 370000
+  },
+  {
+   "name": "Cát xây",
+   "unit": "m3",
+   "price": 110000
+  },
+  {
+   "name": "Cát",
+   "unit": "m3",
+   "price": 93000
+  },
+  {
+   "name": "Cây chống thép hình",
+   "unit": "kg",
+   "price": 18000
+  },
+  {
+   "name": "Cây chống thép ống",
+   "unit": "kg",
+   "price": 18000
+  },
+  {
+   "name": "Cây chống",
+   "unit": "cây",
+   "price": 25000
+  },
+  {
+   "name": "Chất tạo màng",
+   "unit": "lít",
+   "price": 15000
+  },
+  {
+   "name": "Chất trám khe",
+   "unit": "lít",
+   "price": 35000
+  },
+  {
+   "name": "Cọc bê tông 15x15cm",
+   "unit": "m",
+   "price": 105000
+  },
+  {
+   "name": "Cọc bê tông 20x20cm",
+   "unit": "m",
+   "price": 135000
+  },
+  {
+   "name": "Cọc bê tông 25x25cm",
+   "unit": "m",
+   "price": 150000
+  },
+  {
+   "name": "Cọc bê tông 30x30cm",
+   "unit": "m",
+   "price": 260000
+  },
+  {
+   "name": "Cọc bê tông 35x35cm",
+   "unit": "m",
+   "price": 320000
+  },
+  {
+   "name": "Cọc bê tông 40x40cm",
+   "unit": "m",
+   "price": 350000
+  },
+  {
+   "name": "Cọc bê tông 45x45cm",
+   "unit": "m",
+   "price": 400000
+  },
+  {
+   "name": "Cọc bê tông 50x50cm",
+   "unit": "m",
+   "price": 450000
+  },
+  {
+   "name": "Cọc BTCT dự ứng lực 35x35cm",
+   "unit": "m",
+   "price": 495000
+  },
+  {
+   "name": "Cọc BTCT dự ứng lực 40x40cm",
+   "unit": "m",
+   "price": 620000
+  },
+  {
+   "name": "Cọc BTCT dự ứng lực D400mm",
+   "unit": "m",
+   "price": 295000
+  },
+  {
+   "name": "Cọc BTCT dự ứng lực D600mm",
+   "unit": "m",
+   "price": 530000
+  },
+  {
+   "name": "Cọc cừ máng BT dự ứng lực, chiều cao 30-50cm",
+   "unit": "m",
+   "price": 1726515
+  },
+  {
+   "name": "Cọc cừ máng BT dự ứng lực, chiều cao 60-84cm",
+   "unit": "m",
+   "price": 2794507
+  },
+  {
+   "name": "Cọc cừ máng BT dự ứng lực, chiều cao 94-120cm",
+   "unit": "m",
+   "price": 3896566
+  },
+  {
+   "name": "Cọc gỗ L >2,5m",
+   "unit": "m",
+   "price": 9000
+  },
+  {
+   "name": "Cọc gỗ L ≤2,5m",
+   "unit": "m",
+   "price": 9000
+  },
+  {
+   "name": "Cọc neo thép D10mm",
+   "unit": "kg",
+   "price": 4000
+  },
+  {
+   "name": "Cốc nhựa",
+   "unit": "cái",
+   "price": 2000
+  },
+  {
+   "name": "Cọc ống BTCT ĐK ≤550mm",
+   "unit": "m",
+   "price": 260000
+  },
+  {
+   "name": "Cọc ống BTCT ĐK ≤800mm",
+   "unit": "m",
+   "price": 650000
+  },
+  {
+   "name": "Cọc ống BTCT ĐK ≤1000m",
+   "unit": "m",
+   "price": 950000
+  },
+  {
+   "name": "Cọc ống thép D≤300mm",
+   "unit": "m",
+   "price": 400000
+  },
+  {
+   "name": "Cọc ống thép D≤500mm",
+   "unit": "m",
+   "price": 600000
+  },
+  {
+   "name": "Cọc thép hình U, I chiều dài cọc L ≤10m",
+   "unit": "m",
+   "price": 163518
+  },
+  {
+   "name": "Cọc thép hình U, I chiều dài cọc L >10m",
+   "unit": "m",
+   "price": 241822
+  },
+  {
+   "name": "Cọc tre L ≤2,5m",
+   "unit": "m",
+   "price": 3500
+  },
+  {
+   "name": "Cọc tre L >2,5m",
+   "unit": "m",
+   "price": 3500
+  },
+  {
+   "name": "Cọc ván thép ≤12m",
+   "unit": "m",
+   "price": 1279864
+  },
+  {
+   "name": "Cọc ván thép >12m",
+   "unit": "m",
+   "price": 1279864
+  },
+  {
+   "name": "Côn cao su",
+   "unit": "cái",
+   "price": 5000
+  },
+  {
+   "name": "Côn nhựa",
+   "unit": "cái",
+   "price": 4364
+  },
+  {
+   "name": "Cột chống thép ống",
+   "unit": "kg",
+   "price": 18000
+  },
+  {
+   "name": "Củi đun",
+   "unit": "kg",
+   "price": 1200
+  },
+  {
+   "name": "Cút thép đầu cọc D34/15",
+   "unit": "cái",
+   "price": 20000
+  },
+  {
+   "name": "Đá 0,15-0,5",
+   "unit": "m3",
+   "price": 218182
+  },
+  {
+   "name": "Đá 0,5-1,6",
+   "unit": "m3",
+   "price": 218182
+  },
+  {
+   "name": "Đá 0,5x1",
+   "unit": "m3",
+   "price": 218182
+  },
+  {
+   "name": "Đá 0,5x2",
+   "unit": "m3",
+   "price": 218182
+  },
+  {
+   "name": "Đá 1x2",
+   "unit": "m3",
+   "price": 294000
+  },
+  {
+   "name": "Đá 2x4",
+   "unit": "m3",
+   "price": 288000
+  },
+  {
+   "name": "Đá 2,36÷4,75 (mm)",
+   "unit": "m3",
+   "price": 288000
+  },
+  {
+   "name": "Đá 4x6",
+   "unit": "m3",
+   "price": 259000
+  },
+  {
+   "name": "Đá 4,75÷9,5 (mm)",
+   "unit": "m3",
+   "price": 259000
+  },
+  {
+   "name": "Đá 5-15mm",
+   "unit": "m3",
+   "price": 259000
+  },
+  {
+   "name": "Đá 6x8",
+   "unit": "m3",
+   "price": 259000
+  },
+  {
+   "name": "Đá 9,5÷12,5 (mm)",
+   "unit": "m3",
+   "price": 259000
+  },
+  {
+   "name": "Đá 12,5÷19 (mm)",
+   "unit": "m3",
+   "price": 259000
+  },
+  {
+   "name": "Đá cẩm thạch ≤0,16m2",
+   "unit": "m2",
+   "price": 1125000
+  },
+  {
+   "name": "Đá cẩm thạch ≤0,25m2",
+   "unit": "m2",
+   "price": 1125000
+  },
+  {
+   "name": "Đá cẩm thạch >0,25m2",
+   "unit": "m2",
+   "price": 1125000
+  },
+  {
+   "name": "Đá cấp phối dmax ≤ 4",
+   "unit": "m3",
+   "price": 244000
+  },
+  {
+   "name": "Đá cấp phối dmax ≤ 6",
+   "unit": "m3",
+   "price": 244000
+  },
+  {
+   "name": "Đá cấp phối dmax > 6",
+   "unit": "m3",
+   "price": 244000
+  },
+  {
+   "name": "Đá cắt",
+   "unit": "viên",
+   "price": 13000
+  },
+  {
+   "name": "Đá chẻ 10x10x20cm",
+   "unit": "viên",
+   "price": 1500
+  },
+  {
+   "name": "Đá chẻ 15x20x25cm",
+   "unit": "viên",
+   "price": 5000
+  },
+  {
+   "name": "Đá chẻ 20x20x25cm",
+   "unit": "viên",
+   "price": 7200
+  },
+  {
+   "name": "Đá dăm chèn",
+   "unit": "m3",
+   "price": 231000
+  },
+  {
+   "name": "Đá dăm đen",
+   "unit": "tấn",
+   "price": 231000
+  },
+  {
+   "name": "Đá dăm",
+   "unit": "m3",
+   "price": 231000
+  },
+  {
+   "name": "Đá granít tự nhiên",
+   "unit": "m2",
+   "price": 290000
+  },
+  {
+   "name": "Đá hoa cương ≤0,16m2",
+   "unit": "m2",
+   "price": 290000
+  },
+  {
+   "name": "Đá hoa cương ≤0,25m2",
+   "unit": "m2",
+   "price": 350000
+  },
+  {
+   "name": "Đá hoa cương >0,25m2",
+   "unit": "m2",
+   "price": 480000
+  },
+  {
+   "name": "Đá hộc",
+   "unit": "m3",
+   "price": 220000
+  },
+  {
+   "name": "Đá mài",
+   "unit": "viên",
+   "price": 11500
+  },
+  {
+   "name": "Đá trắng nhỏ",
+   "unit": "kg",
+   "price": 350
+  },
+  {
+   "name": "Đá trắng",
+   "unit": "kg",
+   "price": 350
+  },
+  {
+   "name": "Đá xanh miếng 10x20x30",
+   "unit": "m3",
+   "price": 125000
+  },
+  {
+   "name": "Đay",
+   "unit": "kg",
+   "price": 8000
+  },
+  {
+   "name": "Đất sét",
+   "unit": "m3",
+   "price": 45000
+  },
+  {
+   "name": "Dầu bảo ôn",
+   "unit": "lít",
+   "price": 52000
+  },
+  {
+   "name": "Dầu bôi",
+   "unit": "kg",
+   "price": 10000
+  },
+  {
+   "name": "Dầu CS46",
+   "unit": "kg",
+   "price": 25000
+  },
+  {
+   "name": "Đầu dẫn hướng",
+   "unit": "cái",
+   "price": 50000
+  },
+  {
+   "name": "Dầu diezel",
+   "unit": "lít",
+   "price": 22591
+  },
+  {
+   "name": "Dầu hỏa",
+   "unit": "kg",
+   "price": 22945
+  },
+  {
+   "name": "Dầu mazút",
+   "unit": "lít",
+   "price": 15036
+  },
+  {
+   "name": "Đầu neo kéo",
+   "unit": "cái",
+   "price": 55000
+  },
+  {
+   "name": "Đầu nối cần khoan",
+   "unit": "cái",
+   "price": 48400
+  },
+  {
+   "name": "Đầu nối cần",
+   "unit": "bộ",
+   "price": 48400
+  },
+  {
+   "name": "Đầu nối nhanh",
+   "unit": "cái",
+   "price": 10000
+  },
+  {
+   "name": "Đầu nối nhựa chữ T63/63mm",
+   "unit": "cái",
+   "price": 20000
+  },
+  {
+   "name": "Đầu nối nhựa chữ thập 63/50mm",
+   "unit": "cái",
+   "price": 20000
+  },
+  {
+   "name": "Dây thép Fi 2,5mm",
+   "unit": "kg",
+   "price": 21000
+  },
+  {
+   "name": "Dây thép Fi 3mm",
+   "unit": "kg",
+   "price": 21000
+  },
+  {
+   "name": "Dây thép",
+   "unit": "kg",
+   "price": 21000
+  },
+  {
+   "name": "Dây thừng",
+   "unit": "m",
+   "price": 1000
+  },
+  {
+   "name": "Đinh 6cm",
+   "unit": "kg",
+   "price": 23455
+  },
+  {
+   "name": "Đinh 10mm",
+   "unit": "kg",
+   "price": 23455
+  },
+  {
+   "name": "Đinh các loại",
+   "unit": "kg",
+   "price": 23455
+  },
+  {
+   "name": "Đinh crămpông",
+   "unit": "cái",
+   "price": 3000
+  },
+  {
+   "name": "Đinh đỉa Fi 6x120",
+   "unit": "cái",
+   "price": 1500
+  },
+  {
+   "name": "Đinh đỉa",
+   "unit": "cái",
+   "price": 3000
+  },
+  {
+   "name": "Đinh mũ Fi 4x100",
+   "unit": "kg",
+   "price": 15000
+  },
+  {
+   "name": "Đinh mũ",
+   "unit": "kg",
+   "price": 15000
+  },
+  {
+   "name": "Đinh tán Fi 20",
+   "unit": "cái",
+   "price": 1200
+  },
+  {
+   "name": "Đinh tán Fi 22",
+   "unit": "cái",
+   "price": 1500
+  },
+  {
+   "name": "Đinh, đinh vít",
+   "unit": "cái",
+   "price": 30
+  },
+  {
+   "name": "Đinh",
+   "unit": "kg",
+   "price": 23455
+  },
+  {
+   "name": "Đồng hồ áp lực Fi 60",
+   "unit": "cái",
+   "price": 200000
+  },
+  {
+   "name": "Đồng tấm d=2mm",
+   "unit": "kg",
+   "price": 164120
+  },
+  {
+   "name": "Dung dịch bảo vệ bề mặt bê tông",
+   "unit": "lít",
+   "price": 42000
+  },
+  {
+   "name": "Dung dịch bảo vệ bề mặt đá tự nhiên",
+   "unit": "lít",
+   "price": 71480
+  },
+  {
+   "name": "Dung dịch chống thấm",
+   "unit": "kg",
+   "price": 50000
+  },
+  {
+   "name": "Dung dịch sơn cách nhiệt",
+   "unit": "lít",
+   "price": 117373
+  },
+  {
+   "name": "Đuôi choòng Fi 38",
+   "unit": "cái",
+   "price": 50000
+  },
+  {
+   "name": "Đuôi choòng",
+   "unit": "cái",
+   "price": 50000
+  },
+  {
+   "name": "Fibro xi măng",
+   "unit": "m2",
+   "price": 14000
+  },
+  {
+   "name": "Foocmica",
+   "unit": "m2",
+   "price": 65000
+  },
+  {
+   "name": "Gạch AAC 7,5x10x60cm",
+   "unit": "viên",
+   "price": 4050
+  },
+  {
+   "name": "Gạch AAC 7,5x20x60cm",
+   "unit": "viên",
+   "price": 12900
+  },
+  {
+   "name": "Gạch AAC 7,5x30x60cm",
+   "unit": "viên",
+   "price": 18900
+  },
+  {
+   "name": "Gạch AAC 10x10x60cm",
+   "unit": "viên",
+   "price": 7620
+  },
+  {
+   "name": "Gạch AAC 10x20x60cm",
+   "unit": "viên",
+   "price": 17200
+  },
+  {
+   "name": "Gạch AAC 10x30x60cm",
+   "unit": "viên",
+   "price": 25200
+  },
+  {
+   "name": "Gạch AAC 12,5x10x60cm",
+   "unit": "viên",
+   "price": 9525
+  },
+  {
+   "name": "Gạch AAC 12,5x20x60cm",
+   "unit": "viên",
+   "price": 19050
+  },
+  {
+   "name": "Gạch AAC 12,5x30x60cm",
+   "unit": "viên",
+   "price": 28575
+  },
+  {
+   "name": "Gạch AAC 15x10x60cm",
+   "unit": "viên",
+   "price": 11430
+  },
+  {
+   "name": "Gạch AAC 15x20x60cm",
+   "unit": "viên",
+   "price": 25800
+  },
+  {
+   "name": "Gạch AAC 15x30x60cm",
+   "unit": "viên",
+   "price": 34290
+  },
+  {
+   "name": "Gạch AAC 17,5x10x60cm",
+   "unit": "viên",
+   "price": 12954
+  },
+  {
+   "name": "Gạch AAC 17,5x20x60cm",
+   "unit": "viên",
+   "price": 25908
+  },
+  {
+   "name": "Gạch AAC 17,5x30x60cm",
+   "unit": "viên",
+   "price": 38862
+  },
+  {
+   "name": "Gạch AAC 20x20x60cm",
+   "unit": "viên",
+   "price": 30480
+  },
+  {
+   "name": "Gạch AAC 20x30x60cm",
+   "unit": "viên",
+   "price": 45720
+  },
+  {
+   "name": "Gạch AAC 25x10x60cm",
+   "unit": "viên",
+   "price": 19050
+  },
+  {
+   "name": "Gạch AAC 25x20x60cm",
+   "unit": "viên",
+   "price": 38100
+  },
+  {
+   "name": "Gạch AAC 25x30x60cm",
+   "unit": "viên",
+   "price": 57150
+  },
+  {
+   "name": "Gạch bê tông 10x20x40cm",
+   "unit": "viên",
+   "price": 10160
+  },
+  {
+   "name": "Gạch bê tông 10,5x6x22cm",
+   "unit": "viên",
+   "price": 1250
+  },
+  {
+   "name": "Gạch bê tông 15x20x30cm",
+   "unit": "viên",
+   "price": 11430
+  },
+  {
+   "name": "Gạch bê tông 15x20x40cm",
+   "unit": "viên",
+   "price": 15240
+  },
+  {
+   "name": "Gạch bê tông 20x20x40cm",
+   "unit": "viên",
+   "price": 20320
+  },
+  {
+   "name": "Gạch bê tông bọt 15x10x30cm",
+   "unit": "viên",
+   "price": 6356
+  },
+  {
+   "name": "Gạch bê tông bọt 15x20x30cm",
+   "unit": "viên",
+   "price": 12713
+  },
+  {
+   "name": "Gạch chỉ 6,5x10,5x22cm",
+   "unit": "viên",
+   "price": 1480
+  },
+  {
+   "name": "Gạch chống nóng 22x10,5x15 (4 lỗ)",
+   "unit": "viên",
+   "price": 2200
+  },
+  {
+   "name": "Gạch chống nóng 22x15x10,5 (6 lỗ)",
+   "unit": "viên",
+   "price": 3500
+  },
+  {
+   "name": "Gạch chống nóng 22x22x10,5 (10 lỗ)",
+   "unit": "viên",
+   "price": 4000
+  },
+  {
+   "name": "Gạch đất nung ≤ 0,09m2",
+   "unit": "m2",
+   "price": 44000
+  },
+  {
+   "name": "Gạch đất nung ≤ 0,122m2",
+   "unit": "m2",
+   "price": 44000
+  },
+  {
+   "name": "Gạch đất nung ≤ 0,16m2",
+   "unit": "m2",
+   "price": 44000
+  },
+  {
+   "name": "Gạch granít nhân tạo",
+   "unit": "m2",
+   "price": 145455
+  },
+  {
+   "name": "Gạch không nung 6,5 x 10,5 x 22cm",
+   "unit": "viên",
+   "price": 1250
+  },
+  {
+   "name": "Gạch lá dừa",
+   "unit": "m2",
+   "price": 136000
+  },
+  {
+   "name": "Gạch lát ≤ 0,023m2",
+   "unit": "m2",
+   "price": 106700
+  },
+  {
+   "name": "Gạch lát ≤ 0,04m2",
+   "unit": "m2",
+   "price": 106700
+  },
+  {
+   "name": "Gạch lát ≤ 0,06m2",
+   "unit": "m2",
+   "price": 106700
+  },
+  {
+   "name": "Gạch lát ≤ 0,09m2",
+   "unit": "m2",
+   "price": 106700
+  },
+  {
+   "name": "Gạch lát ≤ 0,16m2",
+   "unit": "m2",
+   "price": 116047
+  },
+  {
+   "name": "Gạch lát ≤ 0,25m2",
+   "unit": "m2",
+   "price": 116047
+  },
+  {
+   "name": "Gạch lát ≤ 0,27m2",
+   "unit": "m2",
+   "price": 116047
+  },
+  {
+   "name": "Gạch lát ≤ 0,36m2",
+   "unit": "m2",
+   "price": 170720
+  },
+  {
+   "name": "Gạch lát ≤ 0,54m2",
+   "unit": "m2",
+   "price": 170720
+  },
+  {
+   "name": "Gạch ốp chân tường ≤ 0,023m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp chân tường ≤ 0,036m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp chân tường ≤ 0,048m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp chân tường ≤ 0,06m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp chân tường ≤ 0,075m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp chân tường ≤ 0,08m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp tường ≤ 0,05m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp tường ≤ 0,06m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp tường ≤ 0,09m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp tường ≤ 0,16m2",
+   "unit": "m2",
+   "price": 119700
+  },
+  {
+   "name": "Gạch ốp tường ≤ 0,25m2",
+   "unit": "m2",
+   "price": 156413
+  },
+  {
+   "name": "Gạch ốp tường ≤ 0,36m2",
+   "unit": "m2",
+   "price": 189000
+  },
+  {
+   "name": "Gạch ốp tường ≤ 0,4m2",
+   "unit": "m2",
+   "price": 189000
+  },
+  {
+   "name": "Gạch ốp tường ≤ 0,54m2",
+   "unit": "m2",
+   "price": 189000
+  },
+  {
+   "name": "Gạch rỗng 6 lỗ 10x15x22cm",
+   "unit": "viên",
+   "price": 3900
+  },
+  {
+   "name": "Gạch thẻ 5x10x20cm",
+   "unit": "viên",
+   "price": 110
+  },
+  {
+   "name": "Gạch thẻ",
+   "unit": "viên",
+   "price": 110
+  },
+  {
+   "name": "Gạch thông gió 20x20cm",
+   "unit": "viên",
+   "price": 16000
+  },
+  {
+   "name": "Gạch thông gió 30x30cm",
+   "unit": "viên",
+   "price": 18500
+  },
+  {
+   "name": "Gạch vỉ",
+   "unit": "m2",
+   "price": 45000
+  },
+  {
+   "name": "Gạch vỡ",
+   "unit": "m3",
+   "price": 60000
+  },
+  {
+   "name": "Gạch xi măng tự chèn dày 3,5cm",
+   "unit": "m2",
+   "price": 95000
+  },
+  {
+   "name": "Gạch xi măng tự chèn dày 5,5cm",
+   "unit": "m2",
+   "price": 95000
+  },
+  {
+   "name": "Gạch xi măng",
+   "unit": "m2",
+   "price": 95000
+  },
+  {
+   "name": "Giáo công cụ",
+   "unit": "Bộ",
+   "price": 300000
+  },
+  {
+   "name": "Giáo thép",
+   "unit": "kg",
+   "price": 15382
+  },
+  {
+   "name": "Giấy dầu",
+   "unit": "m2",
+   "price": 4500
+  },
+  {
+   "name": "Giấy ráp",
+   "unit": "m2",
+   "price": 8100
+  },
+  {
+   "name": "Giấy trang trí",
+   "unit": "m2",
+   "price": 26981
+  },
+  {
+   "name": "Gioăng cao su",
+   "unit": "m",
+   "price": 2700
+  },
+  {
+   "name": "Gioăng đồng",
+   "unit": "m",
+   "price": 90000
+  },
+  {
+   "name": "Gioăng kính",
+   "unit": "m",
+   "price": 2000
+  },
+  {
+   "name": "Gioăng tam pôn",
+   "unit": "cái",
+   "price": 2500
+  },
+  {
+   "name": "Gỗ chèn",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ chống",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ đà nẹp",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ dán, ván ép",
+   "unit": "m2",
+   "price": 70240
+  },
+  {
+   "name": "Gỗ hộp",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ kê chèn",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ kê",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ làm khe co dãn",
+   "unit": "m3",
+   "price": 1500000
+  },
+  {
+   "name": "Gỗ nẹp, chống",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ nẹp, giằng chống",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ nhóm 4",
+   "unit": "m3",
+   "price": 1800000
+  },
+  {
+   "name": "Gỗ sàn thao tác, kê đệm",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ ván (cả nẹp)",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ ván cầu công tác",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ ván",
+   "unit": "m2",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ ván",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Gỗ xẻ",
+   "unit": "m3",
+   "price": 1800000
+  },
+  {
+   "name": "Gối cầu bằng cao su",
+   "unit": "bộ",
+   "price": 1172700
+  },
+  {
+   "name": "Gối cầu bằng thép",
+   "unit": "bộ",
+   "price": 3000000
+  },
+  {
+   "name": "Gỗ",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Hắc ín",
+   "unit": "kg",
+   "price": 8200
+  },
+  {
+   "name": "Hạt thủy tinh",
+   "unit": "kg",
+   "price": 2000
+  },
+  {
+   "name": "Hỗn hợp chất kết kính polime PT2A2",
+   "unit": "kg",
+   "price": 20000
+  },
+  {
+   "name": "Kẽm buộc 1mm",
+   "unit": "kg",
+   "price": 14000
+  },
+  {
+   "name": "Keo Bituminous",
+   "unit": "kg",
+   "price": 40000
+  },
+  {
+   "name": "Keo chống mối Termiparge",
+   "unit": "kg",
+   "price": 50000
+  },
+  {
+   "name": "Keo dán đá granít",
+   "unit": "kg",
+   "price": 7740
+  },
+  {
+   "name": "Keo dán Foocmica",
+   "unit": "kg",
+   "price": 30000
+  },
+  {
+   "name": "Keo dán gạch vỉ",
+   "unit": "kg",
+   "price": 6000
+  },
+  {
+   "name": "Keo dán giấy trang trí",
+   "unit": "kg",
+   "price": 35000
+  },
+  {
+   "name": "Keo dán",
+   "unit": "kg",
+   "price": 30000
+  },
+  {
+   "name": "Keo Megapoxy",
+   "unit": "kg",
+   "price": 75000
+  },
+  {
+   "name": "Khí gas",
+   "unit": "kg",
+   "price": 37803
+  },
+  {
+   "name": "Khớp nối nhanh",
+   "unit": "cái",
+   "price": 26000
+  },
+  {
+   "name": "Khung xương nhôm",
+   "unit": "kg",
+   "price": 20000
+  },
+  {
+   "name": "Litô 3x3",
+   "unit": "m3",
+   "price": 2100000
+  },
+  {
+   "name": "Litô",
+   "unit": "m3",
+   "price": 2100000
+  },
+  {
+   "name": "Lưỡi cắt D350mm",
+   "unit": "cái",
+   "price": 1263636
+  },
+  {
+   "name": "Lưỡi cắt bê tông loại 356mm",
+   "unit": "cái",
+   "price": 1263636
+  },
+  {
+   "name": "Lưỡi cắt",
+   "unit": "cái",
+   "price": 10000
+  },
+  {
+   "name": "Lưới thép Fi 1 a20",
+   "unit": "m2",
+   "price": 20000
+  },
+  {
+   "name": "Lưới thép Fi 1mm (2 lớp)",
+   "unit": "m2",
+   "price": 20000
+  },
+  {
+   "name": "Lưới thép Fi 4mm",
+   "unit": "m2",
+   "price": 20000
+  },
+  {
+   "name": "Lưới thép B40",
+   "unit": "m2",
+   "price": 25527
+  },
+  {
+   "name": "Lưới thép không rỉ Termimesh (TMA725)",
+   "unit": "m2",
+   "price": 27270
+  },
+  {
+   "name": "Lưới thép V-3D tăng cường",
+   "unit": "m",
+   "price": 17850
+  },
+  {
+   "name": "Lưới thủy tinh",
+   "unit": "m2",
+   "price": 7300
+  },
+  {
+   "name": "Ma tít chèn khe",
+   "unit": "kg",
+   "price": 6000
+  },
+  {
+   "name": "Màng kín khí lớp dưới",
+   "unit": "m2",
+   "price": 11818
+  },
+  {
+   "name": "Màng kín khí lớp trên",
+   "unit": "m2",
+   "price": 11818
+  },
+  {
+   "name": "Mỡ bôi trơn",
+   "unit": "kg",
+   "price": 13889
+  },
+  {
+   "name": "Mỡ bò",
+   "unit": "kg",
+   "price": 13889
+  },
+  {
+   "name": "Mỡ các loại",
+   "unit": "kg",
+   "price": 13889
+  },
+  {
+   "name": "Mỡ trung tính",
+   "unit": "kg",
+   "price": 13889
+  },
+  {
+   "name": "Móc inox",
+   "unit": "cái",
+   "price": 4500
+  },
+  {
+   "name": "Móc sắt đệm",
+   "unit": "cái",
+   "price": 2000
+  },
+  {
+   "name": "Móc sắt",
+   "unit": "cái",
+   "price": 2000
+  },
+  {
+   "name": "Mùn cưa",
+   "unit": "kg",
+   "price": 300
+  },
+  {
+   "name": "Nêm kích",
+   "unit": "bộ",
+   "price": 70000
+  },
+  {
+   "name": "Nêm neo cáp",
+   "unit": "bộ",
+   "price": 70000
+  },
+  {
+   "name": "Neo OVM 15-4",
+   "unit": "bộ",
+   "price": 530000
+  },
+  {
+   "name": "Neo OVM 15-6",
+   "unit": "bộ",
+   "price": 530000
+  },
+  {
+   "name": "Neo OVM 15-8",
+   "unit": "bộ",
+   "price": 530000
+  },
+  {
+   "name": "Neo OVM 158",
+   "unit": "bộ",
+   "price": 530000
+  },
+  {
+   "name": "Nẹp gỗ 10x20",
+   "unit": "m",
+   "price": 7000
+  },
+  {
+   "name": "Ngói 13 viên/m2",
+   "unit": "viên",
+   "price": 13636
+  },
+  {
+   "name": "Ngói 22 viên/m2",
+   "unit": "viên",
+   "price": 8636
+  },
+  {
+   "name": "Ngói âm dương 80 viên/m2",
+   "unit": "viên",
+   "price": 1500
+  },
+  {
+   "name": "Ngói bò",
+   "unit": "viên",
+   "price": 13636
+  },
+  {
+   "name": "Ngói mũi hài 75 viên/m2",
+   "unit": "viên",
+   "price": 2727
+  },
+  {
+   "name": "Nhũ tương nhựa đường",
+   "unit": "kg",
+   "price": 14500
+  },
+  {
+   "name": "Nhũ tương Novabond",
+   "unit": "lít",
+   "price": 10727
+  },
+  {
+   "name": "Nhũ tương Polime",
+   "unit": "lít",
+   "price": 10727
+  },
+  {
+   "name": "Nhựa bitum bọt",
+   "unit": "kg",
+   "price": 14500
+  },
+  {
+   "name": "Nhựa bitum số 4",
+   "unit": "kg",
+   "price": 14500
+  },
+  {
+   "name": "Nhựa bitum",
+   "unit": "kg",
+   "price": 14500
+  },
+  {
+   "name": "Nhựa đường",
+   "unit": "kg",
+   "price": 14500
+  },
+  {
+   "name": "Nhựa nhũ tương gốc axít 60%",
+   "unit": "kg",
+   "price": 14500
+  },
+  {
+   "name": "Nước",
+   "unit": "lít",
+   "price": 10
+  },
+  {
+   "name": "Nước",
+   "unit": "m3",
+   "price": 9955
+  },
+  {
+   "name": "Ống cao su cao áp Fi 34",
+   "unit": "m",
+   "price": 37273
+  },
+  {
+   "name": "Ống cao su cao áp Fi 60",
+   "unit": "m",
+   "price": 55000
+  },
+  {
+   "name": "Ống lọc nhựa D50mm",
+   "unit": "m",
+   "price": 15000
+  },
+  {
+   "name": "Ống nhựa khe co giãn Fi 42",
+   "unit": "m",
+   "price": 12818
+  },
+  {
+   "name": "Ống nhựa",
+   "unit": "m",
+   "price": 7300
+  },
+  {
+   "name": "Ống nối đường kính ≤80mm",
+   "unit": "m",
+   "price": 20000
+  },
+  {
+   "name": "Ống nối đường kính ≤100mm",
+   "unit": "m",
+   "price": 25000
+  },
+  {
+   "name": "Ống nối đường kính ≤150mm",
+   "unit": "m",
+   "price": 36000
+  },
+  {
+   "name": "Ống nối nhanh",
+   "unit": "cái",
+   "price": 6000
+  },
+  {
+   "name": "Ống thép Fi 80mm",
+   "unit": "m",
+   "price": 89000
+  },
+  {
+   "name": "Ống thép luồn cáp đường kính ≤80mm",
+   "unit": "m",
+   "price": 89000
+  },
+  {
+   "name": "Ống thép luồn cáp đường kính ≤100mm",
+   "unit": "m",
+   "price": 168000
+  },
+  {
+   "name": "Ống thép luồn cáp đường kính ≤150mm",
+   "unit": "m",
+   "price": 269000
+  },
+  {
+   "name": "Ống thoát nước nhựa D63mm",
+   "unit": "m",
+   "price": 22665
+  },
+  {
+   "name": "Ống vách Fi 168mm",
+   "unit": "m",
+   "price": 149000
+  },
+  {
+   "name": "Ống xói Fi 50mm",
+   "unit": "m",
+   "price": 44000
+  },
+  {
+   "name": "Ống xói Fi 150mm",
+   "unit": "m",
+   "price": 133000
+  },
+  {
+   "name": "Ống xói Fi 250mm",
+   "unit": "m",
+   "price": 222000
+  },
+  {
+   "name": "Oxy",
+   "unit": "chai",
+   "price": 30000
+  },
+  {
+   "name": "Phân bón lá",
+   "unit": "lít",
+   "price": 4000
+  },
+  {
+   "name": "Phân sinh hóa hữu cơ",
+   "unit": "kg",
+   "price": 4000
+  },
+  {
+   "name": "Phèn chua",
+   "unit": "kg",
+   "price": 4000
+  },
+  {
+   "name": "Phễu nhựa D500mm",
+   "unit": "cái",
+   "price": 25000
+  },
+  {
+   "name": "Phụ gia CMC",
+   "unit": "kg",
+   "price": 29000
+  },
+  {
+   "name": "Phụ gia dẻo hoá bê tông",
+   "unit": "kg",
+   "price": 19152
+  },
+  {
+   "name": "Phụ gia kháng trương nở",
+   "unit": "lít",
+   "price": 11750
+  },
+  {
+   "name": "Phụ gia Poly",
+   "unit": "kg",
+   "price": 19152
+  },
+  {
+   "name": "Phụ gia siêu dẻo bê tông",
+   "unit": "kg",
+   "price": 19152
+  },
+  {
+   "name": "Phụ gia Soda",
+   "unit": "kg",
+   "price": 10000
+  },
+  {
+   "name": "Polymer",
+   "unit": "kg",
+   "price": 23000
+  },
+  {
+   "name": "Quả đập khí nén Fi 76mm",
+   "unit": "cái",
+   "price": 2318182
+  },
+  {
+   "name": "Quả đập khí nén Fi 105mm",
+   "unit": "cái",
+   "price": 3454545
+  },
+  {
+   "name": "Quả đập khí nén",
+   "unit": "quả",
+   "price": 3454545
+  },
+  {
+   "name": "Que hàn các bon",
+   "unit": "kg",
+   "price": 19800
+  },
+  {
+   "name": "Que hàn đồng",
+   "unit": "kg",
+   "price": 250000
+  },
+  {
+   "name": "Que hàn thép",
+   "unit": "kg",
+   "price": 19800
+  },
+  {
+   "name": "Que hàn",
+   "unit": "kg",
+   "price": 19800
+  },
+  {
+   "name": "Răng cào hợp kim",
+   "unit": "bộ",
+   "price": 500000
+  },
+  {
+   "name": "Răng khoan đất",
+   "unit": "cái",
+   "price": 100000
+  },
+  {
+   "name": "Răng khoan đá",
+   "unit": "cái",
+   "price": 200000
+  },
+  {
+   "name": "Ray P43",
+   "unit": "kg",
+   "price": 13818
+  },
+  {
+   "name": "Sắt đệm",
+   "unit": "kg",
+   "price": 17447
+  },
+  {
+   "name": "Sắt hình",
+   "unit": "kg",
+   "price": 17447
+  },
+  {
+   "name": "Sắt tròn",
+   "unit": "kg",
+   "price": 17711
+  },
+  {
+   "name": "Silicon chít mạch",
+   "unit": "kg",
+   "price": 101515
+  },
+  {
+   "name": "Sỏi hạt lớn",
+   "unit": "kg",
+   "price": 151
+  },
+  {
+   "name": "Sơn cách nhiệt",
+   "unit": "kg",
+   "price": 76300
+  },
+  {
+   "name": "Sơn dẻo nhiệt",
+   "unit": "kg",
+   "price": 24100
+  },
+  {
+   "name": "Sơn kẻ đường",
+   "unit": "kg",
+   "price": 24100
+  },
+  {
+   "name": "Sơn lót",
+   "unit": "kg",
+   "price": 92800
+  },
+  {
+   "name": "Sơn phủ",
+   "unit": "kg",
+   "price": 130800
+  },
+  {
+   "name": "Sơn",
+   "unit": "kg",
+   "price": 130800
+  },
+  {
+   "name": "Tà vẹt gỗ 14x22x180",
+   "unit": "thanh",
+   "price": 443500
+  },
+  {
+   "name": "Tà vẹt gỗ",
+   "unit": "cái",
+   "price": 443500
+  },
+  {
+   "name": "Tấm bê tông 18x22x100cm",
+   "unit": "m",
+   "price": 44091
+  },
+  {
+   "name": "Tấm bê tông 18x33x100cm",
+   "unit": "m",
+   "price": 75000
+  },
+  {
+   "name": "Tấm bê tông 20x20cm",
+   "unit": "m",
+   "price": 52500
+  },
+  {
+   "name": "Tấm cách âm Acoustic",
+   "unit": "m2",
+   "price": 63636
+  },
+  {
+   "name": "Tấm cách nhiệt Sirofort",
+   "unit": "m2",
+   "price": 58333
+  },
+  {
+   "name": "Tấm lưới chống chói",
+   "unit": "m",
+   "price": 291000
+  },
+  {
+   "name": "Tấm lưới nối D5",
+   "unit": "m",
+   "price": 10000
+  },
+  {
+   "name": "Tấm lưới nối D10",
+   "unit": "m",
+   "price": 20000
+  },
+  {
+   "name": "Tấm lưới nối D15",
+   "unit": "m",
+   "price": 25000
+  },
+  {
+   "name": "Tấm mái D5",
+   "unit": "m2",
+   "price": 55000
+  },
+  {
+   "name": "Tấm mái D10",
+   "unit": "m2",
+   "price": 65000
+  },
+  {
+   "name": "Tấm mái D15",
+   "unit": "m2",
+   "price": 90000
+  },
+  {
+   "name": "Tấm Neoweb",
+   "unit": "m2",
+   "price": 70000
+  },
+  {
+   "name": "Tấm nhựa PVC loại KN92",
+   "unit": "m",
+   "price": 60000
+  },
+  {
+   "name": "Tấm nhựa+Khung xương",
+   "unit": "m2",
+   "price": 120000
+  },
+  {
+   "name": "Tấm nhựa",
+   "unit": "m2",
+   "price": 39000
+  },
+  {
+   "name": "Tam pôn Fi 76mm",
+   "unit": "cái",
+   "price": 12000
+  },
+  {
+   "name": "Tam pôn Fi 105mm",
+   "unit": "cái",
+   "price": 15000
+  },
+  {
+   "name": "Tấm sàn D5",
+   "unit": "m2",
+   "price": 45000
+  },
+  {
+   "name": "Tấm sàn D10",
+   "unit": "m2",
+   "price": 55000
+  },
+  {
+   "name": "Tấm sàn D15",
+   "unit": "m2",
+   "price": 65000
+  },
+  {
+   "name": "Tấm sàn C-Deck",
+   "unit": "m2",
+   "price": 97273
+  },
+  {
+   "name": "Tấm thạch cao 9mm",
+   "unit": "m2",
+   "price": 31913
+  },
+  {
+   "name": "Tấm thạch cao 12mm",
+   "unit": "m2",
+   "price": 45351
+  },
+  {
+   "name": "Tấm thạch cao dày 15mm",
+   "unit": "m2",
+   "price": 67186
+  },
+  {
+   "name": "Tấm tường D5",
+   "unit": "m2",
+   "price": 215000
+  },
+  {
+   "name": "Tầm tường D10",
+   "unit": "m2",
+   "price": 255000
+  },
+  {
+   "name": "Tấm tường D15",
+   "unit": "m2",
+   "price": 300000
+  },
+  {
+   "name": "Tấm V-3D",
+   "unit": "m2",
+   "price": 190000
+  },
+  {
+   "name": "Tăng đơ Fi 14",
+   "unit": "cái",
+   "price": 16818
+  },
+  {
+   "name": "Tăng đơ Fi 38mm dài 5-7m",
+   "unit": "cái",
+   "price": 738276
+  },
+  {
+   "name": "Thanh neo thép",
+   "unit": "kg",
+   "price": 12600
+  },
+  {
+   "name": "Thép Fi 25",
+   "unit": "kg",
+   "price": 16746
+  },
+  {
+   "name": "Thép bản d=2mm",
+   "unit": "kg",
+   "price": 16700
+  },
+  {
+   "name": "Thép bản răng lược khe co dãn",
+   "unit": "m",
+   "price": 1500000
+  },
+  {
+   "name": "Thép buộc",
+   "unit": "kg",
+   "price": 16746
+  },
+  {
+   "name": "Thép các loại",
+   "unit": "kg",
+   "price": 16746
+  },
+  {
+   "name": "Thép đệm",
+   "unit": "kg",
+   "price": 16700
+  },
+  {
+   "name": "Thép hình định vị cọc",
+   "unit": "kg",
+   "price": 18000
+  },
+  {
+   "name": "Thép hình, thép tấm",
+   "unit": "kg",
+   "price": 18000
+  },
+  {
+   "name": "Thép hình",
+   "unit": "kg",
+   "price": 18000
+  },
+  {
+   "name": "Thép hộp 40x60x3mm",
+   "unit": "m",
+   "price": 71371
+  },
+  {
+   "name": "Thép hộp 50x50x3mm",
+   "unit": "m",
+   "price": 71371
+  },
+  {
+   "name": "Thép hộp 50x100",
+   "unit": "m",
+   "price": 139932
+  },
+  {
+   "name": "Thép hộp 60x120x3mm",
+   "unit": "m",
+   "price": 169424
+  },
+  {
+   "name": "Thép hộp 80x100x3mm",
+   "unit": "m",
+   "price": 169425
+  },
+  {
+   "name": "Thép hộp",
+   "unit": "m",
+   "price": 71371
+  },
+  {
+   "name": "Thép không rỉ",
+   "unit": "kg",
+   "price": 52000
+  },
+  {
+   "name": "Thép lưới Fi 6",
+   "unit": "kg",
+   "price": 19500
+  },
+  {
+   "name": "Thép mạ kẽm C (đứng)",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép mạ kẽm C14",
+   "unit": "m",
+   "price": 5618
+  },
+  {
+   "name": "Thép mạ kẽm C51 dày 0,52mm",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép mạ kẽm C75 dày 0,52mm",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép mạ kẽm U (ngang)",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép mạ kẽm U25",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép mạ kẽm U76 dày 0,52mm",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép mạ kẽm V20x22 dày 0,52mm",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép mạ kẽm V20x22",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép mạ kẽm V20x22",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép nẹp mạ kẽm 0,6x70mm",
+   "unit": "m",
+   "price": 18300
+  },
+  {
+   "name": "Thép ống Fi 42-49",
+   "unit": "m",
+   "price": 41289
+  },
+  {
+   "name": "Thép ống",
+   "unit": "kg",
+   "price": 20818
+  },
+  {
+   "name": "Thép tấm các loại",
+   "unit": "kg",
+   "price": 17182
+  },
+  {
+   "name": "Thép tấm dày 5mm",
+   "unit": "kg",
+   "price": 17182
+  },
+  {
+   "name": "Thép tấm",
+   "unit": "kg",
+   "price": 16700
+  },
+  {
+   "name": "Thép tròn Fi ≤10mm",
+   "unit": "kg",
+   "price": 17000
+  },
+  {
+   "name": "Thép tròn Fi ≤18mm",
+   "unit": "kg",
+   "price": 17139
+  },
+  {
+   "name": "Thép tròn Fi 6mm",
+   "unit": "kg",
+   "price": 16806
+  },
+  {
+   "name": "Thép tròn Fi 8mm",
+   "unit": "kg",
+   "price": 16806
+  },
+  {
+   "name": "Thép tròn Fi >10mm",
+   "unit": "kg",
+   "price": 17090
+  },
+  {
+   "name": "Thép tròn D10mm",
+   "unit": "kg",
+   "price": 17292
+  },
+  {
+   "name": "Thép tròn Fi >18mm",
+   "unit": "kg",
+   "price": 17090
+  },
+  {
+   "name": "Thép tròn Fi 25mm",
+   "unit": "kg",
+   "price": 17090
+  },
+  {
+   "name": "Thép tròn",
+   "unit": "kg",
+   "price": 17090
+  },
+  {
+   "name": "Thuốc trừ sâu",
+   "unit": "kg",
+   "price": 25000
+  },
+  {
+   "name": "Thủy tinh nước",
+   "unit": "kg",
+   "price": 25000
+  },
+  {
+   "name": "Tiren + Ecu 6",
+   "unit": "bộ",
+   "price": 15000
+  },
+  {
+   "name": "Tôn d=1,5mm",
+   "unit": "kg",
+   "price": 15000
+  },
+  {
+   "name": "Tôn d=2,0mm",
+   "unit": "kg",
+   "price": 15000
+  },
+  {
+   "name": "Tôn lượn sóng dải ngăn cách",
+   "unit": "m",
+   "price": 47273
+  },
+  {
+   "name": "Tôn múi lợp mái ≤2m",
+   "unit": "m2",
+   "price": 147000
+  },
+  {
+   "name": "Tôn múi lợp mái chiều dài bất kỳ",
+   "unit": "m2",
+   "price": 147000
+  },
+  {
+   "name": "Tôn tráng kẽm",
+   "unit": "kg",
+   "price": 16484
+  },
+  {
+   "name": "Trụ bê tông",
+   "unit": "cái",
+   "price": 170000
+  },
+  {
+   "name": "Trụ đỡ thép D60",
+   "unit": "cái",
+   "price": 40000
+  },
+  {
+   "name": "Trụ đỡ tôn lượn sóng",
+   "unit": "cái",
+   "price": 497000
+  },
+  {
+   "name": "Ty xuyên D25",
+   "unit": "cái",
+   "price": 9000
+  },
+  {
+   "name": "Vải địa kỹ thuật lớp dưới",
+   "unit": "m2",
+   "price": 7000
+  },
+  {
+   "name": "Vải địa kỹ thuật lớp trên",
+   "unit": "m2",
+   "price": 7000
+  },
+  {
+   "name": "Vải địa kỹ thuật",
+   "unit": "m2",
+   "price": 7000
+  },
+  {
+   "name": "Van 3 chiều",
+   "unit": "cái",
+   "price": 550000
+  },
+  {
+   "name": "Ván công nghiệp",
+   "unit": "m2",
+   "price": 70240
+  },
+  {
+   "name": "Ván ép phủ phim",
+   "unit": "m2",
+   "price": 82456
+  },
+  {
+   "name": "Ván ép",
+   "unit": "m2",
+   "price": 70240
+  },
+  {
+   "name": "Ván khuôn 3mm",
+   "unit": "m3",
+   "price": 2000000
+  },
+  {
+   "name": "Ván khuôn nhựa",
+   "unit": "m2",
+   "price": 128000
+  },
+  {
+   "name": "Van nhựa một chiều D63mm",
+   "unit": "cái",
+   "price": 27272
+  },
+  {
+   "name": "Viên phản quang",
+   "unit": "viên",
+   "price": 35000
+  },
+  {
+   "name": "Vôi cục",
+   "unit": "kg",
+   "price": 6000
+  },
+  {
+   "name": "Vòng đỡ",
+   "unit": "cái",
+   "price": 1000
+  },
+  {
+   "name": "Vữa bê tông RCC",
+   "unit": "m3",
+   "price": 520000
+  },
+  {
+   "name": "Vữa chèn khe",
+   "unit": "m3",
+   "price": 439340
+  },
+  {
+   "name": "Vữa khô trộn sẵn (trát)",
+   "unit": "kg",
+   "price": 2200
+  },
+  {
+   "name": "Vữa khô trộn sẵn (xây)",
+   "unit": "kg",
+   "price": 1750
+  },
+  {
+   "name": "Vữa không co ngót",
+   "unit": "g",
+   "price": 7600
+  },
+  {
+   "name": "Vữa phun khô",
+   "unit": "m3",
+   "price": 675000
+  },
+  {
+   "name": "Xà gồ gỗ 80x100mm",
+   "unit": "m",
+   "price": 16000
+  },
+  {
+   "name": "Xà gồ thép 3x50x50mm",
+   "unit": "m",
+   "price": 44545
+  },
+  {
+   "name": "Xăng",
+   "unit": "lít",
+   "price": 22791
+  },
+  {
+   "name": "Xi măng PC40",
+   "unit": "kg",
+   "price": 1155
+  },
+  {
+   "name": "Xi măng PCB30",
+   "unit": "kg",
+   "price": 1181
+  },
+  {
+   "name": "Xi măng trắng",
+   "unit": "kg",
+   "price": 2520
+  },
+  {
+   "name": "Xi măng",
+   "unit": "kg",
+   "price": 1181
+  }
+ ],
+ "labor": [
+  {
+   "name": "Nhân công bậc 3,0/7 - Nhóm 1",
+   "unit": "công",
+   "price": 220855
+  },
+  {
+   "name": "Nhân công bậc 3,5/7 - Nhóm 1",
+   "unit": "công",
+   "price": 241510
+  },
+  {
+   "name": "Nhân công bậc 4,0/7 - Nhóm 1",
+   "unit": "công",
+   "price": 262165
+  },
+  {
+   "name": "Nhân công bậc 4,5/7 - Nhóm 1",
+   "unit": "công",
+   "price": 285204
+  },
+  {
+   "name": "Nhân công bậc 3,0/7 - Nhóm 2",
+   "unit": "công",
+   "price": 222508
+  },
+  {
+   "name": "Nhân công bậc 3,5/7 - Nhóm 2",
+   "unit": "công",
+   "price": 243318
+  },
+  {
+   "name": "Nhân công bậc 4,0/7 - Nhóm 2",
+   "unit": "công",
+   "price": 264128
+  },
+  {
+   "name": "Nhân công bậc 4,5/7 - Nhóm 2",
+   "unit": "công",
+   "price": 287339
+  }
+ ],
+ "machines": [
+  {
+   "name": "Bộ kích 10T",
+   "unit": "ca",
+   "price": 278201
+  },
+  {
+   "name": "Bộ kích 50T",
+   "unit": "ca",
+   "price": 283729
+  },
+  {
+   "name": "Bộ thiết bị trượt (60 kích loại 6T)",
+   "unit": "ca",
+   "price": 1544338
+  },
+  {
+   "name": "Bơm chân không 7,5kW",
+   "unit": "ca",
+   "price": 221791
+  },
+  {
+   "name": "Búa căn khí nén 3m3/ph",
+   "unit": "ca",
+   "price": 21147
+  },
+  {
+   "name": "Búa rung 50kW",
+   "unit": "ca",
+   "price": 372362
+  },
+  {
+   "name": "Búa rung 170kW",
+   "unit": "ca",
+   "price": 869670
+  },
+  {
+   "name": "Cần cẩu bánh hơi 6T",
+   "unit": "ca",
+   "price": 1697584
+  },
+  {
+   "name": "Cần cẩu bánh hơi 16T",
+   "unit": "ca",
+   "price": 2179352
+  },
+  {
+   "name": "Cần cẩu bánh hơi 25T",
+   "unit": "ca",
+   "price": 2420423
+  },
+  {
+   "name": "Cần cẩu bánh hơi 40T",
+   "unit": "ca",
+   "price": 3589159
+  },
+  {
+   "name": "Cần cẩu bánh hơi 63 T",
+   "unit": "ca",
+   "price": 4172393
+  },
+  {
+   "name": "Cần cẩu bánh hơi 80T",
+   "unit": "ca",
+   "price": 5179460
+  },
+  {
+   "name": "Cần cẩu bánh xích 10T",
+   "unit": "ca",
+   "price": 2196448
+  },
+  {
+   "name": "Cần cẩu bánh xích 25T",
+   "unit": "ca",
+   "price": 3022320
+  },
+  {
+   "name": "Cần cẩu bánh xích 50T",
+   "unit": "ca",
+   "price": 4400717
+  },
+  {
+   "name": "Cần trục ô tô 30T",
+   "unit": "ca",
+   "price": 3432717
+  },
+  {
+   "name": "Cần trục tháp 15T",
+   "unit": "ca",
+   "price": 2073904
+  },
+  {
+   "name": "Cần trục tháp 25T",
+   "unit": "ca",
+   "price": 2971243
+  },
+  {
+   "name": "Cần trục tháp 40T",
+   "unit": "ca",
+   "price": 3926477
+  },
+  {
+   "name": "Cần trục tháp 50T",
+   "unit": "ca",
+   "price": 4766165
+  },
+  {
+   "name": "Cẩu lao dầm",
+   "unit": "ca",
+   "price": 4925820
+  },
+  {
+   "name": "Cổng trục 30T",
+   "unit": "ca",
+   "price": 1467238
+  },
+  {
+   "name": "Cổng trục 60T",
+   "unit": "ca",
+   "price": 1841304
+  },
+  {
+   "name": "Gầu đào",
+   "unit": "ca",
+   "price": 489536
+  },
+  {
+   "name": "Hệ kích thủy lực 25T",
+   "unit": "ca",
+   "price": 400241
+  },
+  {
+   "name": "Hệ thống xe goòng",
+   "unit": "ca",
+   "price": 296940
+  },
+  {
+   "name": "Kích nâng 30T",
+   "unit": "ca",
+   "price": 279476
+  },
+  {
+   "name": "Kích nâng 200T",
+   "unit": "ca",
+   "price": 302441
+  },
+  {
+   "name": "Kích nâng 250T",
+   "unit": "ca",
+   "price": 317078
+  },
+  {
+   "name": "Kích nâng 500T",
+   "unit": "ca",
+   "price": 368307
+  },
+  {
+   "name": "Lò nấu sơn YHK 3A",
+   "unit": "ca",
+   "price": 917544
+  },
+  {
+   "name": "Lò nung keo",
+   "unit": "ca",
+   "price": 917544
+  },
+  {
+   "name": "Máy bơm áp lực xói nước đầu cọc (300CV)",
+   "unit": "ca",
+   "price": 4029293
+  },
+  {
+   "name": "Máy bơm bê tông 50m3/h",
+   "unit": "ca",
+   "price": 2186614
+  },
+  {
+   "name": "Máy bơm dung dịch 15m3/h",
+   "unit": "ca",
+   "price": 367014
+  },
+  {
+   "name": "Máy bơm dung dịch 200m3/h",
+   "unit": "ca",
+   "price": 413993
+  },
+  {
+   "name": "Máy bơm nước 2kW",
+   "unit": "ca",
+   "price": 14324
+  },
+  {
+   "name": "Máy bơm nước 14kW",
+   "unit": "ca",
+   "price": 84518
+  },
+  {
+   "name": "Máy bơm nước 20kW",
+   "unit": "ca",
+   "price": 123928
+  },
+  {
+   "name": "Máy bơm nước Diezel 5CV",
+   "unit": "ca",
+   "price": 89083
+  },
+  {
+   "name": "Máy bơm nước Diezel 20CV",
+   "unit": "ca",
+   "price": 346317
+  },
+  {
+   "name": "Máy bơm vữa (32 - 50m3/h)",
+   "unit": "ca",
+   "price": 711607
+  },
+  {
+   "name": "Máy bơm vữa 6m3/h",
+   "unit": "ca",
+   "price": 498588
+  },
+  {
+   "name": "Máy bơm vữa 9m3/h",
+   "unit": "ca",
+   "price": 574211
+  },
+  {
+   "name": "Máy bơm xói 4MC (75kW)",
+   "unit": "ca",
+   "price": 684085
+  },
+  {
+   "name": "Máy cào bóc tái sinh PM550s, công suất > 450HP",
+   "unit": "ca",
+   "price": 36691698
+  },
+  {
+   "name": "Máy cào bóc tái sinh Wirtgen 2400",
+   "unit": "ca",
+   "price": 42839058
+  },
+  {
+   "name": "Máy cào bóc Wirtgen C1000",
+   "unit": "ca",
+   "price": 6319027
+  },
+  {
+   "name": "Máy cạp tự hành 9m3",
+   "unit": "ca",
+   "price": 4797732
+  },
+  {
+   "name": "Máy cạp tự hành 16m3",
+   "unit": "ca",
+   "price": 5994422
+  },
+  {
+   "name": "Máy cấp xi măng",
+   "unit": "ca",
+   "price": 13946
+  },
+  {
+   "name": "Máy cắt bê tông 7,5kW",
+   "unit": "ca",
+   "price": 292480
+  },
+  {
+   "name": "Máy cắt bê tông 12CV (MCD 218)",
+   "unit": "ca",
+   "price": 504446
+  },
+  {
+   "name": "Máy cắt cáp 10kW",
+   "unit": "ca",
+   "price": 274405
+  },
+  {
+   "name": "Máy cắt đột 2,8kW",
+   "unit": "ca",
+   "price": 275056
+  },
+  {
+   "name": "Máy cắt gạch đá 1,7kW",
+   "unit": "ca",
+   "price": 27252
+  },
+  {
+   "name": "Máy cắt ống 5kW",
+   "unit": "ca",
+   "price": 272604
+  },
+  {
+   "name": "Máy cắt tôn 15kW",
+   "unit": "ca",
+   "price": 405903
+  },
+  {
+   "name": "Máy cắt uốn cốt thép 5kW",
+   "unit": "ca",
+   "price": 262925
+  },
+  {
+   "name": "Máy cấy bấc thấm",
+   "unit": "ca",
+   "price": 2293707
+  },
+  {
+   "name": "Máy cưa gỗ cầm tay 1,3kW",
+   "unit": "ca",
+   "price": 24097
+  },
+  {
+   "name": "Máy cưa kim loại 2,7kW",
+   "unit": "ca",
+   "price": 36847
+  },
+  {
+   "name": "Máy đầm bàn 1kW",
+   "unit": "ca",
+   "price": 255268
+  },
+  {
+   "name": "Máy đầm cạnh 1kW",
+   "unit": "ca",
+   "price": 21560
+  },
+  {
+   "name": "Máy đầm đất cầm tay 70kg",
+   "unit": "ca",
+   "price": 372236
+  },
+  {
+   "name": "Máy đầm dùi 1,5kW",
+   "unit": "ca",
+   "price": 258798
+  },
+  {
+   "name": "Máy đào 0,4m3",
+   "unit": "ca",
+   "price": 2028845
+  },
+  {
+   "name": "Máy đào 0,5m3",
+   "unit": "ca",
+   "price": 2347584
+  },
+  {
+   "name": "Máy đào 0,6 5 m3",
+   "unit": "ca",
+   "price": 2648781
+  },
+  {
+   "name": "Máy đào 0,8m3",
+   "unit": "ca",
+   "price": 2888686
+  },
+  {
+   "name": "Máy đào 1,25m3 gắn đầu búa thủy lực",
+   "unit": "ca",
+   "price": 4208714
+  },
+  {
+   "name": "Máy đào 1,25m3 gắn hàm kẹp",
+   "unit": "ca",
+   "price": 4208714
+  },
+  {
+   "name": "Máy đào 1,25m3",
+   "unit": "ca",
+   "price": 3941782
+  },
+  {
+   "name": "Máy đào 1,6m3 gắn đầu búa thủy lực",
+   "unit": "ca",
+   "price": 5003034
+  },
+  {
+   "name": "Máy đào 1,6m3",
+   "unit": "ca",
+   "price": 4898401
+  },
+  {
+   "name": "Máy đào 2,3m3",
+   "unit": "ca",
+   "price": 6381909
+  },
+  {
+   "name": "Máy đào 3,6m3",
+   "unit": "ca",
+   "price": 9586649
+  },
+  {
+   "name": "Máy đóng cọc 8T",
+   "unit": "ca",
+   "price": 13880397
+  },
+  {
+   "name": "Máy đóng cọc chạy trên ray 1,2T",
+   "unit": "ca",
+   "price": 1383910
+  },
+  {
+   "name": "Máy đóng cọc chạy trên ray 1,8T",
+   "unit": "ca",
+   "price": 1749257
+  },
+  {
+   "name": "Máy đóng cọc chạy trên ray 2,5T",
+   "unit": "ca",
+   "price": 2041374
+  },
+  {
+   "name": "Máy đóng cọc chạy trên ray 3,5T",
+   "unit": "ca",
+   "price": 2426640
+  },
+  {
+   "name": "Máy đóng cọc chạy trên ray 4,5T",
+   "unit": "ca",
+   "price": 3013464
+  },
+  {
+   "name": "Máy ép cọc Robot thủy lực tự hành 860T",
+   "unit": "ca",
+   "price": 12454984
+  },
+  {
+   "name": "Máy ép cọc trước 150T",
+   "unit": "ca",
+   "price": 652499
+  },
+  {
+   "name": "Máy ép cọc trước 200T",
+   "unit": "ca",
+   "price": 697079
+  },
+  {
+   "name": "Máy ép thủy lực (KGK - 130C4) - lực ép 130T",
+   "unit": "ca",
+   "price": 1108036
+  },
+  {
+   "name": "Máy hàn điện 23kW",
+   "unit": "ca",
+   "price": 382874
+  },
+  {
+   "name": "Máy khoan 1,7kW",
+   "unit": "ca",
+   "price": 18556
+  },
+  {
+   "name": "Máy khoan 80KNm÷25KNm",
+   "unit": "ca",
+   "price": 5358956
+  },
+  {
+   "name": "Máy khoan 150KNm÷200KNm",
+   "unit": "ca",
+   "price": 6286624
+  },
+  {
+   "name": "Máy khoan 200KNm÷300KNm",
+   "unit": "ca",
+   "price": 13732025
+  },
+  {
+   "name": "Máy khoan 300KNm÷400KNm",
+   "unit": "ca",
+   "price": 16833784
+  },
+  {
+   "name": "Máy khoan bê tông 0,75kW",
+   "unit": "ca",
+   "price": 15071
+  },
+  {
+   "name": "Máy khoan bê tông 1,5kW",
+   "unit": "ca",
+   "price": 33851
+  },
+  {
+   "name": "Máy khoan cầm tay Fi 42mm",
+   "unit": "ca",
+   "price": 256770
+  },
+  {
+   "name": "Máy khoan cọc xi măng đất (2 cần)",
+   "unit": "ca",
+   "price": 7080304
+  },
+  {
+   "name": "Máy khoan đập cáp 40kw",
+   "unit": "ca",
+   "price": 1284082
+  },
+  {
+   "name": "Máy khoan đứng 2,5kW",
+   "unit": "ca",
+   "price": 46579
+  },
+  {
+   "name": "Máy khoan đứng 4,5kW",
+   "unit": "ca",
+   "price": 66233
+  },
+  {
+   "name": "Máy khoan tạo lỗ neo gia cố mái ta luy YG60",
+   "unit": "ca",
+   "price": 2039811
+  },
+  {
+   "name": "Máy khoan tự hành 2 cần",
+   "unit": "ca",
+   "price": 11344445
+  },
+  {
+   "name": "Máy khoan tường sét (khoan trộn đất)",
+   "unit": "ca",
+   "price": 5532731
+  },
+  {
+   "name": "Máy khoan xoay 54CV",
+   "unit": "ca",
+   "price": 1886045
+  },
+  {
+   "name": "Máy khoan xoay 300CV",
+   "unit": "ca",
+   "price": 8940651
+  },
+  {
+   "name": "Máy khoan xoay đập tự hành Fi 76mm",
+   "unit": "ca",
+   "price": 1547999
+  },
+  {
+   "name": "Máy khoan xoay đập tự hành Fi 105mm",
+   "unit": "ca",
+   "price": 1808892
+  },
+  {
+   "name": "Máy khoan XY-1A hoặc loại tương tự",
+   "unit": "ca",
+   "price": 856185
+  },
+  {
+   "name": "Máy lốc tôn 5kW",
+   "unit": "ca",
+   "price": 294635
+  },
+  {
+   "name": "Máy lu bánh hơi 25T",
+   "unit": "ca",
+   "price": 2255139
+  },
+  {
+   "name": "Máy lu bánh hơi tự hành 16T",
+   "unit": "ca",
+   "price": 1744417
+  },
+  {
+   "name": "Máy lu bánh hơi tự hành 18T",
+   "unit": "ca",
+   "price": 1871888
+  },
+  {
+   "name": "Máy lu bánh thép 6T",
+   "unit": "ca",
+   "price": 985158
+  },
+  {
+   "name": "Máy lu bánh thép 9T",
+   "unit": "ca",
+   "price": 1121727
+  },
+  {
+   "name": "Máy lu bánh thép 10T",
+   "unit": "ca",
+   "price": 1255683
+  },
+  {
+   "name": "Máy lu bánh thép 16T",
+   "unit": "ca",
+   "price": 1558150
+  },
+  {
+   "name": "Máy lu bánh thép 25T",
+   "unit": "ca",
+   "price": 1843624
+  },
+  {
+   "name": "Máy lu bánh thép tự hành 8,5T",
+   "unit": "ca",
+   "price": 1121727
+  },
+  {
+   "name": "Máy lu bánh thép tự hành 12T",
+   "unit": "ca",
+   "price": 1427645
+  },
+  {
+   "name": "Máy lu rung 12T",
+   "unit": "ca",
+   "price": 1730363
+  },
+  {
+   "name": "Máy lu rung chân cừu 12T",
+   "unit": "ca",
+   "price": 1826722
+  },
+  {
+   "name": "Máy lu rung chân cừu 20T (lực rung 20-35T)",
+   "unit": "ca",
+   "price": 3010882
+  },
+  {
+   "name": "Máy lu rung tự hành 15T",
+   "unit": "ca",
+   "price": 2209491
+  },
+  {
+   "name": "Máy lu rung tự hành 18T",
+   "unit": "ca",
+   "price": 2710361
+  },
+  {
+   "name": "Máy lu rung tự hành 20T (lực rung 20-35T)",
+   "unit": "ca",
+   "price": 2938119
+  },
+  {
+   "name": "Máy lu rung tự hành 25T",
+   "unit": "ca",
+   "price": 3148941
+  },
+  {
+   "name": "Máy luồn cáp 15kW",
+   "unit": "ca",
+   "price": 338512
+  },
+  {
+   "name": "Máy mài 1,7kW",
+   "unit": "ca",
+   "price": 13010
+  },
+  {
+   "name": "Máy mài 2,7kW",
+   "unit": "ca",
+   "price": 18228
+  },
+  {
+   "name": "Máy nâng (thủy lực) phục vụ thi công hầm 135CV",
+   "unit": "ca",
+   "price": 1896701
+  },
+  {
+   "name": "Máy nén khí điện 5,0m3/h",
+   "unit": "ca",
+   "price": 237316
+  },
+  {
+   "name": "Máy nén khí diezel 240m3/h",
+   "unit": "ca",
+   "price": 1101715
+  },
+  {
+   "name": "Máy nén khí diezel 360m3/h",
+   "unit": "ca",
+   "price": 1332478
+  },
+  {
+   "name": "Máy nén khí diezel 420m3/h",
+   "unit": "ca",
+   "price": 1475338
+  },
+  {
+   "name": "Máy nén khí diezel 540m3/h",
+   "unit": "ca",
+   "price": 1659559
+  },
+  {
+   "name": "Máy nén khí diezel 600m3/h",
+   "unit": "ca",
+   "price": 1800551
+  },
+  {
+   "name": "Máy nén khí diezel 660m3/h",
+   "unit": "ca",
+   "price": 1941880
+  },
+  {
+   "name": "Máy nén khí diezel 1200m3/h",
+   "unit": "ca",
+   "price": 2973095
+  },
+  {
+   "name": "Máy phun chất tạo màng 5,5Hp",
+   "unit": "ca",
+   "price": 245843
+  },
+  {
+   "name": "Máy phun nhựa đường 190CV",
+   "unit": "ca",
+   "price": 3283250
+  },
+  {
+   "name": "Máy phun vẩy 9m3/h",
+   "unit": "ca",
+   "price": 2328762
+  },
+  {
+   "name": "Máy rải bê tông SP500",
+   "unit": "ca",
+   "price": 10282723
+  },
+  {
+   "name": "Máy rải cấp phối đá dăm 50 - 60m3/h",
+   "unit": "ca",
+   "price": 3724457
+  },
+  {
+   "name": "Máy rải hỗn hợp bê tông nhựa 130 - 140CV",
+   "unit": "ca",
+   "price": 5573898
+  },
+  {
+   "name": "Máy rải Novachip 170CV",
+   "unit": "ca",
+   "price": 18083146
+  },
+  {
+   "name": "Máy rải xi măng SW16TC (16m3)",
+   "unit": "ca",
+   "price": 10616791
+  },
+  {
+   "name": "Máy rót mastic",
+   "unit": "ca",
+   "price": 408663
+  },
+  {
+   "name": "Máy san 110CV",
+   "unit": "ca",
+   "price": 2211600
+  },
+  {
+   "name": "Máy sàng lọc 100m3/h",
+   "unit": "ca",
+   "price": 596773
+  },
+  {
+   "name": "Máy trộn bê tông 250 lít",
+   "unit": "ca",
+   "price": 302069
+  },
+  {
+   "name": "Máy trộn dung dịch 750 lít",
+   "unit": "ca",
+   "price": 276804
+  },
+  {
+   "name": "Máy trộn dung dịch 1000 lít",
+   "unit": "ca",
+   "price": 448914
+  },
+  {
+   "name": "Máy trộn vữa 80 lít",
+   "unit": "ca",
+   "price": 262354
+  },
+  {
+   "name": "Máy trộn vữa 150l",
+   "unit": "ca",
+   "price": 276697
+  },
+  {
+   "name": "Máy trộn vữa xi măng 1200l",
+   "unit": "ca",
+   "price": 529663
+  },
+  {
+   "name": "Máy trộn vữa xi măng 1600l",
+   "unit": "ca",
+   "price": 620133
+  },
+  {
+   "name": "Máy ủi 110CV",
+   "unit": "ca",
+   "price": 2055575
+  },
+  {
+   "name": "Máy ủi 140CV",
+   "unit": "ca",
+   "price": 2788564
+  },
+  {
+   "name": "Máy ủi 180CV",
+   "unit": "ca",
+   "price": 3488620
+  },
+  {
+   "name": "Máy ủi 240CV",
+   "unit": "ca",
+   "price": 4183812
+  },
+  {
+   "name": "Máy ủi 320CV",
+   "unit": "ca",
+   "price": 5819197
+  },
+  {
+   "name": "Máy uốn ống 2,8kW",
+   "unit": "ca",
+   "price": 266676
+  },
+  {
+   "name": "Máy vận thăng 0,8T",
+   "unit": "ca",
+   "price": 426604
+  },
+  {
+   "name": "Máy vận thăng 2T",
+   "unit": "ca",
+   "price": 498213
+  },
+  {
+   "name": "Máy vận thăng 3T",
+   "unit": "ca",
+   "price": 542335
+  },
+  {
+   "name": "Máy vận thăng lồng 3T",
+   "unit": "ca",
+   "price": 800934
+  },
+  {
+   "name": "Máy xúc lật 0,65m3",
+   "unit": "ca",
+   "price": 1545025
+  },
+  {
+   "name": "Máy xúc lật 1,6m3",
+   "unit": "ca",
+   "price": 3196055
+  },
+  {
+   "name": "Máy xúc lật 2,3m3",
+   "unit": "ca",
+   "price": 3873897
+  },
+  {
+   "name": "Máy xúc lật 3,2m3",
+   "unit": "ca",
+   "price": 5899861
+  },
+  {
+   "name": "Ô tô cấp nhũ tương 5m3",
+   "unit": "ca",
+   "price": 1930408
+  },
+  {
+   "name": "Ô tô chở nước 5m3",
+   "unit": "ca",
+   "price": 1239525
+  },
+  {
+   "name": "Ô tô chứa nhiên liệu 2,5T",
+   "unit": "ca",
+   "price": 794866
+  },
+  {
+   "name": "Ô tô đầu keo 150CV",
+   "unit": "ca",
+   "price": 1503074
+  },
+  {
+   "name": "Ô tô đầu kéo 200CV",
+   "unit": "ca",
+   "price": 1928651
+  },
+  {
+   "name": "Ô tô đầu kéo 272CV",
+   "unit": "ca",
+   "price": 2428339
+  },
+  {
+   "name": "Ô tô tự đổ 5T",
+   "unit": "ca",
+   "price": 1690472
+  },
+  {
+   "name": "Ô tô tự đổ 7T",
+   "unit": "ca",
+   "price": 2000442
+  },
+  {
+   "name": "Ô tô tự đổ 10T",
+   "unit": "ca",
+   "price": 2297246
+  },
+  {
+   "name": "Ô tô tự đổ 12T",
+   "unit": "ca",
+   "price": 2641003
+  },
+  {
+   "name": "Ô tô tự đổ 22T",
+   "unit": "ca",
+   "price": 3616261
+  },
+  {
+   "name": "Ô tô tự đổ 27T",
+   "unit": "ca",
+   "price": 4090766
+  },
+  {
+   "name": "Ô tô tưới nước 5m3",
+   "unit": "ca",
+   "price": 1239525
+  },
+  {
+   "name": "Ô tô tưới nước 10m3",
+   "unit": "ca",
+   "price": 1663035
+  },
+  {
+   "name": "Ô tô tưới nước 16m3",
+   "unit": "ca",
+   "price": 1938605
+  },
+  {
+   "name": "Ô tô vận tải thùng 2,5T",
+   "unit": "ca",
+   "price": 794866
+  },
+  {
+   "name": "Ô tô vận tải thùng 7T",
+   "unit": "ca",
+   "price": 1442949
+  },
+  {
+   "name": "Ô tô vận tải thùng 12T",
+   "unit": "ca",
+   "price": 1872762
+  },
+  {
+   "name": "Ô tô vận tải thùng 20T",
+   "unit": "ca",
+   "price": 2711427
+  },
+  {
+   "name": "Pa lăng xích 3T",
+   "unit": "ca",
+   "price": 238011
+  },
+  {
+   "name": "Pa lăng xích 5T",
+   "unit": "ca",
+   "price": 240103
+  },
+  {
+   "name": "Rơ mooc 30T",
+   "unit": "ca",
+   "price": 218019
+  },
+  {
+   "name": "Rơ mooc 60T",
+   "unit": "ca",
+   "price": 289308
+  },
+  {
+   "name": "Rơ mooc 100T",
+   "unit": "ca",
+   "price": 465768
+  },
+  {
+   "name": "Thiết bị nâng hạ dầm 90T",
+   "unit": "ca",
+   "price": 4645039
+  },
+  {
+   "name": "Thiết bị nấu nhựa",
+   "unit": "ca",
+   "price": 358653
+  },
+  {
+   "name": "Thiết bị phun sơn YHK 10A",
+   "unit": "ca",
+   "price": 349115
+  },
+  {
+   "name": "Thiết bị sơn kẻ vạch YHK 10A",
+   "unit": "ca",
+   "price": 349115
+  },
+  {
+   "name": "Tời điện 1,5T",
+   "unit": "ca",
+   "price": 256101
+  },
+  {
+   "name": "Tời điện 3T",
+   "unit": "ca",
+   "price": 285249
+  },
+  {
+   "name": "Tời điện 3,5T",
+   "unit": "ca",
+   "price": 290609
+  },
+  {
+   "name": "Tời điện 5T",
+   "unit": "ca",
+   "price": 302620
+  },
+  {
+   "name": "Trạm trộn bê tông ≤ 25T/h",
+   "unit": "ca",
+   "price": 5533092
+  },
+  {
+   "name": "Trạm trộn bê tông 20-25m3/h",
+   "unit": "ca",
+   "price": 1928476
+  },
+  {
+   "name": "Trạm trộn bê tông 30m3/h",
+   "unit": "ca",
+   "price": 2336168
+  },
+  {
+   "name": "Trạm trộn bê tông 50÷60T/h",
+   "unit": "ca",
+   "price": 1928476
+  },
+  {
+   "name": "Trạm trộn bê tông 50m3/h",
+   "unit": "ca",
+   "price": 3264974
+  },
+  {
+   "name": "Trạm trộn bê tông 80T/h",
+   "unit": "ca",
+   "price": 9947981
+  },
+  {
+   "name": "Trạm trộn bê tông 120T/h",
+   "unit": "ca",
+   "price": 11343989
+  },
+  {
+   "name": "Xe bơm bê tông tự hành 50m3/h",
+   "unit": "ca",
+   "price": 3974286
+  },
+  {
+   "name": "Xe bồn (13 - 14m3) chở bitum",
+   "unit": "ca",
+   "price": 5686725
+  },
+  {
+   "name": "Xe bồn (13-14m3) chở Polime PT2A2 có lắp hệ thống phun",
+   "unit": "ca",
+   "price": 5686725
+  }
+ ]
+}

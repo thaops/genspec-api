@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import * as fs from 'fs';
 import * as path from 'path';
 import { UnitPrice } from './unit-price.schema';
+import { MaterialPrice } from '../data-hub/prices/material-price.schema';
 
 interface DongiaFile {
   source: { province: string; document: string; origin: string };
