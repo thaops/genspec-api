@@ -26,6 +26,7 @@ import { RepriceService } from './reprice.service';
 import { TakeoffEngineService } from './takeoff-engine.service';
 import { ExportF1Service } from './export-f1.service';
 import { ExportThdtService } from './export-thdt.service';
+import { ExportTmdtService } from './export-tmdt.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller()
@@ -35,6 +36,7 @@ export class EstimateController {
     private readonly copilot: CopilotService,
     private readonly exporter: ExportF1Service,
     private readonly thdtExporter: ExportThdtService,
+    private readonly tmdtExporter: ExportTmdtService,
     private readonly catalog: CatalogService,
     private readonly takeoffEngine: TakeoffEngineService,
     private readonly reprice: RepriceService,
@@ -232,6 +234,18 @@ export class EstimateController {
     res.set({
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${safe}-thdt.xlsx"`,
+    });
+    res.send(buffer);
+  }
+
+  @Get('estimates/:id/export-tmdt')
+  async exportTmdt(@CurrentUser('userId') userId: string, @Param('id') id: string, @Res() res: Response) {
+    const estimate = await this.estimates.getOne(userId, id);
+    const buffer = await this.tmdtExporter.build(estimate);
+    const safe = estimate.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'du-toan';
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${safe}-tmdt.xlsx"`,
     });
     res.send(buffer);
   }

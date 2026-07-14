@@ -39,11 +39,13 @@ export class ExportF1Service {
     this.projectInfo(wb, e);
     this.takeoffSheet(wb, e);
     this.boqSheet(wb, e);
+    this.rebarScheduleSheet(wb, e);
     this.analysisSheet(wb, e);
     this.materialPrice(wb, e);
     this.laborPrice(wb, e);
     this.equipmentPrice(wb, e);
     this.materialSummary(wb, e);
+    this.materialDiffSheet(wb, e);
     this.costSummary(wb, e);
 
     const out = await wb.xlsx.writeBuffer();
@@ -184,6 +186,99 @@ export class ExportF1Service {
     totalRow.font = { bold: true };
     totalRow.getCell('total').numFmt = MONEY;
     totalRow.eachCell((c) => (c.border = thin()));
+  }
+
+  /**
+   * Bảng thống kê thép — chỉ sinh khi có dòng cốt thép (group "Cốt thép" hoặc
+   * tên "Cốt thép Ø…" đơn vị kg, do RebarPanel thêm vào). KHÔNG bịa: chỉ tổng
+   * hợp lại các dòng đã có trong takeoff.
+   */
+  private rebarScheduleSheet(wb: ExcelJS.Workbook, e: ExportInput) {
+    const steel = (e.takeoff ?? []).filter(
+      (t) => t.group === 'Cốt thép' || /c[ốô]t th[ée]p|thép\s*Ø|thep\s*O/i.test(t.name),
+    );
+    if (steel.length === 0) return; // không có thép → bỏ sheet
+
+    const ws = wb.addWorksheet('10_ThongKeThep');
+    ws.columns = [
+      { header: 'STT', key: 'stt', width: 6 },
+      { header: 'Đường kính', key: 'dia', width: 12 },
+      { header: 'Cấu kiện / Diễn giải', key: 'name', width: 44 },
+      { header: 'Đơn vị', key: 'unit', width: 8 },
+      { header: 'Khối lượng', key: 'qty', width: 14 },
+    ];
+    this.head(ws, 'BẢNG THỐNG KÊ CỐT THÉP', 'A1:E1');
+    let totalKg = 0;
+    steel.forEach((t, i) => {
+      const m = /Ø\s*(\d{1,2})/.exec(t.name);
+      const r = ws.addRow({
+        stt: i + 1,
+        dia: m ? `Ø${m[1]}` : '',
+        name: t.note ? `${t.name} — ${t.note}` : t.name,
+        unit: t.unit || 'kg',
+        qty: t.quantity || null,
+      });
+      r.getCell('qty').numFmt = QTY;
+      r.eachCell((c) => (c.border = thin()));
+      if ((t.unit || 'kg').toLowerCase() === 'kg') totalKg += t.quantity || 0;
+    });
+    const tr = ws.addRow({ name: 'TỔNG KHỐI LƯỢNG THÉP', unit: 'kg', qty: totalKg || null });
+    tr.font = { bold: true };
+    tr.getCell('qty').numFmt = QTY;
+    tr.eachCell((c) => (c.border = thin()));
+  }
+
+  /**
+   * Bảng bù/chênh lệch giá vật tư — so GIÁ HIỆN HÀNH (price) vs GIÁ GỐC tại thời điểm
+   * lập (basePrice, chốt lần đầu). Thành tiền bù = (hiện − gốc) × khối lượng (từ THVT).
+   * Chỉ sinh khi có vật tư đã chênh giá. KHÔNG bịa: dùng basePrice đã lưu.
+   */
+  private materialDiffSheet(wb: ExcelJS.Workbook, e: ExportInput) {
+    const mats = (e.materials ?? []).filter(
+      (m) => typeof m.basePrice === 'number' && m.basePrice !== m.price,
+    );
+    if (mats.length === 0) return;
+
+    // Khối lượng vật tư từ tổng hợp vật tư (khớp theo ref/tên).
+    const qtyOf = (m: { code: string; name: string }): number => {
+      const key = (s: string) => (s ?? '').toLowerCase().trim();
+      const hit = (e.materialSummary ?? []).find(
+        (r) => r.kind === 'material' && (key(r.ref) === key(m.code) || key(r.name) === key(m.name)),
+      );
+      return hit?.quantity ?? 0;
+    };
+
+    const ws = wb.addWorksheet('11_BuGiaVatTu');
+    ws.columns = [
+      { header: 'STT', key: 'stt', width: 6 },
+      { header: 'Vật tư', key: 'name', width: 34 },
+      { header: 'ĐVT', key: 'unit', width: 8 },
+      { header: 'Khối lượng', key: 'qty', width: 13 },
+      { header: 'Giá gốc', key: 'base', width: 14 },
+      { header: 'Giá hiện hành', key: 'cur', width: 14 },
+      { header: 'Chênh đơn giá', key: 'diff', width: 14 },
+      { header: 'Thành tiền bù', key: 'amount', width: 16 },
+    ];
+    this.head(ws, 'BẢNG BÙ CHÊNH LỆCH GIÁ VẬT TƯ', 'A1:H1');
+    let totalBu = 0;
+    mats.forEach((m, i) => {
+      const base = m.basePrice as number;
+      const diff = m.price - base;
+      const qty = qtyOf(m);
+      const amount = Math.round(diff * qty);
+      totalBu += amount;
+      const r = ws.addRow({
+        stt: i + 1, name: m.name, unit: m.unit, qty: qty || null,
+        base, cur: m.price, diff, amount: amount || null,
+      });
+      for (const k of ['qty']) r.getCell(k).numFmt = QTY;
+      for (const k of ['base', 'cur', 'diff', 'amount']) r.getCell(k).numFmt = MONEY;
+      r.eachCell((c) => (c.border = thin()));
+    });
+    const tr = ws.addRow({ name: 'TỔNG BÙ GIÁ', amount: totalBu || null });
+    tr.font = { bold: true };
+    tr.getCell('amount').numFmt = MONEY;
+    tr.eachCell((c) => (c.border = thin()));
   }
 
   private analysisSheet(wb: ExcelJS.Workbook, e: ExportInput) {

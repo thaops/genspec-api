@@ -12,6 +12,15 @@ export interface ProjectInfo {
   floors?: number;
   area?: string;
   note?: string;
+  // Cấu phần Tổng mức đầu tư (ngoài chi phí xây dựng). Optional — QS nhập, trống → bỏ dòng.
+  tmdt?: {
+    equipment?: number;      // chi phí thiết bị
+    management?: number;     // chi phí quản lý dự án
+    consulting?: number;     // chi phí tư vấn ĐTXD
+    land?: number;           // chi phí bồi thường, GPMB
+    other?: number;          // chi phí khác
+    contingencyPct?: number; // dự phòng (% trên tổng I..VI)
+  };
 }
 
 // Kind of price source — drives reliability deterministically (Source Ranking Engine).
@@ -39,7 +48,8 @@ export interface Material {
   code: string; // mã vật tư, e.g. "VL.XM"
   name: string;
   unit: string;
-  price: number; // đơn giá (VND)
+  price: number; // đơn giá HIỆN HÀNH (VND)
+  basePrice?: number; // giá GỐC tại thời điểm lập (chốt lần đầu, không đổi khi reprice) — cho bảng bù giá
   source?: PriceSource; // nguồn giá truy vết được
 }
 

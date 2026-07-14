@@ -102,7 +102,12 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
         materials: upsert(
           state.materials,
           (m) => (a.id ? m.id === a.id : m.code.toLowerCase() === a.code.toLowerCase()),
-          (ex) => ({ id: ex?.id ?? a.id ?? uuid(), code: a.code, name: a.name, unit: a.unit, price: num(a.price), source: rankSource(a.source ?? ex?.source) }),
+          (ex) => {
+            const price = num(a.price);
+            // Chốt giá gốc lần ĐẦU có giá; giữ nguyên qua các lần reprice → cho bảng bù giá.
+            const basePrice = ex?.basePrice ?? (price > 0 ? price : undefined);
+            return { id: ex?.id ?? a.id ?? uuid(), code: a.code, name: a.name, unit: a.unit, price, basePrice, source: rankSource(a.source ?? ex?.source) };
+          },
         ),
       };
     case 'delete_material':

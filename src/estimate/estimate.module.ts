@@ -8,6 +8,7 @@ import { Estimate, EstimateSchema } from './estimate.schema';
 import { EstimateService } from './estimate.service';
 import { ExportF1Service } from './export-f1.service';
 import { ExportThdtService } from './export-thdt.service';
+import { ExportTmdtService } from './export-tmdt.service';
 import { ContextBuilderService } from './context-builder.service';
 import { ReadModeHandler } from './modes/read.handler';
 import { ReviewModeHandler } from './modes/review.handler';
@@ -42,6 +43,7 @@ import { TakeoffEngineService } from './takeoff-engine.service';
     CopilotService,
     ExportF1Service,
     ExportThdtService,
+    ExportTmdtService,
     ContextBuilderService,
     ReadModeHandler,
     ReviewModeHandler,
