@@ -30,8 +30,7 @@ export class UnitPriceService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      const count = await this.model.estimatedDocumentCount();
-      if (count === 0) await this.seedFromJson();
+      await this.seedFromJson();
     } catch (err) {
       this.logger.warn(`unit_prices seed skipped: ${(err as Error).message}`);
     }
@@ -83,18 +82,27 @@ export class UnitPriceService implements OnModuleInit {
     this.logger.log(`Seeded ${ops.length} giá tài nguyên (VL/NC/Máy) — ${province}, ${sourceId}`);
   }
 
-  /** Đọc file JSON (được copy vào dist qua nest-cli assets) và bulk upsert. */
+  /** Nạp MỌI file dongia-*.json (mỗi tỉnh 1 file) vào unit_prices — guard theo tỉnh. */
   private async seedFromJson() {
-    // __dirname: src/catalog (dev) hoặc dist/catalog (prod) → data/dongia-hanoi.json
-    const file = path.join(__dirname, 'data', 'dongia-hanoi.json');
-    if (!fs.existsSync(file)) {
-      this.logger.warn(`unit_prices: không thấy ${file} — bỏ qua seed`);
-      return;
+    const dir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir).filter((f) => /^dongia-.*\.json$/.test(f));
+    for (const f of files) {
+      try {
+        await this.seedOneProvince(path.join(dir, f));
+      } catch (err) {
+        this.logger.warn(`unit_prices seed ${f}: ${(err as Error).message}`);
+      }
     }
+  }
+
+  private async seedOneProvince(file: string) {
     const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as DongiaFile;
-    const province = data.source?.province || 'Hà Nội';
+    const province = data.source?.province || 'Không rõ';
     const sourceDoc = data.source?.document || 'Đơn giá tỉnh';
     const sourceOrigin = data.source?.origin || '';
+    // Đã có đơn giá tỉnh này → bỏ qua (idempotent).
+    if ((await this.model.countDocuments({ province })) > 0) return;
     const docs = (data.items ?? [])
       .filter((it) => it.code && it.unitPrice > 0)
       .map((it) => ({
