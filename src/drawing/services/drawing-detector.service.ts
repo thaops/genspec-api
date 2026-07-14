@@ -125,6 +125,12 @@ export const MEP_COUNT_TYPES = new Set(['light', 'socket', 'switch', 'electric_p
 /** Loại đối tượng MEP đo theo CHIỀU DÀI (tuyến ống/dây/máng) — polyline length. */
 export const MEP_LENGTH_TYPES = new Set(['wire', 'conduit', 'cable_tray', 'pipe', 'duct']);
 
+// Layer chú thích/ký hiệu/kích thước/chi tiết/khung tên — object trên đây KHÔNG phải
+// cấu kiện xây dựng (thường là circle/arc/text ký hiệu, hay bị geometry đoán nhầm thành
+// cột/cọc). Khớp theo SUBSTRING trên tên layer đã upper-case.
+const ANNOTATION_LAYER_RE =
+  /KIHIEU|KYHIEU|GHICHU|CHUTHICH|CHIDAN|THUYETMINH|KICHTHUOC|COTATION|TIEUDE|BORDER|KHUNGBO|KHUNGTEN|TITLE|LEGEND|CHITIET|CHU-?THICH/;
+
 const LABEL_PATTERNS: Array<{ pattern: RegExp; type: string; hint: string }> = [
   { pattern: /^[Bb]\d/, type: 'beam',    hint: 'Label matches beam pattern (B + digit)' },
   { pattern: /^[Cc]\d/, type: 'column',  hint: 'Label matches column pattern (C + digit)' },
@@ -279,6 +285,14 @@ export class DrawingDetectorService {
       if (layerUpper === k || layerUpper.startsWith(k + '-') || layerUpper.endsWith('-' + k) || layerUpper.includes('-' + k + '-')) {
         return this.single(type, 0.95, 'layer_map', `Layer "${obj.layer}" matched rule "${key}" → ${type}`, false);
       }
+    }
+
+    // 1b. Layer CHÚ THÍCH/KÝ HIỆU/KÍCH THƯỚC/CHI TIẾT/KHUNG → 'symbol' (KHÔNG tính cấu
+    // kiện). Chặn lỗi đếm nhầm vòng tròn ký hiệu / cung ghi chú / text kích thước thành
+    // cột/cọc trên bản KC (vd layer Chikihieu, netGHICHU, KICHTHUOC, CHITIET). Chạy TRƯỚC
+    // label_pattern + geometry vì các nét này hay là circle/arc/text dễ bị đoán nhầm.
+    if (ANNOTATION_LAYER_RE.test(layerUpper)) {
+      return this.single('symbol', 0.9, 'layer_map', `Layer "${obj.layer}" là chú thích/ký hiệu → không tính cấu kiện`, false);
     }
 
     // 2. Label text pattern

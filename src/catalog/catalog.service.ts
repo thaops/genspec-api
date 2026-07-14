@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { NormComponent, NormItem, PriceItem, PriceSet } from './catalog-db.schemas';
 import { MaterialPrice } from '../data-hub/prices/material-price.schema';
+import { UnitPriceService } from './unit-price.service';
 import { CATALOG } from './catalog.seed';
 import { CatalogItem, CatalogSearchResult } from './catalog.types';
 import { extractProvinceFromText } from './province-aliases';
@@ -53,6 +54,7 @@ export class CatalogService {
     @InjectModel(PriceSet.name) private readonly priceSets: Model<PriceSet>,
     @InjectModel(PriceItem.name) private readonly priceItems: Model<PriceItem>,
     @InjectModel(MaterialPrice.name) private readonly materialPrices: Model<MaterialPrice>,
+    private readonly unitPrices: UnitPriceService,
   ) {}
 
   all(): CatalogItem[] {
@@ -119,7 +121,14 @@ export class CatalogService {
               .lean<NormItem[]>()
           : [];
       const hits = [...byCode, ...byText];
-      if (hits.length === 0) return empty;
+
+      // Đơn giá công tác THẬT theo tỉnh (unit_prices — vd tập Đơn giá Hà Nội) để agent
+      // CHỌN đúng dòng + giá có nguồn (nhiều biến thể Mác/kích thước). Độc lập với norm_items.
+      const dgHits = await this.unitPrices
+        .search(keywords || message, location, 6)
+        .catch(() => [] as Awaited<ReturnType<UnitPriceService['search']>>);
+
+      if (hits.length === 0 && dgHits.length === 0) return empty;
 
       // Ưu tiên: tỉnh trong message > projectInfo.location > không match
       const province = await this.matchProvince(message, location);
@@ -141,7 +150,22 @@ export class CatalogService {
       const priceSources: ReferenceBlockResult['priceSources'] = priceCtx
         ? [{ title: `${priceCtx.set.sourceDoc || 'Công bố giá'} — ${priceCtx.set.province}`, type: 'government' }]
         : [];
-      return { text: [head, ...lines].join('\n'), priceSources };
+
+      // Khối đơn giá công tác có nguồn (agent chọn mã đúng, giá thật).
+      const dgLines = dgHits.map(
+        (d) =>
+          `- ${d.code} | ${d.name} | ${d.unit} | ĐƠN GIÁ ${Math.round(d.unitPrice).toLocaleString('vi-VN')}đ ` +
+          `(VL ${Math.round(d.material).toLocaleString('vi-VN')}/NC ${Math.round(d.labor).toLocaleString('vi-VN')}/M ${Math.round(d.machine).toLocaleString('vi-VN')}) | nguồn ${d.sourceDoc}`,
+      );
+      if (dgHits.length > 0) {
+        priceSources.push({ title: `${dgHits[0].sourceDoc} — ${dgHits[0].province}`, type: 'government' });
+      }
+      const dgHead =
+        dgHits.length > 0
+          ? `\n(ĐƠN GIÁ CÔNG TÁC ${dgHits[0].province} — chọn đúng biến thể Mác/kích thước; đối chiếu công bố giá quý mới nhất)`
+          : '';
+
+      return { text: [head, ...lines, dgHead, ...dgLines].filter(Boolean).join('\n'), priceSources };
     } catch (err) {
       this.logger.warn(`referenceBlock skipped: ${(err as Error).message}`);
       return empty;

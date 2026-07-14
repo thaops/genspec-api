@@ -799,14 +799,16 @@ export function computeTakeoffRows(
 
 /** Bảng markdown 9 cột chuẩn: STT/Mã hiệu/Tên công tác/Đơn vị/Khối lượng/Đơn giá/Thành tiền/Nguồn/Diễn giải. */
 export function rowsToMarkdownTable(rows: TakeoffEngineRow[]): string {
-  // Đơn giá/Thành tiền/Nguồn tạm ẩn; thêm Nhóm đối tượng để QS truy vết.
+  // Hiện Đơn giá/Thành tiền/Nguồn: có giá thì show (từ price_set tỉnh hoặc web grounded),
+  // TRỐNG (—) khi chưa có giá — KHÔNG bịa. Nguồn để QS truy vết tới công bố giá.
+  const vnd = (n?: number) => (n != null ? Math.round(n).toLocaleString('vi-VN') : '—');
   const lines = [
-    '| STT | Mã hiệu | Tên công tác | Nhóm đối tượng | Đơn vị | Khối lượng | Diễn giải |',
-    '| --- | --- | --- | --- | --- | --- | --- |',
+    '| STT | Mã hiệu | Tên công tác | Nhóm đối tượng | Đơn vị | Khối lượng | Đơn giá | Thành tiền | Nguồn | Diễn giải |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
   ];
   rows.forEach((r, i) => {
     lines.push(
-      `| ${i + 1} | ${r.code} | ${r.name} | ${OBJECT_GROUP_LABEL[r.group] ?? r.group} | ${r.unit} | ${r.quantity} | ${r.note} |`,
+      `| ${i + 1} | ${r.code} | ${r.name} | ${OBJECT_GROUP_LABEL[r.group] ?? r.group} | ${r.unit} | ${r.quantity} | ${vnd(r.unitPrice)} | ${vnd(r.totalPrice)} | ${r.source ?? '—'} | ${r.note} |`,
     );
   });
   return lines.join('\n');
@@ -1030,15 +1032,19 @@ export class TakeoffEngineService {
           prices: priceCtxRaw.prices.map((p) => ({ refCode: p.refCode, name: p.name, price: p.price })),
         }
       : null;
+    // KHÔNG auto-fill giá từ unit_prices theo mã đoán (COMMON_FALLBACK_CODES) — mã
+    // đơn giá tỉnh đánh số KHÁC, dễ gán nhầm (vd AF.61120 = thép chứ không phải BT móng).
+    // Đơn giá tỉnh được dùng như NGUỒN TRA CỨU cho agent (referenceBlock) để chọn đúng
+    // mã + giá có nguồn, KHÔNG điền tự động mù.
     let rows = applyPricingToRows(bareRows, normCandidates, priceCtx);
 
     // Tra ĐƠN GIÁ từ web cho các dòng CHƯA có giá tỉnh chính thống (grounded search,
     // chống bịa 3 rào, gắn cờ "cần kiểm chứng" + link nguồn). Chỉ khi Edit bật.
     let webPricedCount = 0;
     const webPriceHits: WebPriceHit[] = [];
-    // TẠM ẨN GIÁ WEB: cột Đơn giá/Thành tiền/Nguồn đã ẩn khỏi bảng + key Gemini free
-    // tier hết quota grounding. Bật lại khi có billing: đổi `false` → điều kiện gốc.
-    const PRICE_WEB_ON = false;
+    // Tra giá web (grounded, 3 rào chống bịa, gắn nguồn). BẬT mặc định; tắt qua env
+    // PRICE_WEB=off nếu hết quota Gemini. Cần API key có billing để grounding ổn định.
+    const PRICE_WEB_ON = process.env.PRICE_WEB !== 'off';
     if (PRICE_WEB_ON && input.editPermission && this.priceWeb.enabled) {
       const need = rows.filter((r) => r.code && r.unitPrice == null);
       if (need.length > 0) {
@@ -1162,7 +1168,7 @@ export class TakeoffEngineService {
             `Đã điền mã phổ thông cho ${fallbackRows.length} dòng (cần kiểm chứng theo chỉ dẫn kỹ thuật).`,
           ]
         : []),
-      `(Đơn giá/Thành tiền TẠM ẨN — sẽ bật lại khi cấu hình nguồn giá; hiện tập trung Khối lượng + Nhóm đối tượng.)`,
+      `(Đơn giá/Thành tiền hiện khi CÓ nguồn giá — công bố giá tỉnh (Sở XD) hoặc web grounded có trích nguồn; ô "—" là chưa có giá, KHÔNG bịa.)`,
       `BOQ hiện chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm công tác cần bản vẽ kết cấu/MEP để bóc đầy đủ.`,
       '',
       rowsToMarkdownTable(rows),

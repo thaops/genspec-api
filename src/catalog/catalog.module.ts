@@ -9,9 +9,11 @@ import {
   PriceSetSchema,
 } from './catalog-db.schemas';
 import { MaterialPrice, MaterialPriceSchema } from '../data-hub/prices/material-price.schema';
+import { UnitPrice, UnitPriceSchema } from './unit-price.schema';
 import { CatalogController } from './catalog.controller';
 import { CatalogImportService } from './catalog-import.service';
 import { CatalogService } from './catalog.service';
+import { UnitPriceService } from './unit-price.service';
 
 @Module({
   imports: [
@@ -20,10 +22,11 @@ import { CatalogService } from './catalog.service';
       { name: PriceSet.name, schema: PriceSetSchema },
       { name: PriceItem.name, schema: PriceItemSchema },
       { name: MaterialPrice.name, schema: MaterialPriceSchema },
+      { name: UnitPrice.name, schema: UnitPriceSchema },
     ]),
   ],
   controllers: [CatalogController],
-  providers: [CatalogService, CatalogImportService],
-  exports: [CatalogService],
+  providers: [CatalogService, CatalogImportService, UnitPriceService],
+  exports: [CatalogService, UnitPriceService],
 })
 export class CatalogModule {}
