@@ -193,16 +193,8 @@ export class DrawingController {
     return this.objectOverride.correct(estimateId, drawingId, stableId, type);
   }
 
-  // --- Graph ---
-  @Get(':drawingId/graph')
-  getGraph(@Param('drawingId') drawingId: string) {
-    return this.graph.getGraph(drawingId);
-  }
-
-  @Post(':drawingId/graph/build')
-  buildGraph(@Param('drawingId') drawingId: string) {
-    return this.graph.build(drawingId);
-  }
+  // Graph raw endpoints (getGraph/buildGraph) đã bỏ — thay bằng /building/* (tầng ngữ nghĩa).
+  // DrawingGraphService.build() vẫn chạy qua event onDetected (không cần route thủ công).
 
   // --- Building Graph (tầng ngữ nghĩa) ---
   @Get(':drawingId/building')
