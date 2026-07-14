@@ -1,0 +1,133 @@
+{
+ "source": {
+  "title": "Công bố giá vật liệu xây dựng TP.HCM",
+  "document": "TB 493/TB-SXD-KTVLXD ngày 11/7/2025 - Sở Xây dựng TP.HCM (công bố giá VLXD tháng 6/2025, trước sáp nhập); Phụ lục 1 (đá) & Phụ lục 2 (cát) tham khảo giá thị trường theo báo cáo UBND TP Thủ Đức và các quận-huyện",
+  "province": "Hồ Chí Minh",
+  "currency": "VND",
+  "origin": "PDF scan (đọc bằng vision) — công bố Sở XD TP.HCM 2025",
+  "note": "Giá chưa gồm thuế GTGT. Giá tham khảo theo khu vực/quận huyện, có thể khác nhau. Chỉ gồm dòng đọc rõ; dòng mờ đã bỏ. Đối chiếu công bố giá gốc trước khi dùng. Thân TB 493 chỉ liệt kê danh mục công văn của các nhà sản xuất (thép/xi măng/gạch...) mà KHÔNG kèm số giá trong file scan này, nên chỉ bóc được nhóm đá & cát từ 2 phụ lục."
+ },
+ "count": 15,
+ "materials": [
+  {
+   "name": "Đá 1x2 (đá xanh) - Quận Phú Nhuận",
+   "unit": "m3",
+   "price": 400000,
+   "area": "Quận Phú Nhuận",
+   "maker": "Công ty CP Đầu tư XD và Vật liệu Đồng Nai",
+   "sourceRow": "CV 466/TCKH ngày 25/6/2025 - Phòng TC-KH quận Phú Nhuận"
+  },
+  {
+   "name": "Đá 4x6 (đá xanh) - Quận Phú Nhuận",
+   "unit": "m3",
+   "price": 370000,
+   "area": "Quận Phú Nhuận",
+   "maker": "Công ty CP Đầu tư XD và Vật liệu Đồng Nai",
+   "sourceRow": "CV 466/TCKH ngày 25/6/2025 - Phòng TC-KH quận Phú Nhuận"
+  },
+  {
+   "name": "Đá 1x2 (đá đen) - Quận Gò Vấp",
+   "unit": "m3",
+   "price": 454545,
+   "area": "Quận Gò Vấp",
+   "maker": "Công ty CP Đầu tư Xây dựng 3/2 - Chi nhánh Xí nghiệp Đá xây dựng",
+   "sourceRow": "CV 633/BC-TCKH ngày 03/6/2025 - Phòng TC-KH quận Gò Vấp"
+  },
+  {
+   "name": "Đá 1x2 (đá xanh) - Quận Gò Vấp",
+   "unit": "m3",
+   "price": 590909,
+   "area": "Quận Gò Vấp",
+   "maker": "Công ty CP Đầu tư Xây dựng 3/2 - Chi nhánh Xí nghiệp Đá xây dựng",
+   "sourceRow": "CV 633/BC-TCKH ngày 03/6/2025 - Phòng TC-KH quận Gò Vấp"
+  },
+  {
+   "name": "Đá 4x6 - Quận Gò Vấp",
+   "unit": "m3",
+   "price": 500000,
+   "area": "Quận Gò Vấp",
+   "maker": "Công ty CP Đầu tư Xây dựng 3/2 - Chi nhánh Xí nghiệp Đá xây dựng",
+   "sourceRow": "CV 633/BC-TCKH ngày 03/6/2025 - Phòng TC-KH quận Gò Vấp"
+  },
+  {
+   "name": "Đá 1x2 - Huyện Củ Chi",
+   "unit": "m3",
+   "price": 500000,
+   "area": "Huyện Củ Chi",
+   "maker": "Công ty TNHH VLXD An Bình An",
+   "sourceRow": "CV 06/BCPL-TCKH tháng 6/2025 - Phòng TC-KH huyện Củ Chi"
+  },
+  {
+   "name": "Đá 4x6 - Huyện Củ Chi",
+   "unit": "m3",
+   "price": 440000,
+   "area": "Huyện Củ Chi",
+   "maker": "Công ty TNHH VLXD An Bình An",
+   "sourceRow": "CV 06/BCPL-TCKH tháng 6/2025 - Phòng TC-KH huyện Củ Chi"
+  },
+  {
+   "name": "Cát xây tô - Quận Phú Nhuận",
+   "unit": "m3",
+   "price": 420000,
+   "area": "Quận Phú Nhuận",
+   "maker": "Công ty CP Xây lắp VLXD Đồng Tháp",
+   "sourceRow": "CV 466/TCKH ngày 25/6/2025 - Phòng TC-KH quận Phú Nhuận"
+  },
+  {
+   "name": "Cát bê tông (xe 3 khối) - Quận Phú Nhuận",
+   "unit": "m3",
+   "price": 440000,
+   "area": "Quận Phú Nhuận",
+   "maker": "Công ty CP Xây lắp VLXD Đồng Tháp",
+   "sourceRow": "CV 466/TCKH ngày 25/6/2025 - Phòng TC-KH quận Phú Nhuận"
+  },
+  {
+   "name": "Cát bê tông (xe 5 khối) - Quận Phú Nhuận",
+   "unit": "m3",
+   "price": 420000,
+   "area": "Quận Phú Nhuận",
+   "maker": "Công ty CP Xây lắp VLXD Đồng Tháp",
+   "sourceRow": "CV 466/TCKH ngày 25/6/2025 - Phòng TC-KH quận Phú Nhuận"
+  },
+  {
+   "name": "Cát xây tô - Quận Gò Vấp",
+   "unit": "m3",
+   "price": 436364,
+   "area": "Quận Gò Vấp",
+   "maker": "Công ty CP Xây lắp VLXD Đồng Tháp",
+   "sourceRow": "CV 633/BC-TCKH ngày 03/6/2025 - Phòng TC-KH quận Gò Vấp"
+  },
+  {
+   "name": "Cát san lấp - Quận Gò Vấp",
+   "unit": "m3",
+   "price": 381818,
+   "area": "Quận Gò Vấp",
+   "maker": "Công ty CP Xây lắp VLXD Đồng Tháp",
+   "sourceRow": "CV 633/BC-TCKH ngày 03/6/2025 - Phòng TC-KH quận Gò Vấp"
+  },
+  {
+   "name": "Cát san lấp - Huyện Nhà Bè",
+   "unit": "m3",
+   "price": 420000,
+   "area": "Huyện Nhà Bè",
+   "maker": "Công ty TNHH Thanh Tùng Sand",
+   "sourceRow": "BC 68/BC-TCKH ngày 06/6/2025 - Phòng TC-KH huyện Nhà Bè"
+  },
+  {
+   "name": "Cát xây tô - Huyện Củ Chi",
+   "unit": "m3",
+   "price": 430000,
+   "area": "Huyện Củ Chi",
+   "maker": "Công ty TNHH VLXD An Bình An",
+   "sourceRow": "CV 06/BCPL-TCKH tháng 6/2025 - Phòng TC-KH huyện Củ Chi"
+  },
+  {
+   "name": "Cát san lấp - Huyện Củ Chi",
+   "unit": "m3",
+   "price": 320000,
+   "area": "Huyện Củ Chi",
+   "maker": "Công ty TNHH VLXD An Bình An",
+   "sourceRow": "CV 06/BCPL-TCKH tháng 6/2025 - Phòng TC-KH huyện Củ Chi"
+  }
+ ]
+}

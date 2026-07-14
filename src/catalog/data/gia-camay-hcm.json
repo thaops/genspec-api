@@ -4,11 +4,11 @@
   "document": "QĐ 1491/QĐ-SXD-KT&VLXD ngày 31/12/2024 - Sở XD TP.HCM (năm 2024)",
   "province": "Hồ Chí Minh",
   "currency": "VND",
-  "priceCol": "Giá ca máy Vùng I (cột [13])",
-  "origin": "DOCX (OCR) — giá lấy theo cột đánh số [13], deterministic",
-  "note": "Giá ca máy Vùng I map theo DÒNG ĐÁNH SỐ CỘT [13] (chuẩn TT13). Tên máy OCR — cần kiểm chứng. Đối chiếu công bố giá mới nhất."
+  "priceCol": "Giá ca máy Vùng I",
+  "origin": "DOCX (OCR)",
+  "note": "Giá Vùng I map theo: dòng đánh số [13] / bảng 15 cột (idx12) / đuôi bảng [Giá I|NC II|Giá II]. Tên máy OCR — tra theo M-code. Đối chiếu công bố giá mới nhất."
  },
- "count": 76,
+ "count": 129,
  "machines": [
   {
    "code": "M101.1102",
@@ -203,6 +203,12 @@
    "price": 6968253
   },
   {
+   "code": "M103.1401",
+   "type": "May c§p xi mang",
+   "unit": "ca",
+   "price": 13946
+  },
+  {
    "code": "M103.1601",
    "type": "100m3/h",
    "unit": "ca",
@@ -341,30 +347,6 @@
    "price": 980553
   },
   {
-   "code": "M106.0801",
-   "type": "15 t",
-   "unit": "ca",
-   "price": 143429
-  },
-  {
-   "code": "M106.0802",
-   "type": "21 t",
-   "unit": "ca",
-   "price": 166430
-  },
-  {
-   "code": "M106.0805",
-   "type": "60 t",
-   "unit": "ca",
-   "price": 289308
-  },
-  {
-   "code": "M107.0101",
-   "type": "D '.:o 42 mm (di)ng co di�n-1,2 kW)",
-   "unit": "ca",
-   "price": 293550
-  },
-  {
    "code": "M107.0102",
    "type": "D '.:o 42 mm (truy€n di)ng khi nen - chua tinh khi nen)",
    "unit": "ca",
@@ -377,10 +359,52 @@
    "price": 412268
   },
   {
+   "code": "M108.0201",
+   "type": "120 m3/h",
+   "unit": "ca",
+   "price": 652194
+  },
+  {
+   "code": "M108.0202",
+   "type": "600 ni3/h",
+   "unit": "ca",
+   "price": 1549371
+  },
+  {
+   "code": "M109.0301",
+   "type": "Pong tong",
+   "unit": "ca",
+   "price": 342457
+  },
+  {
+   "code": "M112.0103",
+   "type": "2,8 kW",
+   "unit": "ca",
+   "price": 22371
+  },
+  {
+   "code": "M112.0104",
+   "type": "7 kW+ 7.5 kW",
+   "unit": "ca",
+   "price": 35725
+  },
+  {
    "code": "M112.0201",
    "type": "5 CV",
    "unit": "ca",
    "price": 72397
+  },
+  {
+   "code": "M201.0015",
+   "type": "May tham do dia v�t ly UJ-18",
+   "unit": "ca",
+   "price": 33804
+  },
+  {
+   "code": "M201.0016",
+   "type": "May tham do dia v�t ly MF-2-100",
+   "unit": "ca",
+   "price": 41852
   },
   {
    "code": "M201.0019",
@@ -389,10 +413,34 @@
    "price": 343379
   },
   {
+   "code": "M201.0020",
+   "type": "May thuy binh di¢n ttr",
+   "unit": "ca",
+   "price": 14767
+  },
+  {
+   "code": "M201.0023",
+   "type": "6ng nhom",
+   "unit": "ca",
+   "price": 1020
+  },
+  {
+   "code": "M201.0024",
+   "type": "Kfnh hi€n vi",
+   "unit": "ca",
+   "price": 7065
+  },
+  {
    "code": "M201.0025",
    "type": "Kfnh hi€n vi di¢n ttr quet",
    "unit": "ca",
    "price": 2287396
+  },
+  {
+   "code": "M201.0026",
+   "type": "May ilnh",
+   "unit": "ca",
+   "price": 6726
   },
   {
    "code": "M202.0002",
@@ -437,10 +485,94 @@
    "price": 478189
   },
   {
+   "code": "M202.0122",
+   "type": "May do dQ gilin no nhi�t dai",
+   "unit": "ca",
+   "price": 2188
+  },
+  {
+   "code": "M202.0123",
+   "type": "May do khuy�t t�t",
+   "unit": "ca",
+   "price": 3063
+  },
+  {
+   "code": "M202.0124",
+   "type": "May do kich thu6c",
+   "unit": "ca",
+   "price": 2188
+  },
+  {
+   "code": "M202.0125",
+   "type": "May do thcri gian kho mang son",
+   "unit": "ca",
+   "price": 2625
+  },
+  {
+   "code": "M202.0126",
+   "type": "May do img suAt bb m�t",
+   "unit": "ca",
+   "price": 4375
+  },
+  {
+   "code": "M202.0128",
+   "type": "May Hveem",
+   "unit": "ca",
+   "price": 12375
+  },
+  {
    "code": "M202.0130",
    "type": "May keo, nen WDW- 100",
    "unit": "ca",
    "price": 170500
+  },
+  {
+   "code": "M202.0132",
+   "type": "May ki�m tra d(> cirng",
+   "unit": "ca",
+   "price": 8168
+  },
+  {
+   "code": "M202.0133",
+   "type": "May lam si;ich b�ng sieu am",
+   "unit": "ca",
+   "price": 2888
+  },
+  {
+   "code": "M202.0135",
+   "type": "May mai mon sau",
+   "unit": "ca",
+   "price": 3713
+  },
+  {
+   "code": "M202.0136",
+   "type": "May nen c6 kit",
+   "unit": "ca",
+   "price": 20625
+  },
+  {
+   "code": "M202.0137",
+   "type": "May phiin tich thanh ph!in kim loi;ii",
+   "unit": "ca",
+   "price": 8250
+  },
+  {
+   "code": "M202.0139",
+   "type": "May quang ph5 do h� s6 truybn sang",
+   "unit": "ca",
+   "price": 46500
+  },
+  {
+   "code": "M202.0140",
+   "type": "May sieu iim do vit nut",
+   "unit": "ca",
+   "price": 28288
+  },
+  {
+   "code": "M202.0142",
+   "type": "May th§m",
+   "unit": "ca",
+   "price": 16119
   },
   {
    "code": "M202.0169",
@@ -449,10 +581,70 @@
    "price": 234848
   },
   {
+   "code": "M202.0171",
+   "type": "D1,1ng c1,1 thfr va d�p bi rcri",
+   "unit": "ca",
+   "price": 1230
+  },
+  {
+   "code": "M202.0172",
+   "type": "D1,1ng c1,1thfr va d�p con l�c",
+   "unit": "ca",
+   "price": 1230
+  },
+  {
+   "code": "M202.0173",
+   "type": "D1,1ng Ct,I thu xuyen",
+   "unit": "ca",
+   "price": 1948
+  },
+  {
+   "code": "M202.0175",
+   "type": "D1,1ng ct,1xac djnh thoi gian b�t dfiu dong k�t",
+   "unit": "ca",
+   "price": 2625
+  },
+  {
+   "code": "M202.0177",
+   "type": "Khung gia may & May gia tai 50 1An ky thu�t s6",
+   "unit": "ca",
+   "price": 28877
+  },
+  {
+   "code": "M202.0178",
+   "type": "May Gigarang",
+   "unit": "ca",
+   "price": 8750
+  },
+  {
    "code": "M202.0179",
    "type": "MaySHWD",
    "unit": "ca",
    "price": 1645466
+  },
+  {
+   "code": "M202.0180",
+   "type": "May bao g6",
+   "unit": "ca",
+   "price": 2967
+  },
+  {
+   "code": "M202.0181",
+   "type": "May dt Makita",
+   "unit": "ca",
+   "price": 3482
+  },
+  {
+   "code": "M202.0182",
+   "type": "May c�t ph�ng",
+   "unit": "ca",
+   "price": 20625
+  },
+  {
+   "code": "M202.0183",
+   "type": "May dfim xoay",
+   "unit": "ca",
+   "price": 5876
   },
   {
    "code": "M202.0184",
@@ -461,10 +653,136 @@
    "price": 88621
   },
   {
+   "code": "M202.0185",
+   "type": "May do d(> dan h6i",
+   "unit": "ca",
+   "price": 48514
+  },
+  {
+   "code": "M202.0186",
+   "type": "May keo, nen thuy llJC 0,5 tiln",
+   "unit": "ca",
+   "price": 7323
+  },
+  {
+   "code": "M202.0187",
+   "type": "May keo, nen thuy llJC 20 tfin",
+   "unit": "ca",
+   "price": 21875
+  },
+  {
+   "code": "M202.0188",
+   "type": "May keo, nen thuy ilJC 200 tiln",
+   "unit": "ca",
+   "price": 48050
+  },
+  {
+   "code": "M202.0189",
+   "type": "May keo, nen thuy h,rc 50 t§n",
+   "unit": "ca",
+   "price": 27633
+  },
+  {
+   "code": "M202.0190",
+   "type": "May k.\"loan l§y m§.u chuyen dt,mg",
+   "unit": "ca",
+   "price": 5950
+  },
+  {
+   "code": "M202.0191",
+   "type": "May khu§y va lam mat nu6c",
+   "unit": "ca",
+   "price": 4813
+  },
+  {
+   "code": "M202.0192",
+   "type": "May thir cuong d9 barn dinh",
+   "unit": "ca",
+   "price": 12600
+  },
+  {
+   "code": "M202.0193",
+   "type": "May thu- di) ch6ng thfim",
+   "unit": "ca",
+   "price": 14850
+  },
+  {
+   "code": "M202.0194",
+   "type": "May thir keo xac dinh cuong d9 bam dinh",
+   "unit": "ca",
+   "price": 12600
+  },
+  {
+   "code": "M202.0195",
+   "type": "May xac djnh d(, thfim nu6c cua be tong ki�u C430 (ho�c C43 I)",
+   "unit": "ca",
+   "price": 16119
+  },
+  {
+   "code": "M202.0196",
+   "type": "Nh6t k€",
+   "unit": "ca",
+   "price": 20500
+  },
+  {
+   "code": "M202.0198",
+   "type": "Nh6t k€ Vebe",
+   "unit": "ca",
+   "price": 6150
+  },
+  {
+   "code": "M202.0199",
+   "type": "Sung b�t njy",
+   "unit": "ca",
+   "price": 7875
+  },
+  {
+   "code": "M202.0200",
+   "type": "Thi€t bi do g6c nghi cua cat",
+   "unit": "ca",
+   "price": 1650
+  },
+  {
+   "code": "M202.0201",
+   "type": "Thi€t bi do g6c nghi tl,f nhien cua d§.t rcri",
+   "unit": "ca",
+   "price": 1238
+  },
+  {
+   "code": "M202.0202",
+   "type": "Thi€t bi do nhi�t d9 be tong",
+   "unit": "ca",
+   "price": 1575
+  },
+  {
+   "code": "M202.0203",
+   "type": "Thi€t bi do nhi�t lugng",
+   "unit": "ca",
+   "price": 1313
+  },
+  {
+   "code": "M202.0204",
+   "type": "Thi€t bi gia nhi�t vong va bi",
+   "unit": "ca",
+   "price": 8750
+  },
+  {
+   "code": "M202.0205",
+   "type": "Thi€t bi tht'r tai trQng",
+   "unit": "ca",
+   "price": 8750
+  },
+  {
    "code": "M202.0206",
    "type": "Thi€t bi whed tracking",
    "unit": "ca",
    "price": 1075080
+  },
+  {
+   "code": "M202.0207",
+   "type": "Thi€t bi xac dinh d9 b�n CQ rira",
+   "unit": "ca",
+   "price": 33000
   }
  ]
 }

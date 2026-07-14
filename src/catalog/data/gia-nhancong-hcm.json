@@ -1,0 +1,173 @@
+{
+ "source": {
+  "title": "Đơn giá nhân công xây dựng TP.HCM (Khu vực 1 / Vùng I)",
+  "document": "QĐ 1491/QĐ-SXD-KT&VLXD ngày 31/12/2024 - Sở XD TP.HCM (năm 2024)",
+  "province": "Hồ Chí Minh",
+  "currency": "VND",
+  "origin": "DOCX (OCR)",
+  "note": "Đơn giá Vùng I (Khu vực 1 - TP Thủ Đức...). Tên chuẩn hóa từ cấp bậc+nhóm. Đối chiếu công bố giá mới nhất."
+ },
+ "count": 32,
+ "labor": [
+  {
+   "name": "Nhân công bậc 3,0/7 nhóm III",
+   "unit": "công",
+   "price": 265915
+  },
+  {
+   "name": "Nhân công bậc 3,5/7 nhóm III",
+   "unit": "công",
+   "price": 290785
+  },
+  {
+   "name": "Nhân công bậc 4,0/7 nhóm III",
+   "unit": "công",
+   "price": 315655
+  },
+  {
+   "name": "Nhân công bậc 5,0/7 nhóm III",
+   "unit": "công",
+   "price": 371133
+  },
+  {
+   "name": "Nhân công bậc 6,0/7 nhóm III",
+   "unit": "công",
+   "price": 440004
+  },
+  {
+   "name": "Nhân công bậc 7,0/7 nhóm III",
+   "unit": "công",
+   "price": 518439
+  },
+  {
+   "name": "Nhân công bậc 1,0/7 nhóm IV",
+   "unit": "công",
+   "price": 191306
+  },
+  {
+   "name": "Nhân công bậc 2,0/7 nhóm IV",
+   "unit": "công",
+   "price": 225741
+  },
+  {
+   "name": "Nhân công bậc 3,0/7 nhóm IV",
+   "unit": "công",
+   "price": 265915
+  },
+  {
+   "name": "Nhân công bậc 3,5/7 nhóm IV",
+   "unit": "công",
+   "price": 290785
+  },
+  {
+   "name": "Nhân công bậc 4,0/7 nhóm IV",
+   "unit": "công",
+   "price": 315655
+  },
+  {
+   "name": "Nhân công bậc 5,0/7 nhóm IV",
+   "unit": "công",
+   "price": 371133
+  },
+  {
+   "name": "Nhân công bậc 6,0/7 nhóm IV",
+   "unit": "công",
+   "price": 440004
+  },
+  {
+   "name": "Nhân công bậc 7,0/7 nhóm IV",
+   "unit": "công",
+   "price": 518439
+  },
+  {
+   "name": "Nhân công bậc 1,0/4 nhóm IV",
+   "unit": "công",
+   "price": 246428
+  },
+  {
+   "name": "Nhân công bậc 2,0/4 nhóm IV",
+   "unit": "công",
+   "price": 290785
+  },
+  {
+   "name": "Nhân công bậc 3,0/4 nhóm IV",
+   "unit": "công",
+   "price": 344999
+  },
+  {
+   "name": "Nhân công bậc 4,0/4 nhóm IV",
+   "unit": "công",
+   "price": 406606
+  },
+  {
+   "name": "Nhân công bậc 1,0/2",
+   "unit": "công",
+   "price": 448534
+  },
+  {
+   "name": "Nhân công bậc 2,0/4",
+   "unit": "công",
+   "price": 680000
+  },
+  {
+   "name": "Nhân công bậc 3,0/4",
+   "unit": "công",
+   "price": 766545
+  },
+  {
+   "name": "Nhân công bậc 4,0/4",
+   "unit": "công",
+   "price": 859273
+  },
+  {
+   "name": "Nhân công bậc 1,0/8",
+   "unit": "công",
+   "price": 225106
+  },
+  {
+   "name": "Nhân công bậc 2,0/8",
+   "unit": "công",
+   "price": 254370
+  },
+  {
+   "name": "Nhân công bậc 3,0/8",
+   "unit": "công",
+   "price": 283634
+  },
+  {
+   "name": "Nhân công bậc 4,0/8",
+   "unit": "công",
+   "price": 315149
+  },
+  {
+   "name": "Nhân công bậc 5,0/8",
+   "unit": "công",
+   "price": 344413
+  },
+  {
+   "name": "Nhân công bậc 6,0/8",
+   "unit": "công",
+   "price": 373677
+  },
+  {
+   "name": "Nhân công bậc 7,0/8",
+   "unit": "công",
+   "price": 402941
+  },
+  {
+   "name": "Nhân công bậc 8,0/8",
+   "unit": "công",
+   "price": 434455
+  },
+  {
+   "name": "Nhân công bậc 1,5/2",
+   "unit": "công",
+   "price": 620000
+  },
+  {
+   "name": "Nhân công bậc 0/2",
+   "unit": "công",
+   "price": 643846
+  }
+ ]
+}

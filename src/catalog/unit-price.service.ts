@@ -182,4 +182,30 @@ export class UnitPriceService implements OnModuleInit {
   count(province?: string) {
     return this.model.countDocuments(province ? { province } : {});
   }
+
+  /**
+   * Tra giá tài nguyên (VL/NC/ca máy) trong material_prices theo từ khóa tên hoặc
+   * mã (materialId — vd "M-code"). Lọc theo tỉnh + category. Có nguồn (sourceId), không bịa.
+   */
+  async searchResources(
+    query?: string,
+    province?: string,
+    category?: string,
+    limit = 20,
+  ): Promise<MaterialPrice[]> {
+    const filter: Record<string, unknown> = { active: true };
+    if (province?.trim()) filter.province = province.trim();
+    if (category?.trim()) filter.category = category.trim();
+    const q = query?.trim();
+    if (q) {
+      const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [{ name: new RegExp(esc, 'i') }, { materialId: new RegExp(`^${esc}`, 'i') }];
+    }
+    return this.matPrices
+      .find(filter)
+      .sort({ trust: -1, effectiveDate: -1 })
+      .limit(Math.min(limit, 50))
+      .lean<MaterialPrice[]>()
+      .exec();
+  }
 }
