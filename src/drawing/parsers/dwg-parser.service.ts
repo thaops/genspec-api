@@ -114,13 +114,17 @@ export class DwgParserService implements DrawingParserInterface {
     const rawTypeCounts: Record<string, number> = {};
     for (const e of rawAll) rawTypeCounts[e.type ?? 'null'] = (rawTypeCounts[e.type ?? 'null'] ?? 0) + 1;
     this.logger.log(`[DwgParser] raw type counts: ${JSON.stringify(rawTypeCounts)}`);
-    // Log raw structure of first TEXT, HATCH, DIMENSION entity for field discovery
+    // Log raw structure of first TEXT, HATCH, DIMENSION entity for field discovery.
+    // BigInt-safe: libredwg đôi khi trả field BigInt (vd DIMENSION) → JSON.stringify
+    // NÉM "Do not know how to serialize a BigInt" và làm SẬP CẢ parse → rơi nhầm sang
+    // converter ("DWG không hỗ trợ"). Replacer đổi BigInt→string để log không bao giờ crash.
+    const bnSafe = (_k: string, v: unknown) => (typeof v === 'bigint' ? v.toString() : v);
     const firstText  = rawAll.find(e => e.type === 'TEXT');
     const firstHatch = rawAll.find(e => e.type === 'HATCH');
     const firstDim   = rawAll.find(e => e.type === 'DIMENSION');
-    if (firstText)  this.logger.log(`[DwgParser] raw TEXT keys: ${JSON.stringify(Object.keys(firstText))} | sample: ${JSON.stringify(firstText)}`);
-    if (firstHatch) this.logger.log(`[DwgParser] raw HATCH keys: ${JSON.stringify(Object.keys(firstHatch))} | sample: ${JSON.stringify(firstHatch)}`);
-    if (firstDim)   this.logger.log(`[DwgParser] raw DIM keys: ${JSON.stringify(Object.keys(firstDim))} | sample: ${JSON.stringify(firstDim)}`);
+    if (firstText)  this.logger.log(`[DwgParser] raw TEXT keys: ${JSON.stringify(Object.keys(firstText))} | sample: ${JSON.stringify(firstText, bnSafe)}`);
+    if (firstHatch) this.logger.log(`[DwgParser] raw HATCH keys: ${JSON.stringify(Object.keys(firstHatch))} | sample: ${JSON.stringify(firstHatch, bnSafe)}`);
+    if (firstDim)   this.logger.log(`[DwgParser] raw DIM keys: ${JSON.stringify(Object.keys(firstDim))} | sample: ${JSON.stringify(firstDim, bnSafe)}`);
     // Log space distribution to see Paper Space vs Model Space
     const spaceCounts: Record<string, number> = {};
     for (const e of rawAll) {
@@ -130,7 +134,7 @@ export class DwgParserService implements DrawingParserInterface {
     this.logger.log(`[DwgParser] space distribution: ${JSON.stringify(spaceCounts)}`);
     // Log first INSERT to see its fields
     const firstInsert = rawAll.find(e => e.type === 'INSERT');
-    if (firstInsert) this.logger.log(`[DwgParser] raw INSERT sample: ${JSON.stringify(firstInsert)}`);
+    if (firstInsert) this.logger.log(`[DwgParser] raw INSERT sample: ${JSON.stringify(firstInsert, bnSafe)}`);
     // Log available top-level keys of db to see if blocks/layouts exist
     this.logger.log(`[DwgParser] db keys: ${Object.keys(db ?? {}).join(', ')}`);
     // Check block definitions in multiple possible locations
