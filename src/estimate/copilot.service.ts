@@ -6,6 +6,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AiService } from '../ai/ai.service';
 import { DrawingSceneEntity, DrawingSceneDocument } from '../drawing/schemas/drawing-scene.schema';
+import { INSUNITS_TO_METERS } from '../drawing/services/drawing-unit';
 import { EstimateService } from './estimate.service';
 import { ContextBuilderService } from './context-builder.service';
 import { ReadModeHandler } from './modes/read.handler';
@@ -62,8 +63,6 @@ const TAKEOFF_ACTION = /\[ACTION:\s*generate[_-]?takeoff/i;
 // Câu xác nhận ngắn — với Edit bật là lệnh thực thi, không phải câu hỏi đọc.
 const CONFIRM_INTENT = /(lam di|lam luon|ap dung|dong y|chot|duyet|\bok(e)?\b|\byes\b|confirm)/i;
 
-// Quy đổi đơn vị bản vẽ ($INSUNITS) → mét — port từ FE DrawingWorkspace.
-const INSUNITS_TO_METERS: Record<string, number> = { mm: 0.001, m: 1, inch: 0.0254 };
 // Giả định mặc định khi chat tự do (FE popover chưa gửi kèm).
 const DEFAULT_TAKEOFF_ASSUMPTIONS = { floorHeight: 3.3, wallThickness: 0.2, beamDepth: 0.4 };
 
@@ -172,7 +171,7 @@ export class CopilotService {
       yield { event: 'step', data: { text: `Tham chiếu ${research.sources.length} nguồn giá` } };
     }
 
-    yield* this.editHandler.handle(state, context, message, files, research, history);
+    yield* this.editHandler.handle(state, context, message, files, research, history, activeSheetId);
   }
 
   /**

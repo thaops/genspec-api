@@ -35,6 +35,11 @@ export class Drawing {
   @Prop({ default: 0 })
   pageCount: number;
 
+  // m/đơn vị vẽ suy từ $INSUNITS lúc parse (xem drawing-unit.ts). Thiếu = bản vẽ
+  // không khai đơn vị → detector bỏ qua guard tiết diện, KHÔNG đoán bừa tỉ lệ.
+  @Prop()
+  unitFactor?: number;
+
   @Prop({ enum: ['pending', 'converting', 'parsing', 'ready', 'failed'], default: 'pending' })
   parseStatus: string;
 

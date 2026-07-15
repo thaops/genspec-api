@@ -31,6 +31,9 @@ const HEADER_LABELS: Record<ColumnKey, string> = {
 
 const COL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'] as const;
 
+/** Cột cuối của layout (Diễn giải). Suy ra từ COL_LETTERS — đổi số cột không phải sửa tay. */
+const LAST_COL = COL_LETTERS[COL_LETTERS.length - 1];
+
 /** Độ rộng cột (px) theo thứ tự A→G. */
 export const TAKEOFF_COL_WIDTHS_PX = [40, 110, 300, 120, 60, 90, 420] as const;
 
@@ -163,11 +166,21 @@ function extractTable(message: string): ParsedTable | null {
   return null;
 }
 
-/** Tìm sheet đích: hint → tên chứa "khối lượng" → sheet đầu tiên. */
-function pickTargetSheet(sheets: Sheet[], sheetNameHint?: string): Sheet | null {
+/**
+ * Tìm sheet đích: hint (ID sheet đang mở HOẶC tên sheet) → tên chứa "khối lượng"
+ * → sheet đầu tiên.
+ *
+ * Hint nhận CẢ id lẫn tên: đường bóc engine truyền TÊN sheet công tác
+ * ("2. Hoàn thiện bề mặt"), còn đường chat truyền activeSheetId của sheet người
+ * dùng đang mở. Không match id trước → agent luôn rơi về sheets[0] và ghi nhầm
+ * sheet 1 dù user đang đứng ở sheet khác.
+ */
+function pickTargetSheet(sheets: Sheet[], sheetHint?: string): Sheet | null {
   if (sheets.length === 0) return null;
-  if (sheetNameHint) {
-    const hint = normalize(sheetNameHint);
+  if (sheetHint) {
+    const byId = sheets.find((s) => s.id === sheetHint);
+    if (byId) return byId;
+    const hint = normalize(sheetHint);
     const byHint = sheets.find((s) => normalize(s.name).includes(hint));
     if (byHint) return byHint;
   }
@@ -340,9 +353,12 @@ export function rowsToUpdateCells(
   // Header cột nằm ngay dưới title (dòng 2 nếu có title, dòng 1 nếu không).
   const expectedHeaderRow = titleRows + 1;
   // Layout engine đã có sẵn (title + header cột) → GHI ĐÈ data (idempotent).
+  // Probe cột CUỐI của layout (G), không phải I: layout rút từ 9 → 7 cột nên cột I
+  // không bao giờ được ghi ⇒ check cũ luôn false ⇒ mỗi lần bóc lại đều rơi nhánh
+  // "xoá sạch rồi ghi lại từ dòng 1" (mất style/ghi đè) thay vì cập nhật tại chỗ.
   const hasEngineHeader =
     currentValueAt(sheet, `A${expectedHeaderRow}`) === HEADER_LABELS.stt &&
-    currentValueAt(sheet, `I${expectedHeaderRow}`) === HEADER_LABELS.note;
+    currentValueAt(sheet, `${LAST_COL}${expectedHeaderRow}`) === HEADER_LABELS.note;
 
   const written = new Set<string>();
   const push = (cell: string, newValue: string) => {
@@ -570,6 +586,7 @@ export function codeAssignmentsToUpdateCells(
 export function takeoffActionsToUpdateCells(
   actions: Action[],
   state: EstimateState,
+  sheetHint?: string,
 ): TableRescueResult | null {
   const takeoffs = actions.filter((a: any) => a.type === 'upsert_takeoff') as any[];
   if (takeoffs.length === 0) return null;
@@ -583,5 +600,5 @@ export function takeoffActionsToUpdateCells(
     quantity: t.quantity != null ? String(t.quantity) : '',
     note: String(t.note ?? ''),
   }));
-  return rowsToUpdateCells(rows, state);
+  return rowsToUpdateCells(rows, state, sheetHint);
 }

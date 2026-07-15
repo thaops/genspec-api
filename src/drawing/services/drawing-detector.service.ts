@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { MIN_SECTION_M, SECTION_TYPES } from '../../estimate/takeoff-engine.service';
 
 export interface NormalizedObject {
   stableId: string;
@@ -131,6 +132,54 @@ export const MEP_LENGTH_TYPES = new Set(['wire', 'conduit', 'cable_tray', 'pipe'
 const ANNOTATION_LAYER_RE =
   /KIHIEU|KYHIEU|GHICHU|CHUTHICH|CHIDAN|THUYETMINH|KICHTHUOC|COTATION|TIEUDE|BORDER|KHUNGBO|KHUNGTEN|TITLE|LEGEND|CHITIET|CHU-?THICH/;
 
+// ---------------------------------------------------------------------------
+// Tier 1b — layer KẾT CẤU đặt tên tự do (bản KC thực tế: "netCOT", "KC-COT-500",
+// "COT_TANG1", "MONG-BANG", "BTCT-DAM"). LAYER_TYPE_MAP chỉ khớp exact/`-`-delimited
+// nên các tên này rơi xuống geometry → đoán bừa. Ở đây khớp theo TOKEN (tách bởi ký
+// tự không phải chữ/số) + tiền tố nhiễu quen thuộc, ANCHORED để không dính nhầm
+// ("COTATION", "COTCAO" = cao độ đều KHÔNG khớp `^COT\d*$`).
+const KC_NOISE_PREFIX = '(?:NET|LINE|TT|KCC|KC|BTCT|BT|BETONG|BE|TONG|S)?';
+const kcRe = (body: string) => new RegExp(`^${KC_NOISE_PREFIX}(?:${body})\\d*$`);
+
+/** Token "tim/trục" → đường trục, KHÔNG phải cấu kiện (chặn "TIM-COT" thành cột). */
+const KC_AXIS_TOKEN_RE = kcRe('TIM|TRUC|TRUCL');
+
+/**
+ * Token layer → type kết cấu. Cố ý BỎ token "DAI" đứng một mình: đài móng và thép
+ * đai trùng chữ → không chắc thì không gán (thà thiếu còn hơn sai). Chỉ nhận
+ * DAIMONG/DAICOC.
+ */
+const KC_LAYER_RULES: Array<{ re: RegExp; type: string }> = [
+  { re: kcRe('MONG|FOOTING|FOUND|DAIMONG|DAICOC'), type: 'footing' },
+  { re: kcRe('COC|PILE'), type: 'pile' },
+  { re: kcRe('COT|COL|COLUMN'), type: 'column' },
+  { re: kcRe('DAM|GIANG|BEAM'), type: 'beam' },
+  { re: kcRe('SAN|SLAB'), type: 'slab' },
+  { re: kcRe('THEP|REBAR'), type: 'rebar' },
+];
+
+/**
+ * Entity CHÚ THÍCH: nằm trên layer kết cấu vẫn KHÔNG phải cấu kiện (đường kích
+ * thước trên layer "netDAM" là đường kích thước, không phải dầm).
+ */
+const ANNOTATION_RAW = new Set(['DIMENSION', 'TEXT', 'MTEXT', 'LEADER', 'ATTRIB', 'ATTDEF']);
+
+/**
+ * Entity CÓ THỂ là mặt cắt kín (đo được diện tích/chu vi). LINE/ARC/SPLINE là NÉT
+ * ĐƠN — bản KC vẽ móng/dầm bằng nhiều nét rời, 1 nét KHÔNG phải 1 cấu kiện. Đếm nét
+ * thành cấu kiện = số khống (đã gặp thật: 12 LINE trên "netMONG" → "12 móng").
+ */
+const SECTION_CAPABLE_RAW = new Set(['LWPOLYLINE', 'POLYLINE', 'HATCH', 'SOLID', 'CIRCLE', 'ELLIPSE']);
+
+/** Type kết cấu suy từ tên layer đặt tự do; undefined = không chắc → để tier sau. */
+function kcTypeFromLayer(layerUpper: string): string | undefined {
+  const tokens = layerUpper.split(/[^A-Z0-9]+/).filter(Boolean);
+  for (const { re, type } of KC_LAYER_RULES) {
+    if (tokens.some((t) => re.test(t))) return type;
+  }
+  return undefined;
+}
+
 const LABEL_PATTERNS: Array<{ pattern: RegExp; type: string; hint: string }> = [
   { pattern: /^[Bb]\d/, type: 'beam',    hint: 'Label matches beam pattern (B + digit)' },
   { pattern: /^[Cc]\d/, type: 'column',  hint: 'Label matches column pattern (C + digit)' },
@@ -150,11 +199,12 @@ const ENTITY_TYPE_MAP: Record<string, string> = {
 
 @Injectable()
 export class DrawingDetectorService {
-  detect(objects: NormalizedObject[], overrides: LayerOverride[] = []): DetectedObject[] {
+  /** @param unitFactor m/đơn vị vẽ (unitsPerDrawingUnit) — có thì bật kiểm tra tiết diện thật. */
+  detect(objects: NormalizedObject[], overrides: LayerOverride[] = [], unitFactor?: number): DetectedObject[] {
     const stats = this.computeStats(objects);
     const overrideMap = this.buildOverrideMap(overrides);
     const detected = objects.map((obj) => {
-      const detection = this.classify(obj, stats, overrideMap);
+      const detection = this.classify(obj, stats, overrideMap, unitFactor);
       const floor = this.inferFloor(obj);
       return {
         ...obj,
@@ -216,6 +266,18 @@ export class DrawingDetectorService {
   }
 
   /**
+   * Có gợi ý type nhưng CHƯA CHỐT — downstream KHÔNG được tự tính vào BOQ.
+   * Khác `single`: giữ nguyên thông tin (user thấy "móng, chưa chốt") thay vì vứt
+   * về 'unknown', nhưng `ambiguous` chặn không cho sinh khối lượng.
+   */
+  private unsettled(type: string, prob: number, rule: DetectionRule, reason: string): DetectionResult {
+    return {
+      objectType: type, confidence: prob, candidates: [{ type, prob }],
+      ambiguous: true, matchedRule: rule, reason, fallback: false,
+    };
+  }
+
+  /**
    * Dataset-relative scale so geometry rules stay unit-agnostic (mm vs m vs inch).
    * Area is measured only on closed polygons (real footprints); tiny noise entities
    * naturally fall below the median so they don't skew "large vs small" comparisons.
@@ -268,6 +330,7 @@ export class DrawingDetectorService {
     obj: NormalizedObject,
     stats?: { medianArea: number; medianLength: number },
     overrides?: Map<string, LayerOverride>,
+    unitFactor?: number,
   ): DetectionResult {
     // 0. Per-project layer override (Tier 2) — user truth beats every heuristic.
     if (overrides?.size) {
@@ -278,8 +341,23 @@ export class DrawingDetectorService {
       }
     }
 
-    // 1. Layer name — exact, prefix, or suffix match (case-insensitive)
     const layerUpper = obj.layer.toUpperCase();
+
+    // 0b. Token "tim/trục" ở bất kỳ đâu trong tên layer → đường trục, KHÔNG phải cấu
+    // kiện. Chạy TRƯỚC LAYER_TYPE_MAP vì "TIM-COT"/"TRUC-DAM" là tim cột/tim dầm (nét
+    // dựng hình) nhưng lại khớp hậu tố "-COT"/"-DAM" → bị đếm thành cột/dầm khống.
+    if (layerUpper.split(/[^A-Z0-9]+/).some((t) => t && KC_AXIS_TOKEN_RE.test(t))) {
+      return this.single('axis', 0.9, 'layer_map', `Layer "${obj.layer}" là tim/trục → không tính cấu kiện`, false);
+    }
+
+    // 0c. Layer CHÚ THÍCH/KÝ HIỆU/KÍCH THƯỚC/CHI TIẾT/KHUNG → 'symbol'. Chạy TRƯỚC
+    // LAYER_TYPE_MAP: "GHICHU-COT" (ghi chú cột) khớp hậu tố "-COT" → bị đếm thành cột
+    // khống. Chú thích luôn thắng: thà thiếu còn hơn sai.
+    if (ANNOTATION_LAYER_RE.test(layerUpper)) {
+      return this.single('symbol', 0.9, 'layer_map', `Layer "${obj.layer}" là chú thích/ký hiệu → không tính cấu kiện`, false);
+    }
+
+    // 1. Layer name — exact, prefix, or suffix match (case-insensitive)
     for (const [key, type] of Object.entries(LAYER_TYPE_MAP)) {
       const k = key.toUpperCase();
       if (layerUpper === k || layerUpper.startsWith(k + '-') || layerUpper.endsWith('-' + k) || layerUpper.includes('-' + k + '-')) {
@@ -287,12 +365,35 @@ export class DrawingDetectorService {
       }
     }
 
-    // 1b. Layer CHÚ THÍCH/KÝ HIỆU/KÍCH THƯỚC/CHI TIẾT/KHUNG → 'symbol' (KHÔNG tính cấu
-    // kiện). Chặn lỗi đếm nhầm vòng tròn ký hiệu / cung ghi chú / text kích thước thành
-    // cột/cọc trên bản KC (vd layer Chikihieu, netGHICHU, KICHTHUOC, CHITIET). Chạy TRƯỚC
-    // label_pattern + geometry vì các nét này hay là circle/arc/text dễ bị đoán nhầm.
-    if (ANNOTATION_LAYER_RE.test(layerUpper)) {
-      return this.single('symbol', 0.9, 'layer_map', `Layer "${obj.layer}" là chú thích/ký hiệu → không tính cấu kiện`, false);
+    // 1b. Layer KC đặt tên tự do (COT/DAM/MONG/COC/THEP…) → type kết cấu. Kèm kiểm tra
+    // tiết diện: cấu kiện KC cạnh nhỏ < MIN_SECTION_M là KÝ HIỆU (bọt lưới trục, đầu
+    // dóng), không phải mặt cắt thật → 'symbol', không đo. Chỉ kiểm khi biết tỉ lệ;
+    // không biết thì để guard của engine (isRealSection) chặn lúc đo.
+    const kcType = kcTypeFromLayer(layerUpper);
+    const rawUpper = (obj.rawType ?? '').toUpperCase();
+    // Chú thích trên layer KC → KHÔNG phải cấu kiện; rơi xuống tier sau (dimension/text).
+    if (kcType && !ANNOTATION_RAW.has(rawUpper)) {
+      // Nét đơn (LINE/ARC) trên layer KC: bản vẽ dựng móng/dầm bằng NHIỀU nét rời — 1
+      // nét KHÔNG phải 1 cấu kiện. Giữ gợi ý type nhưng CHƯA CHỐT → không tính khối
+      // lượng (thà thiếu còn hơn sai). Muốn đếm phải ghép nét/khoanh vùng.
+      if (SECTION_TYPES.has(kcType) && !SECTION_CAPABLE_RAW.has(rawUpper)) {
+        return this.unsettled(
+          kcType,
+          0.6,
+          'layer_map',
+          `Layer "${obj.layer}" gợi ý ${kcType} nhưng entity là ${obj.rawType} (nét đơn, không phải mặt cắt kín) → chưa chốt, KHÔNG tính khối lượng; cần khoanh vùng/ghép nét`,
+        );
+      }
+      if (unitFactor != null && SECTION_TYPES.has(kcType) && !this.isPlausibleSection(obj, unitFactor)) {
+        return this.single(
+          'symbol',
+          0.9,
+          'layer_map',
+          `Layer "${obj.layer}" gợi ý ${kcType} nhưng tiết diện < ${MIN_SECTION_M * 100}cm → ký hiệu, không đo (cần khoanh vùng nếu là cấu kiện thật)`,
+          false,
+        );
+      }
+      return this.single(kcType, 0.9, 'layer_map', `Layer "${obj.layer}" có token kết cấu → ${kcType}`, false);
     }
 
     // 2. Label text pattern
@@ -317,6 +418,12 @@ export class DrawingDetectorService {
     }
 
     return this.single('unknown', 0, 'none', 'No matching rule found', true);
+  }
+
+  /** Cạnh nhỏ của bbox ≥ MIN_SECTION_M → tiết diện cấu kiện thật (cùng ngưỡng với engine). */
+  private isPlausibleSection(obj: NormalizedObject, unitFactor: number): boolean {
+    const { w, h } = obj.boundingBox;
+    return Math.min(w, h) * unitFactor >= MIN_SECTION_M;
   }
 
   /**

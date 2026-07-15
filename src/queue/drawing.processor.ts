@@ -14,6 +14,7 @@ import { DrawingDetectorService } from '../drawing/services/drawing-detector.ser
 import { DrawingLayerRuleService } from '../drawing/services/drawing-layer-rule.service';
 import { DrawingObjectOverrideService } from '../drawing/services/drawing-object-override.service';
 import { DrawingIndexerService } from '../drawing/services/drawing-indexer.service';
+import { inferUnitFactor } from '../drawing/services/drawing-unit';
 import { DrawingGraphService } from '../drawing/services/drawing-graph.service';
 import { DrawingParserFactory } from '../drawing/parsers/drawing-parser.factory';
 import { DxfParserService } from '../drawing/parsers/dxf-parser.service';
@@ -154,8 +155,13 @@ export class DrawingJobProcessor extends WorkerHost {
       await this.progress(job, 'detecting', 'Đang phân tích đối tượng...', 55);
       const raw       = this.normalizer.fromPages(drawingId, result.pages);
       const overrides = await this.layerRules.list(estimateId);
+      // Tỉ lệ từ header bật guard tiết diện KC (lớp 1); không suy ra được → undefined,
+      // engine vẫn chặn lúc đo (lớp 2). Lưu lại để re-detect dùng cùng tỉ lệ.
+      const unitFactor = inferUnitFactor(result);
+      await this.drawingModel.updateOne({ _id: drawingId }, { unitFactor });
+      await this.plog(drawingId, `[units] unitFactor=${unitFactor ?? 'không suy ra được (thiếu $INSUNITS) → bỏ qua guard tiết diện ở detector'}`);
       await this.plog(drawingId, `[detecting] ${raw.length} objects…`);
-      const detected  = this.detector.detect(raw, overrides);
+      const detected  = this.detector.detect(raw, overrides, unitFactor);
       const userOverrides = await this.objectOverrides.map(drawingId);
 
       await this.objectModel.deleteMany({ drawingId });

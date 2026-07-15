@@ -20,7 +20,8 @@
 import type { DrawingParseResult, RawEntity } from '../parsers/drawing-parser.interface';
 import type { DwgBlockDef } from '../parsers/dwg-parser.service';
 import { coerceDwgText } from '../parsers/dwg-parser.service';
-import type { DxfDocument, DxfEntity, DxfUnits } from '../parsers/dxf-parser.service';
+import type { DxfDocument, DxfEntity } from '../parsers/dxf-parser.service';
+import { unitsFromInsunits } from './drawing-unit';
 
 const RAD2DEG = 180 / Math.PI;
 const MAX_BLOCK_DEPTH = 4;
@@ -47,15 +48,6 @@ function colorOf(e: RawEntity): number | undefined {
   return idx > 0 && idx < 256 ? idx : undefined;
 }
 
-function mapUnits(insunits: unknown): DxfUnits {
-  switch (num(insunits, -1)) {
-    case 4: return 'mm';
-    case 6: return 'm';
-    case 1: return 'inch';
-    default: return 'unknown';
-  }
-}
-
 export function adaptDwgToDxfDocument(result: DrawingParseResult): DwgAdaptResult {
   const dropped: Record<string, number> = {};
   const drop = (type: string) => { dropped[type] = (dropped[type] ?? 0) + 1; };
@@ -80,7 +72,7 @@ export function adaptDwgToDxfDocument(result: DrawingParseResult): DwgAdaptResul
 
   return {
     doc: {
-      units: mapUnits(result.metadata?.insunits),
+      units: unitsFromInsunits(result.metadata?.insunits),
       layers: result.layers.map((l) => ({ name: l.name, colorIndex: l.color })),
       entities,
       extras: [],

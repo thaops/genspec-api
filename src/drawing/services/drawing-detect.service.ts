@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { Drawing, DrawingDocument } from '../schemas/drawing.schema';
 import { DrawingObject, DrawingObjectDocument } from '../schemas/drawing-object.schema';
 import { DrawingDetectorService } from './drawing-detector.service';
 import { DrawingNormalizerService } from './drawing-normalizer.service';
@@ -10,6 +11,7 @@ import { DrawingObjectOverrideService } from './drawing-object-override.service'
 @Injectable()
 export class DrawingDetectService {
   constructor(
+    @InjectModel(Drawing.name) private drawingModel: Model<DrawingDocument>,
     @InjectModel(DrawingObject.name) private objectModel: Model<DrawingObjectDocument>,
     private readonly normalizer: DrawingNormalizerService,
     private readonly detector: DrawingDetectorService,
@@ -40,7 +42,10 @@ export class DrawingDetectService {
     });
 
     const layerOverrides = await this.layerRules.list(estimateId);
-    const detected = this.detector.detect(normalized, layerOverrides);
+    // Tỉ lệ đã suy lúc parse (thiếu $INSUNITS → undefined) — re-detect phải dùng đúng
+    // tỉ lệ đó để guard tiết diện KC cho kết quả giống lần parse đầu.
+    const drawing = await this.drawingModel.findById(drawingId).lean();
+    const detected = this.detector.detect(normalized, layerOverrides, drawing?.unitFactor);
     const userOverrides = await this.overrides.map(drawingId);
 
     await this.objectModel.deleteMany({ drawingId });

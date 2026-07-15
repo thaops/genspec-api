@@ -8,6 +8,7 @@ import { DrawingParserFactory } from '../parsers/drawing-parser.factory';
 import { DrawingNormalizerService } from './drawing-normalizer.service';
 import { DrawingDetectorService } from './drawing-detector.service';
 import { DrawingIndexerService } from './drawing-indexer.service';
+import { inferUnitFactor } from './drawing-unit';
 import {
   DrawingUploadedEvent,
   DrawingConvertedEvent,
@@ -129,9 +130,12 @@ export class DrawingParserService {
       const rawObjects = this.normalizer.fromPages(drawingId, result.pages);
       await this.log(drawingId, `[normalize] ${rawObjects.length} raw objects in ${Date.now() - t1}ms`);
 
-      // 3. Detect
+      // 3. Detect — tỉ lệ từ header bật guard tiết diện KC (lớp 1). Không suy ra được
+      // thì để undefined: engine vẫn chặn lúc đo (lớp 2), không đoán bừa tỉ lệ.
       const t2 = Date.now();
-      const detected = this.detector.detect(rawObjects);
+      const unitFactor = inferUnitFactor(result);
+      await this.log(drawingId, `[units] unitFactor=${unitFactor ?? 'không suy ra được (bản vẽ thiếu $INSUNITS) → bỏ qua guard tiết diện ở detector'}`);
+      const detected = this.detector.detect(rawObjects, [], unitFactor);
       await this.log(drawingId, `[detect] ${detected.length} detected objects in ${Date.now() - t2}ms`);
 
       // 4. Persist
@@ -157,7 +161,7 @@ export class DrawingParserService {
       // 6. Done
       await this.drawingModel.updateOne(
         { _id: drawingId },
-        { pageCount: result.pages.length, parseStatus: 'ready' },
+        { pageCount: result.pages.length, parseStatus: 'ready', unitFactor },
       );
       const total = Date.now() - t0;
       await this.log(drawingId, `[done] total=${total}ms — status=ready`);

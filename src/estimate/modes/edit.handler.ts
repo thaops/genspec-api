@@ -156,6 +156,8 @@ export class EditModeHandler {
     files: Express.Multer.File[],
     research: { text: string; sources: { title?: string; uri?: string }[] },
     history = '',
+    /** Sheet người dùng đang mở — mọi rescue phải ghi vào ĐÚNG sheet này, không mặc định sheets[0]. */
+    activeSheetId?: string,
   ): AsyncGenerator<StreamEvent> {
     // CHỈ liệt kê mã/tên/đơn vị để LLM chọn mã hiệu. KHÔNG in đơn giá ở đây —
     // giá seed là số bịa; giá thật chỉ lấy từ normRef (import) + priceCtxLite bên dưới.
@@ -314,7 +316,7 @@ export class EditModeHandler {
     if (reply.actions.length === 0) {
       const candidates = [reply.message, fullText, fallbackRaw].filter((t) => t && t.includes('|'));
       for (const text of candidates) {
-        const rescue = tableToUpdateCellsDetailed(text, state);
+        const rescue = tableToUpdateCellsDetailed(text, state, activeSheetId);
         if (!rescue || rescue.actions.length === 0) continue;
         const note = `Chuyển bảng markdown thành ${rescue.actions.length} thay đổi ô (sheet ${rescue.sheetName}, dòng ${rescue.startRow}-${rescue.endRow}).`;
         const messageWithTable =
@@ -337,7 +339,7 @@ export class EditModeHandler {
     if (reply.actions.length === 0) {
       const candidates = [reply.message, fullText, fallbackRaw].filter(Boolean);
       for (const text of candidates) {
-        const rescue = codeAssignmentsToUpdateCells(text, state);
+        const rescue = codeAssignmentsToUpdateCells(text, state, activeSheetId);
         if (!rescue || rescue.actions.length === 0) continue;
         const n = rescue.matched.length;
         const note = `Điền ${n} mã hiệu từ đề xuất của AI vào sheet`;
@@ -381,7 +383,7 @@ export class EditModeHandler {
 
     // upsert_takeoff chỉ vào kho cấu trúc (F1 export) — mirror thành ô nhìn
     // thấy được trên sheet "Khối lượng" để user thấy kết quả ngay trên grid.
-    const mirror = takeoffActionsToUpdateCells(reply.actions, state);
+    const mirror = takeoffActionsToUpdateCells(reply.actions, state, activeSheetId);
     if (mirror && mirror.actions.length > 0) {
       reply = { ...reply, actions: [...reply.actions, ...mirror.actions, mirror.formatAction] };
       yield {
