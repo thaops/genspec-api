@@ -185,8 +185,10 @@ const HIT_TTL_MS = 7 * 24 * 3600 * 1000; // hit: 7 ngày
 // Miss chỉ cache 15 phút: user thường bấm ⚡ lại ngay sau khi chỉnh/deploy —
 // miss 1 ngày làm bản mới vẫn trả kết quả rỗng của bản cũ suốt 24h.
 const MISS_TTL_MS = 15 * 60 * 1000;
-// research() đã tự giới hạn 20s; cộng extract JSON → 35s/query; tối đa 2 query + đệm.
-const QUERY_TIMEOUT_MS = 35000;
+// research() tự giới hạn bằng deadline tổng 45s; cộng extract JSON → 55s/query;
+// tối đa 2 query + đệm. Giữ > deadline của research(), nếu không sẽ cắt ngang
+// call grounded đang chạy và mất nguồn.
+const QUERY_TIMEOUT_MS = 55000;
 const LOOKUP_TIMEOUT_MS = QUERY_TIMEOUT_MS * MAX_QUERIES_PER_KEY + 5000;
 
 // Extract nhiều ứng viên: model liệt kê MỌI mã xuất hiện nguyên văn (tối đa 5),

@@ -9,6 +9,7 @@ import { DrawingNormalizerService } from './drawing-normalizer.service';
 import { DrawingDetectorService } from './drawing-detector.service';
 import { DrawingIndexerService } from './drawing-indexer.service';
 import { inferUnitFactor } from './drawing-unit';
+import { detectDisciplineFromLayers } from '../discipline';
 import {
   DrawingUploadedEvent,
   DrawingConvertedEvent,
@@ -158,11 +159,19 @@ export class DrawingParserService {
       await this.indexer.buildIndex(drawingId, detected, result.layers, result.pages);
       await this.log(drawingId, `[index] built in ${Date.now() - t4}ms`);
 
-      // 6. Done
-      await this.drawingModel.updateOne(
-        { _id: drawingId },
-        { pageCount: result.pages.length, parseStatus: 'ready', unitFactor },
-      );
+      // 6. Done — nếu filename không đoán được bộ môn (KHAC), thử lại bằng tên
+      // layer giờ đã có sau parse. KHÔNG đè lên bộ môn đã xác định rõ từ filename
+      // hay do user tự chỉnh tay (setDiscipline) — chỉ nâng cấp từ KHAC.
+      const updateFields: Record<string, unknown> = { pageCount: result.pages.length, parseStatus: 'ready', unitFactor };
+      const current = await this.drawingModel.findById(drawingId).select('discipline').lean();
+      if (current?.discipline === 'KHAC') {
+        const fromLayers = detectDisciplineFromLayers(result.layers.map((l) => l.name));
+        if (fromLayers !== 'KHAC') {
+          updateFields.discipline = fromLayers;
+          await this.log(drawingId, `[discipline] filename mơ hồ → suy từ layer: ${fromLayers}`);
+        }
+      }
+      await this.drawingModel.updateOne({ _id: drawingId }, updateFields);
       const total = Date.now() - t0;
       await this.log(drawingId, `[done] total=${total}ms — status=ready`);
 

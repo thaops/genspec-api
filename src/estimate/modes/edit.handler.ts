@@ -221,6 +221,8 @@ export class EditModeHandler {
                 `QS chuẩn bị chỉnh sửa dự toán theo yêu cầu: "${message || '(tệp đính kèm)'}". ` +
                 `Dùng tool để xác định ĐÚNG sheet và dòng cần tác động: locate_sheet('takeoff' hoặc 'boq') lấy sheetId; ` +
                 `get_sheet_state để xem header/cấu trúc; find_row(sheetId, mã hiệu/từ khoá) để định vị dòng đã có. ` +
+                `NẾU YÊU CẦU NHẮC SỐ DÒNG CỤ THỂ (vd "dòng 5 sai", "hàng 12 đổi màu") → BẮT BUỘC gọi get_row(sheetId, row) ` +
+                `lấy đúng nội dung dòng đó TRƯỚC — KHÔNG được đoán/nhớ nhầm nội dung dòng. ` +
                 `Sau khi tra xong, TRẢ GỌN (không sửa gì): "sheetId đích = …; các dòng liên quan: <mã> → row <n>". ` +
                 `Nếu công tác chưa có trong sheet thì nói "cần THÊM dòng mới vào sheetId …".`,
             },

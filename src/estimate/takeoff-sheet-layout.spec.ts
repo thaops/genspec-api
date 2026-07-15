@@ -18,7 +18,7 @@ function applyToSheet(sheet: Sheet, r: ReturnType<typeof rowsToUpdateCells>): Sh
   const cd: Record<string, Record<string, any>> = JSON.parse(JSON.stringify(sheet.data?.cellData ?? {}));
   for (const a of r!.actions) {
     if (a.type !== 'update_cells') continue;
-    const m = a.cell.match(/^([A-I])(\d+)$/)!;
+    const m = a.cell.match(/^([A-J])(\d+)$/)!;
     const col = m[1].charCodeAt(0) - 65;
     const rowIdx = Number(m[2]) - 1;
     (cd[String(rowIdx)] ??= {})[String(col)] = a.newValue === '' ? { v: '' } : { v: a.newValue };
@@ -26,7 +26,7 @@ function applyToSheet(sheet: Sheet, r: ReturnType<typeof rowsToUpdateCells>): Sh
   return { ...sheet, data: { ...sheet.data, cellData: cd } };
 }
 const val = (s: Sheet, cell: string) => {
-  const m = cell.match(/^([A-I])(\d+)$/)!;
+  const m = cell.match(/^([A-J])(\d+)$/)!;
   return s.data?.cellData?.[String(Number(m[2]) - 1)]?.[String(m[1].charCodeAt(0) - 65)]?.v ?? '';
 };
 
@@ -39,6 +39,9 @@ describe('layout sheet BOQ — tiêu đề + header + footnote', () => {
     expect(val(after, 'A1')).toBe('1. KẾT CẤU & BAO CHE');
     expect(val(after, 'A2')).toBe('STT');
     expect(val(after, 'G2')).toBe('Diễn giải');
+    expect(val(after, 'H2')).toBe('Đơn giá');
+    expect(val(after, 'I2')).toBe('Thành tiền');
+    expect(val(after, 'J2')).toBe('Nguồn giá');
     expect(val(after, 'B3')).toBe('AE.62210');
     expect(val(after, 'B4')).toBe('AK.21110');
     // footnote NGAY dưới data cuối (dòng 5), không chừa dòng trống
@@ -74,12 +77,33 @@ describe('layout sheet BOQ — tiêu đề + header + footnote', () => {
     // Header đã khớp → KHÔNG xoá vùng title/header (dòng 1-2) để ghi lại từ đầu.
     // (Ô trống ở dòng data là giá trị thật của cột objectGroup, không phải wipe.)
     const wipedHeader = r2!.actions.filter(
-      (a: any) => a.type === 'update_cells' && a.newValue === '' && /^[A-G][12]$/.test(a.cell),
+      (a: any) => a.type === 'update_cells' && a.newValue === '' && /^[A-J][12]$/.test(a.cell),
     );
     expect(wipedHeader).toHaveLength(0);
     // và không ghi đè lại nhãn header (A2=STT) vì đã đúng chỗ
     const wroteHeader = r2!.actions.some((a: any) => a.cell === 'A2' && a.newValue === 'STT');
     expect(wroteHeader).toBe(false);
+  });
+});
+
+describe('cột giá/nguồn — trace giá thật ghi vào Excel (không chỉ chat)', () => {
+  it('row có unitPrice/totalPrice/source → 3 ô H/I/J nhận đúng giá trị, không bịa số khi thiếu', () => {
+    const sheet = emptySheet('1. Kết cấu & bao che');
+    const rows: RescueRow[] = [
+      { stt: '1', code: 'AE.62210', name: 'Xây tường', unit: 'm3', quantity: '10', note: 'x',
+        unitPrice: '1.500.000', totalPrice: '15.000.000', source: 'CB giá Hà Nội 07/2025' },
+      { stt: '2', code: 'AK.21110', name: 'Trát tường', unit: 'm2', quantity: '5', note: 'y' }, // thiếu giá
+    ];
+    // Không truyền title → header ở dòng 1, data bắt đầu dòng 2.
+    const r = rowsToUpdateCells(rows, stateWith(sheet), '1. Kết cấu & bao che');
+    const after = applyToSheet(sheet, r);
+    expect(val(after, 'H2')).toBe('1.500.000');
+    expect(val(after, 'I2')).toBe('15.000.000');
+    expect(val(after, 'J2')).toBe('CB giá Hà Nội 07/2025');
+    // dòng thiếu giá → trống, KHÔNG "0"/ước lượng
+    expect(val(after, 'H3')).toBe('');
+    expect(val(after, 'I3')).toBe('');
+    expect(val(after, 'J3')).toBe('');
   });
 });
 

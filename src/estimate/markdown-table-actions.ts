@@ -1,13 +1,13 @@
 // Rescue layer: khi model trả bảng markdown khối lượng thay vì JSON actions,
 // chuyển bảng thành update_cells để đề xuất vẫn ghi được vào sheet.
-// Đồng thời là nơi định nghĩa layout 9 cột chuẩn của sheet Khối lượng + format_sheet.
+// Đồng thời là nơi định nghĩa layout 10 cột chuẩn của sheet Khối lượng + format_sheet.
 import { Action, EstimateState, Sheet } from './estimate.types';
 import { parseExcelCell } from './reducer';
 import { NORM_CODE_CORE } from '../catalog/norm-code';
 
-// Layout 7 cột: A=STT B=Mã hiệu C=Tên công tác D=Nhóm đối tượng E=Đơn vị
-// F=Khối lượng G=Diễn giải. Ô thiếu giá trị → "".
-// (Đơn giá/Thành tiền/Nguồn TẠM ẨN — bật lại khi có billing Gemini để tra giá web.)
+// Layout 10 cột: A=STT B=Mã hiệu C=Tên công tác D=Nhóm đối tượng E=Đơn vị
+// F=Khối lượng G=Diễn giải H=Đơn giá I=Thành tiền J=Nguồn giá. Ô thiếu giá trị → "".
+// (Billing Gemini đã bật → giá/nguồn hiện thẳng trên Excel, không chỉ trong chat.)
 const COLUMN_ORDER = [
   'stt',
   'code',
@@ -16,6 +16,9 @@ const COLUMN_ORDER = [
   'unit',
   'quantity',
   'note',
+  'unitPrice',
+  'totalPrice',
+  'source',
 ] as const;
 type ColumnKey = (typeof COLUMN_ORDER)[number];
 
@@ -27,18 +30,21 @@ const HEADER_LABELS: Record<ColumnKey, string> = {
   unit: 'Đơn vị',
   quantity: 'Khối lượng',
   note: 'Diễn giải',
+  unitPrice: 'Đơn giá',
+  totalPrice: 'Thành tiền',
+  source: 'Nguồn giá',
 };
 
-const COL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'] as const;
+const COL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'] as const;
 
-/** Cột cuối của layout (Diễn giải). Suy ra từ COL_LETTERS — đổi số cột không phải sửa tay. */
+/** Cột cuối của layout (Nguồn giá). Suy ra từ COL_LETTERS — đổi số cột không phải sửa tay. */
 const LAST_COL = COL_LETTERS[COL_LETTERS.length - 1];
 
-/** Độ rộng cột (px) theo thứ tự A→G. */
-export const TAKEOFF_COL_WIDTHS_PX = [40, 110, 300, 120, 60, 90, 420] as const;
+/** Độ rộng cột (px) theo thứ tự A→J. */
+export const TAKEOFF_COL_WIDTHS_PX = [40, 110, 300, 120, 60, 90, 420, 100, 120, 260] as const;
 
-/** Chỉ số cột số (Khối lượng = F, index 5) — căn phải. */
-const NUMERIC_COL_INDEXES = [5];
+/** Chỉ số cột số (Khối lượng=F/5, Đơn giá=H/7, Thành tiền=I/8) — căn phải. */
+const NUMERIC_COL_INDEXES = [5, 7, 8];
 
 const THIN_BORDER = { s: 1, cl: { rgb: '#d0d0d0' } };
 const CELL_BORDER = { t: THIN_BORDER, b: THIN_BORDER, l: THIN_BORDER, r: THIN_BORDER };
@@ -89,9 +95,10 @@ export const TAKEOFF_TITLE_STYLE = {
 
 const REQUIRED_KEYS = ['stt', 'code', 'name', 'unit', 'quantity', 'note'] as const;
 
-/** Dòng chuẩn — 6 cột lõi + objectGroup (Nhóm đối tượng). Giá/nguồn tạm ẩn. */
+/** Dòng chuẩn — 6 cột lõi bắt buộc + objectGroup/unitPrice/totalPrice/source (optional,
+ * để "" khi chưa có giá — KHÔNG bịa). */
 export type RescueRow = Record<(typeof REQUIRED_KEYS)[number], string> &
-  Partial<Record<'objectGroup', string>>;
+  Partial<Record<'objectGroup' | 'unitPrice' | 'totalPrice' | 'source', string>>;
 
 /** Bỏ dấu tiếng Việt + lowercase để so khớp fuzzy. */
 function normalize(s: string): string {
@@ -226,7 +233,7 @@ export interface TableRescueResult {
 }
 
 /**
- * format_sheet cho layout 9 cột chuẩn: widths A→I, header style (nếu có header),
+ * format_sheet cho layout 10 cột chuẩn: widths A→J, header style (nếu có header),
  * border mảnh 4 cạnh mọi ô dữ liệu, cột E/F/G căn phải, chú thích italic xám.
  * Không zebra — nền sáng cứng chói trên dark mode (FE remap zinc).
  */
@@ -248,7 +255,7 @@ export function buildTakeoffFormatAction(
   footnoteRow?: number,
   /** Màu theo sheet (tint nền + accent chữ) cho tiêu đề/header. */
   theme?: SheetTheme,
-  /** Dòng TIÊU ĐỀ SHEET — style thanh tiêu đề trải hết 9 cột. */
+  /** Dòng TIÊU ĐỀ SHEET — style thanh tiêu đề trải hết 10 cột. */
   titleRow?: number | null,
 ): Action {
   const columnWidths: Record<string, number> = {};
@@ -274,7 +281,7 @@ export function buildTakeoffFormatAction(
 
   const cells: { cell: string; s: Record<string, any> }[] = [];
   if (titleRow != null) {
-    // Style cả 9 cột → thanh tiêu đề trải hết chiều ngang (không cần merge).
+    // Style cả 10 cột → thanh tiêu đề trải hết chiều ngang (không cần merge).
     COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${titleRow}`, s: titleStyle }));
   }
   if (headerRow != null) {
@@ -291,7 +298,7 @@ export function buildTakeoffFormatAction(
   }
   if (footnoteRow != null) cells.push({ cell: `B${footnoteRow}`, s: TAKEOFF_FOOTNOTE_STYLE });
 
-  // Merge thanh tiêu đề trải hết 9 cột (A..I) để căn giữa toàn bảng.
+  // Merge thanh tiêu đề trải hết 10 cột (A..J) để căn giữa toàn bảng.
   const merges = titleRow != null
     ? [{ startRow: titleRow - 1, startColumn: 0, endRow: titleRow - 1, endColumn: COL_LETTERS.length - 1 }]
     : undefined;
@@ -332,7 +339,7 @@ export function tableToUpdateCellsDetailed(
 }
 
 /**
- * Ghi một dãy dòng (đã map theo layout 9 cột chuẩn) vào dòng trống đầu tiên
+ * Ghi một dãy dòng (đã map theo layout 10 cột chuẩn) vào dòng trống đầu tiên
  * của sheet khối lượng. opts.footnote → 1 dòng chú thích giả định (cột B,
  * cách dòng dữ liệu cuối 1 dòng trống).
  */
@@ -356,9 +363,13 @@ export function rowsToUpdateCells(
   // Probe cột CUỐI của layout (G), không phải I: layout rút từ 9 → 7 cột nên cột I
   // không bao giờ được ghi ⇒ check cũ luôn false ⇒ mỗi lần bóc lại đều rơi nhánh
   // "xoá sạch rồi ghi lại từ dòng 1" (mất style/ghi đè) thay vì cập nhật tại chỗ.
+  // Nhãn cột cuối suy từ COLUMN_ORDER — KHÔNG hard-code 'note': thêm/bớt cột đổi
+  // cột cuối (từng là 'note', giờ là 'source') mà quên sửa hằng ở đây từng khiến
+  // check luôn false → mỗi lần bóc lại xoá sạch sheet thay vì cập nhật tại chỗ.
+  const lastColKey = COLUMN_ORDER[COLUMN_ORDER.length - 1];
   const hasEngineHeader =
     currentValueAt(sheet, `A${expectedHeaderRow}`) === HEADER_LABELS.stt &&
-    currentValueAt(sheet, `${LAST_COL}${expectedHeaderRow}`) === HEADER_LABELS.note;
+    currentValueAt(sheet, `${LAST_COL}${expectedHeaderRow}`) === HEADER_LABELS[lastColKey];
 
   const written = new Set<string>();
   const push = (cell: string, newValue: string) => {

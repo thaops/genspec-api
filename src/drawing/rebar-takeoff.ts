@@ -33,9 +33,11 @@ export interface RebarCallout {
   kind: RebarKind;
 }
 
-// `%%C`/`%%c` = Ø; số đứng trước = số lượng; `a<mm>` (thường LOWERCASE) = khoảng cách.
-// Uppercase `A<nnn>` là MÁC thép (A500/CB500…) → KHÔNG phải spacing, bỏ qua.
-const CALLOUT_RE = /(\d+)?\s*%%[Cc]\s*(\d{1,2})(?:\s*a\s*(\d{2,3}))?/g;
+// `%%C`/`%%c` (literal AutoCAD, chưa decode) HOẶC ký tự `Ø` thật (parser đã decode
+// trước khi lưu properties.text — xác nhận thật trên file KC: "2Ø6a500", "4Ø10",
+// "Ø6a150") đều = Ø. Số đứng trước = số lượng; `a<mm>` (thường LOWERCASE) = khoảng
+// cách. Uppercase `A<nnn>` là MÁC thép (A500/CB500…) → KHÔNG phải spacing, bỏ qua.
+const CALLOUT_RE = /(\d+)?\s*(?:%%[Cc]|Ø)\s*(\d{1,2})(?:\s*a\s*(\d{2,3}))?/g;
 // Loại nhiễu: bu lông/bolt (%%C12 nhưng là bu lông, không phải cốt thép).
 const BOLT_RE = /bu\s*l[oôơại]ng|bolt/i;
 

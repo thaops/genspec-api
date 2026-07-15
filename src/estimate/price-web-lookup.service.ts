@@ -134,7 +134,9 @@ export const WebPriceCacheSchema = SchemaFactory.createForClass(WebPriceCache);
 
 const HIT_TTL_MS = 7 * 24 * 3600 * 1000;
 const MISS_TTL_MS = 15 * 60 * 1000;
-const LOOKUP_TIMEOUT_MS = 40000;
+// > deadline tổng của research() (45s) — nếu ngắn hơn sẽ cắt ngang call grounded
+// đang chạy và mất nguồn thật (đo được 3-13s/call nhưng có model fallback chậm hơn).
+const LOOKUP_TIMEOUT_MS = 55000;
 
 const EXTRACT_SCHEMA = {
   type: 'OBJECT',

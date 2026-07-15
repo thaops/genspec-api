@@ -1,4 +1,4 @@
-import { executeAgentTool, findRow, getSheetState, locateSheet, reconcileByCode } from './agent-tools';
+import { executeAgentTool, findRow, getRow, getSheetState, locateSheet, reconcileByCode } from './agent-tools';
 import { DEFAULT_MARKUPS, EstimateState } from './estimate.types';
 
 function state(): EstimateState {
@@ -57,6 +57,42 @@ describe('findRow (read-before-write)', () => {
   });
   it('mã không có → found=false (không đoán)', () => {
     expect(findRow(state(), 'bt', 'XX.99999').found).toBe(false);
+  });
+});
+
+describe('getRow — định vị theo SỐ DÒNG (gap "dòng 5 sai, sửa lại")', () => {
+  it('row = số dòng hiển thị (1-based, khớp cell "X<row>") — dòng 3 = Trát tường', () => {
+    const r = getRow(state(), 'bt', 3);
+    expect(r.found).toBe(true);
+    expect(r.row).toBe(3);
+    expect(r.cells).toEqual(['2', 'AK.21110', 'Trát tường', '40']);
+  });
+
+  it('dòng 1 = header (đúng như user thấy trên sheet)', () => {
+    const r = getRow(state(), 'bt', 1);
+    expect(r.found).toBe(true);
+    expect(r.cells).toEqual(['STT', 'Mã hiệu', 'Tên công tác', 'Khối lượng']);
+  });
+
+  it('dòng 2 = Xây tường (không lệch off-by-one)', () => {
+    const r = getRow(state(), 'bt', 2);
+    expect(r.cells).toEqual(['1', 'AE.62210', 'Xây tường', '12.5']);
+  });
+
+  it('dòng ngoài phạm vi / trống → found=false, KHÔNG bịa nội dung', () => {
+    expect(getRow(state(), 'bt', 99).found).toBe(false);
+    expect(getRow(state(), 'bt', 0).found).toBe(false);
+    expect(getRow(state(), 'bt', -1).found).toBe(false);
+  });
+
+  it('sheet không tồn tại → found=false', () => {
+    expect(getRow(state(), 'no-such-sheet', 1).found).toBe(false);
+  });
+
+  it('executeAgentTool dispatch tới get_row', () => {
+    const r = executeAgentTool(state(), 'get_row', { sheetId: 'bt', row: 3 }) as any;
+    expect(r.found).toBe(true);
+    expect(r.cells).toContain('Trát tường');
   });
 });
 

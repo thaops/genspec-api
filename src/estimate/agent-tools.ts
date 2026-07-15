@@ -114,6 +114,35 @@ export function findRow(
   return { found: false, sheetId };
 }
 
+/**
+ * Tool: get_row (định vị dòng theo SỐ DÒNG — user chat kiểu "dòng 5 sai, sửa
+ * lại"). Đây là gap thật: find_row chỉ khớp theo giá trị ô (mã/từ khoá), không
+ * có cách tra theo số dòng người dùng gõ ra → LLM phải tự đoán ô cần sửa.
+ *
+ * QUAN TRỌNG — quy ước `row` khác `find_row`/`get_sheet_state`: ở ĐÂY `row` là
+ * SỐ DÒNG THẬT như hiển thị trên sheet, khớp trực tiếp với số trong địa chỉ ô
+ * (vd cell "B5" → row=5). Cố ý làm vậy để LLM dùng NGUYÊN con số user gõ
+ * ("dòng 5") ghép thẳng vào update_cells (cell: "X5") — không phải tự trừ 1
+ * (rủi ro lệch dòng nếu để LLM tự quy đổi).
+ */
+export function getRow(
+  state: EstimateState,
+  sheetId: string,
+  row: number,
+): { found: boolean; sheetId?: string; row?: number; cells?: string[] } {
+  const sheet = (state.sheets ?? []).find((s) => s.id === sheetId);
+  if (!sheet || !Number.isFinite(row) || row < 1) return { found: false };
+  const cd = cellsOf(sheet);
+  const cellDataKey = String(row - 1); // "dòng 5" (hiển thị) → cellData key "4" (0-based nội bộ)
+  const rowData = cd[cellDataKey];
+  if (!rowData) return { found: false, sheetId };
+  const maxCol = Math.max(-1, ...Object.keys(rowData).map((c) => Number(c)));
+  const cells: string[] = [];
+  for (let c = 0; c <= maxCol; c++) cells.push(val(rowData[String(c)]));
+  if (!cells.some((v) => v !== '')) return { found: false, sheetId }; // dòng trống — không bịa nội dung
+  return { found: true, sheetId, row, cells };
+}
+
 // ===== Reconcile (MERGE by key): các mã → đã có row nào / chưa có =====
 export function reconcileByCode(
   state: EstimateState,
@@ -164,6 +193,16 @@ export const AGENT_TOOL_DECLARATIONS = [
       required: ['sheetId', 'query'],
     },
   },
+  {
+    name: 'get_row',
+    description:
+      'Khi user chat nhắc SỐ DÒNG cụ thể (vd "dòng 5 sai, sửa lại", "hàng 12 đổi màu") — BẮT BUỘC gọi tool này TRƯỚC khi sinh update_cells/format_sheet, lấy đúng nội dung dòng đó thay vì đoán. `row` = đúng con số user gõ (khớp trực tiếp số trong địa chỉ ô, vd row=5 dùng cho cell "X5"). Không tìm thấy (dòng trống/ngoài phạm vi) → không bịa nội dung.',
+    parameters: {
+      type: 'OBJECT',
+      properties: { sheetId: { type: 'STRING' }, row: { type: 'NUMBER', description: 'số dòng user nhắc tới, vd "dòng 5" → 5' } },
+      required: ['sheetId', 'row'],
+    },
+  },
 ] as const;
 
 /** Dispatcher: thực thi 1 tool-call trên state (PURE). Trả object JSON-able cho functionResponse. */
@@ -175,6 +214,8 @@ export function executeAgentTool(state: EstimateState, name: string, args: Recor
       return getSheetState(state, String(args?.sheetId ?? ''));
     case 'find_row':
       return findRow(state, String(args?.sheetId ?? ''), String(args?.query ?? ''));
+    case 'get_row':
+      return getRow(state, String(args?.sheetId ?? ''), Number(args?.row));
     default:
       return { error: `unknown tool: ${name}` };
   }

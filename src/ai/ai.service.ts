@@ -18,10 +18,15 @@ export class AiService {
 
   constructor(private readonly config: ConfigService) {
     this.geminiKey = this.config.get<string>('GEMINI_API_KEY');
-    // Default gemini-2.5-flash: model DUY NHẤT test được với key này CÓ grounding
-    // (Google Search) thật — gemini-3-flash/gemini-3.5-flash KHÔNG tồn tại (call lỗi),
-    // để làm default sẽ khiến research rơi rỗng → agent bịa giá. Override qua env
-    // GEMINI_MODEL/GEMINI_SEARCH_MODEL nếu sau này có model mới ground được.
+    // Default gemini-2.5-flash — đo thật 07/2026 với key hiện tại (đã bật billing):
+    // grounding (Google Search) CHẠY, trả 3-16 groundingChunks, latency 3-13s. Đây vẫn
+    // là model tốt nhất cho research: nhanh + ổn định.
+    // Các model khác đã đo, KHÔNG dùng làm default:
+    //   - gemini-3.5-flash      : ground được (16 chunks) nhưng ~120s → vượt mọi timeout.
+    //   - gemini-3-flash-preview: HTTP 503 "high demand" (~107s mới trả lỗi).
+    //   - gemini-flash-latest   : HTTP 503 thường xuyên → chỉ giữ làm fallback.
+    //   - gemini-2.5-pro / 2.0-flash / 2.5-flash-lite: HTTP 404, không còn cho key mới.
+    // Override qua env GEMINI_MODEL/GEMINI_SEARCH_MODEL khi có model mới ground nhanh hơn.
     const estimate = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.5-flash';
     const search = this.config.get<string>('GEMINI_SEARCH_MODEL') ?? 'gemini-2.5-flash';
     this.geminiEstimateModels = [...new Set([estimate, 'gemini-flash-latest', 'gemini-2.5-flash'])];
@@ -58,9 +63,12 @@ export class AiService {
     if (!this.gemini) {
       return null;
     }
-    // Deadline TỔNG cho cả vòng model×attempt — chống treo ~160s khi key tier
-    // thiếu grounding (mỗi model timeout 20s + retry chồng lên nhau).
-    const OVERALL_MS = 30000;
+    // Deadline TỔNG cho cả vòng model×attempt. Trước sizing cho tình huống key
+    // free-tier không có grounding (bỏ cuộc sớm). Nay grounding chạy thật và call
+    // grounded đo được 3-13s → 30s quá chặt: 1 call chậm là hết sạch ngân sách,
+    // không còn chỗ cho fallback. Nới 45s để 1 attempt chậm vẫn còn lượt model sau.
+    const OVERALL_MS = 45000;
+    const ATTEMPT_MS = 25000;
     const deadline = Date.now() + OVERALL_MS;
     for (const modelName of this.geminiSearchModels) {
       if (Date.now() >= deadline) break;
@@ -72,9 +80,9 @@ export class AiService {
         const budget = deadline - Date.now();
         if (budget <= 0) return null;
         try {
-          // Timeout min(20s, ngân sách còn lại của deadline tổng).
+          // Timeout min(ATTEMPT_MS, ngân sách còn lại của deadline tổng).
           const timeout = new Promise<never>((_, rej) =>
-            setTimeout(() => rej(new Error('research timeout')), Math.min(20000, budget)),
+            setTimeout(() => rej(new Error('research timeout')), Math.min(ATTEMPT_MS, budget)),
           );
           const r = await Promise.race([model.generateContent(query), timeout]);
           const text = r.response.text();
@@ -87,15 +95,17 @@ export class AiService {
             .map((c) => ({ title: c.web?.title, uri: c.web?.uri }))
             .filter((s) => !!s.uri);
           if (!text && sources.length === 0) {
-            this.logger.warn(`Gemini research (${modelName}): empty — grounding may be unavailable for this key tier`);
+            this.logger.warn(`Gemini research (${modelName}): rỗng cả text lẫn sources`);
             return null;
           }
           return { text, sources };
         } catch (err) {
           const msg = (err as Error).message ?? '';
           if (msg === 'research timeout') {
-            this.logger.warn(`Gemini research (${modelName}) timed out after 20s`);
-            return null;
+            // Bỏ model này sang model kế (deadline tổng vẫn chặn treo), thay vì
+            // bỏ cuộc cả vòng — 1 model chậm không nên giết luôn lượt fallback.
+            this.logger.warn(`Gemini research (${modelName}) timed out — thử model kế`);
+            break;
           }
           if (!this.isTransient(err)) {
             this.logger.warn(`Gemini research (${modelName}) failed: ${msg}`);

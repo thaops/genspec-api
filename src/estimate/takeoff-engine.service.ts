@@ -14,6 +14,7 @@ import { rowsToUpdateCells } from './markdown-table-actions';
 import { NormWebLookupService } from './norm-web-lookup.service';
 import { PriceWebLookupService, WebPriceHit } from './price-web-lookup.service';
 import { previewActions } from './transparency';
+import { aggregateRebar, RebarTakeoff } from '../drawing/rebar-takeoff';
 
 // ===== Pure core (không Mongo — verify script gọi trực tiếp từ dist) =====
 
@@ -22,10 +23,14 @@ export interface TakeoffAssumptions {
   wallThickness: number; // m
   beamDepth: number; // m
   footingDepth?: number; // m — chiều cao móng (giả định, mặc định 0.4m); mặt bằng không có → công khai trong ghi chú
+  pileLength?: number; // m — chiều dài cọc (giả định, mặc định 20m); mặt cắt không có thông tin dài → công khai trong ghi chú
 }
 
 /** Chiều cao móng giả định (m) khi assumptions.footingDepth trống — ghi rõ trong Ghi chú mỗi dòng móng. */
 export const DEFAULT_FOOTING_DEPTH = 0.4;
+
+/** Chiều dài cọc giả định (m) khi assumptions.pileLength trống — ghi rõ trong Ghi chú mỗi dòng cọc. */
+export const DEFAULT_PILE_LENGTH = 20;
 
 export interface EngineDrawingObject {
   type: string;
@@ -80,6 +85,7 @@ export const COMMON_FALLBACK_CODES: Record<TakeoffRowKey, { code: string; name: 
   ceiling: { code: 'AK.64110', name: 'Trần thạch cao khung xương' },
   ceiling_paint: { code: 'AK.84330', name: 'Sơn trần' },
   skirting: { code: 'AK.57110', name: 'Ốp/len chân tường' },
+  pile_concrete: { code: 'AC.24110', name: 'Cọc bê tông đúc sẵn ép' },
 };
 
 export type TakeoffRowKey =
@@ -92,6 +98,7 @@ export type TakeoffRowKey =
   | 'beam_formwork'
   | 'footing_concrete'   // bê tông móng (= diện tích móng × chiều cao giả định)
   | 'footing_formwork'   // ván khuôn móng (= chu vi móng × chiều cao)
+  | 'pile_concrete'      // bê tông cọc (= tiết diện mặt cắt kín × chiều dài cọc giả định)
   | 'door'
   | 'window'
   | 'slab'
@@ -118,7 +125,7 @@ export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
  */
 export const DISCIPLINE_ROWKEYS: Record<Discipline, TakeoffRowKey[] | null> = {
   KT: ['wall_area', 'wall_volume', 'wall_paint', 'door', 'window', 'floor_screed', 'floor_finish', 'ceiling', 'ceiling_paint', 'skirting'],
-  KC: ['footing_concrete', 'footing_formwork', 'column_concrete', 'column_formwork', 'beam_concrete', 'beam_formwork', 'slab'],
+  KC: ['footing_concrete', 'footing_formwork', 'column_concrete', 'column_formwork', 'beam_concrete', 'beam_formwork', 'slab', 'pile_concrete'],
   DIEN: [],
   NUOC: [],
   KHAC: null,
@@ -244,6 +251,7 @@ export const NORM_KEYWORDS: Record<TakeoffRowKey, string[]> = {
   beam_formwork: ['ván khuôn.*dầm'],
   footing_concrete: ['bê tông.*móng', 'bê tông.*đài'],
   footing_formwork: ['ván khuôn.*móng', 'ván khuôn.*đài'],
+  pile_concrete: ['bê tông.*cọc', 'ép cọc', 'cọc.*khoan nhồi', 'cọc'],
   door: ['cửa đi', 'cửa'],
   window: ['cửa sổ', 'cửa'],
   slab: ['bê tông.*sàn'],
@@ -268,6 +276,7 @@ const BOQ_GROUP: Record<TakeoffRowKey, string> = {
   beam_concrete: BOQ_GROUP_THO,
   beam_formwork: BOQ_GROUP_THO,
   slab: BOQ_GROUP_THO,
+  pile_concrete: BOQ_GROUP_THO,
   wall_area: BOQ_GROUP_FINISH,
   wall_paint: BOQ_GROUP_FINISH,
   floor_screed: BOQ_GROUP_FINISH,
@@ -319,6 +328,7 @@ const ROWKEY_SHEET: Record<TakeoffRowKey, string> = {
   beam_concrete: 'structure',
   beam_formwork: 'structure',
   slab: 'structure',
+  pile_concrete: 'structure',
   wall_paint: 'finishing',
   floor_screed: 'finishing',
   floor_finish: 'finishing',
@@ -410,6 +420,7 @@ const DEFAULT_NAMES: Record<TakeoffRowKey, string> = {
   beam_formwork: 'Ván khuôn dầm',
   footing_concrete: 'Bê tông móng',
   footing_formwork: 'Ván khuôn móng',
+  pile_concrete: 'Bê tông cọc',
   door: 'Cửa đi',
   window: 'Cửa sổ',
   slab: 'Sàn (bê tông)',
@@ -426,6 +437,7 @@ const OBJECT_GROUP_LABEL: Record<string, string> = {
   column: 'Cột (column)',
   beam: 'Dầm (beam)',
   footing: 'Móng (footing)',
+  pile: 'Cọc (pile)',
   door: 'Cửa đi (door)',
   window: 'Cửa sổ (window)',
   slab: 'Sàn/nền (slab)',
@@ -483,6 +495,7 @@ export interface ResolvedAssumptions {
   D: number;  // cao dầm
   W: number;  // bề rộng dầm
   FD: number; // cao móng
+  PL: number; // chiều dài cọc
 }
 
 export interface DeriveRule {
@@ -537,6 +550,11 @@ export const DERIVE_RULES: Record<string, DeriveRule[]> = {
       qty: (t, a) => t.perimeter * a.FD,
       note: (t, a) => `chu vi ${f3(t.perimeter)}m × ${f3(a.FD)}m cao = ${f3(t.perimeter * a.FD)} m²` },
   ],
+  pile: [
+    { key: 'pile_concrete', group: 'pile', unit: 'm3',
+      qty: (t, a) => t.area * a.PL,
+      note: (t, a) => `${f3(t.area)} m² tiết diện (${t.count} cọc) × ${f3(a.PL)}m dài (giả định) = ${f3(t.area * a.PL)} m³` },
+  ],
   door: [
     { key: 'door', group: 'door', unit: 'm2',
       qty: (t) => t.area,
@@ -545,7 +563,7 @@ export const DERIVE_RULES: Record<string, DeriveRule[]> = {
 };
 
 /** Thứ tự chạy nhóm (giữ đúng thứ tự phát sinh cũ để STT ổn định). */
-const DERIVE_GROUP_ORDER = ['wall', 'column', 'beam', 'footing', 'door'];
+const DERIVE_GROUP_ORDER = ['wall', 'column', 'beam', 'footing', 'pile', 'door'];
 
 export interface HatchSlabStats {
   /** Số hatch có diện tích > 0. */
@@ -640,7 +658,7 @@ export function countObjectClusters(
 // Guard tiết diện cấu kiện KC: cạnh nhỏ hơn ngưỡng vật lý = ký hiệu/điểm/bọt lưới
 // trục, KHÔNG phải mặt cắt thật → không đo (chống ván khuôn/bê tông khống).
 // Cột/dầm thật cạnh ≥ ~100mm; 0.08m an toàn dưới mọi tiết diện thật.
-export const SECTION_TYPES = new Set(['column', 'beam', 'footing']);
+export const SECTION_TYPES = new Set(['column', 'beam', 'footing', 'pile']);
 export const MIN_SECTION_M = 0.08;
 /** true nếu object là cấu kiện KC có tiết diện đủ lớn để đo (không phải ký hiệu). */
 export function isRealSection(obj: EngineDrawingObject, factor: number): boolean {
@@ -650,12 +668,37 @@ export function isRealSection(obj: EngineDrawingObject, factor: number): boolean
 
 const TYPE_LABELS_VI: Record<string, string> = {
   wall: 'tường', column: 'cột', beam: 'dầm', door: 'cửa', window: 'cửa sổ',
-  slab: 'sàn', hatch: 'hatch', text: 'text', block: 'block',
+  slab: 'sàn', hatch: 'hatch', text: 'text', block: 'block', pile: 'cọc',
   dimension: 'dimension', unknown: 'chưa phân loại',
 };
 
 /** Các loại đã bóc được (trực tiếp, qua hatch→sàn, hoặc opening/slab-typed). */
-const TAKEN_TYPES = new Set<string>([...MEASURED_TYPES, 'hatch', 'opening', 'slab']);
+const TAKEN_TYPES = new Set<string>([...MEASURED_TYPES, 'hatch', 'opening', 'slab', 'pile']);
+
+/**
+ * Phụ lục CỐT THÉP (callout) — KHÔNG phải công tác, KHÔNG có kg. Bản KC thường vẽ
+ * móng/dầm bằng nét đơn (không mặt cắt kín để đo hình học) nhưng LUÔN có callout Ø
+ * trên bản vẽ — đây là nguồn thật QS dùng để bóc thép, không phải suy từ hình học.
+ * `computeRebarWeight` cần CHIỀU DÀI (bảng thống kê thép hoặc QS xác nhận) nên
+ * dừng ở mức đếm theo Ø — không bịa kg khi chưa có chiều dài.
+ */
+export function renderRebarSummary(agg: RebarTakeoff): string {
+  if (agg.totalCallouts === 0) return '';
+  const lines = agg.diameters.map((d) => {
+    const parts: string[] = [];
+    if (d.mainBarCount > 0) parts.push(`${d.mainBarCount} thanh chính đếm được`);
+    if (d.stirrupCalloutCount > 0) {
+      const sp = d.spacings.length ? ` (khoảng cách ${d.spacings.join('/')}mm)` : '';
+      parts.push(`${d.stirrupCalloutCount} callout đai/phân bố${sp}`);
+    }
+    return `- Ø${d.diameter}: ${parts.join('; ')} — đơn trọng ${d.unitWeightKgM} kg/m`;
+  });
+  return [
+    `PHỤ LỤC CỐT THÉP (từ callout bản vẽ, ${agg.totalCallouts} callout — KHÔNG có trong bảng công tác trên):`,
+    ...lines,
+    `⚠ ${agg.note}`,
+  ].join('\n');
+}
 
 /**
  * 1 dòng thống kê (KHÔNG phải công tác) để user biết bản vẽ còn gì chưa bóc,
@@ -704,7 +747,7 @@ export function computeTakeoffRows(
 ): TakeoffEngineRow[] {
   // Ngoài MEASURED_TYPES, còn gom 'opening' (lỗ mở/cửa sổ) và 'slab' (sàn vẽ
   // dạng polygon) để có nhánh đo — tăng coverage cho type đã nhận diện.
-  const AGG_TYPES = new Set<string>([...MEASURED_TYPES, 'opening', 'slab', 'footing']);
+  const AGG_TYPES = new Set<string>([...MEASURED_TYPES, 'opening', 'slab', 'footing', 'pile']);
   const totals = new Map<string, GroupTotals>();
   for (const obj of objects) {
     if (!isCountableObject(obj)) continue;
@@ -763,15 +806,18 @@ export function computeTakeoffRows(
 
   // RULE ENGINE: mỗi nhóm hình học chạy bảng công tác dẫn xuất (DERIVE_RULES).
   // Móng (đơn/băng/đài): chỉ chạy khi có diện tích mặt bằng — chiều cao giả định
-  // công khai trong ghi chú; cọc/đài cọc cần mặt cắt → vẫn ở CHECKLIST_QS, không bịa.
+  // công khai trong ghi chú. Cọc: chỉ chạy khi có mặt cắt KÍN (isRealSection chặn
+  // nét đơn/ký hiệu) — chiều dài giả định công khai, giống móng.
   const resolved: ResolvedAssumptions = {
     H, T, D, W: ASSUMED_BEAM_WIDTH,
     FD: assumptions.footingDepth ?? DEFAULT_FOOTING_DEPTH,
+    PL: assumptions.pileLength ?? DEFAULT_PILE_LENGTH,
   };
   for (const grp of DERIVE_GROUP_ORDER) {
     const t = totals.get(grp);
     if (!t) continue;
     if (grp === 'footing' && !(t.area > 0)) continue; // móng cần diện tích mặt bằng
+    if (grp === 'pile' && !(t.area > 0)) continue; // cọc cần tiết diện mặt cắt kín
     for (const rule of DERIVE_RULES[grp]) {
       push(rule.key, rule.group, rule.unit, rule.qty(t, resolved), rule.note(t, resolved));
     }
@@ -1136,6 +1182,8 @@ export class TakeoffEngineService {
     filledSheets.forEach((sheetDef, si) => {
       const sheetRows = rowsBySheet.get(sheetDef.key)!;
       const isLast = si === filledSheets.length - 1;
+      // Ô giá thiếu → "" (KHÔNG "0"/"—"): đúng convention sheet, không bịa số chưa có nguồn.
+      const cellVnd = (n?: number) => (n != null ? Math.round(n).toLocaleString('vi-VN') : '');
       const mirror = rowsToUpdateCells(
         sheetRows.map((r, i) => ({
           stt: String(i + 1),
@@ -1145,6 +1193,9 @@ export class TakeoffEngineService {
           unit: r.unit,
           quantity: String(r.quantity),
           note: r.note,
+          unitPrice: cellVnd(r.unitPrice),
+          totalPrice: cellVnd(r.totalPrice),
+          source: r.source ?? '',
         })),
         state,
         sheetDef.name,
@@ -1162,6 +1213,11 @@ export class TakeoffEngineService {
       ...takeoffActions,
       ...mirrorActions,
     ];
+
+    // Phụ lục thép: dùng text của TẤT CẢ đối tượng trong phạm vi đang bóc (đã lọc
+    // rejected/region) — callout Ø không phụ thuộc classification hình học.
+    const rebarTexts = objects.map((o) => (o as any).text).filter((t): t is string => !!t);
+    const rebarSummary = renderRebarSummary(aggregateRebar(rebarTexts));
 
     const groups = [...new Set(rows.map((r) => r.group))];
     const missingCode = rows.filter((r) => !r.code);
@@ -1196,6 +1252,7 @@ export class TakeoffEngineService {
       rowsToMarkdownTable(rows),
       '',
       renderChecklistQs(existingDisciplines),
+      ...(rebarSummary ? ['', rebarSummary] : []),
       '',
       summarizeDetectedObjects(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit),
     ].join('\n');
