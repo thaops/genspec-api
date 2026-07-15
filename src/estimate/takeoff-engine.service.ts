@@ -637,6 +637,17 @@ export function countObjectClusters(
   return { clusters: roots.size, spanM: Math.max(maxX - minX, maxY - minY) * factor };
 }
 
+// Guard tiết diện cấu kiện KC: cạnh nhỏ hơn ngưỡng vật lý = ký hiệu/điểm/bọt lưới
+// trục, KHÔNG phải mặt cắt thật → không đo (chống ván khuôn/bê tông khống).
+// Cột/dầm thật cạnh ≥ ~100mm; 0.08m an toàn dưới mọi tiết diện thật.
+export const SECTION_TYPES = new Set(['column', 'beam', 'footing']);
+export const MIN_SECTION_M = 0.08;
+/** true nếu object là cấu kiện KC có tiết diện đủ lớn để đo (không phải ký hiệu). */
+export function isRealSection(obj: EngineDrawingObject, factor: number): boolean {
+  if (!SECTION_TYPES.has(obj.type)) return true;
+  return Math.min(obj.boundingBox.w, obj.boundingBox.h) * factor >= MIN_SECTION_M;
+}
+
 const TYPE_LABELS_VI: Record<string, string> = {
   wall: 'tường', column: 'cột', beam: 'dầm', door: 'cửa', window: 'cửa sổ',
   slab: 'sàn', hatch: 'hatch', text: 'text', block: 'block',
@@ -650,12 +661,16 @@ const TAKEN_TYPES = new Set<string>([...MEASURED_TYPES, 'hatch', 'opening', 'sla
  * 1 dòng thống kê (KHÔNG phải công tác) để user biết bản vẽ còn gì chưa bóc,
  * thay vì tưởng chỉ có mấy nhóm ít ỏi trong bảng.
  */
-export function summarizeDetectedObjects(objects: EngineDrawingObject[]): string {
+export function summarizeDetectedObjects(objects: EngineDrawingObject[], factor?: number): string {
   const counts: Record<string, number> = {};
+  const symbolLike: Record<string, number> = {}; // cấu kiện KC nghi ký hiệu (tiết diện quá nhỏ)
   let ambiguous = 0;
   for (const o of objects) {
     if (o.ambiguous) { ambiguous += 1; continue; }
     counts[o.type] = (counts[o.type] ?? 0) + 1;
+    if (factor != null && SECTION_TYPES.has(o.type) && !isRealSection(o, factor)) {
+      symbolLike[o.type] = (symbolLike[o.type] ?? 0) + 1;
+    }
   }
   const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   const parts = entries.map(([t, n]) => `${n} ${TYPE_LABELS_VI[t] ?? t}`);
@@ -665,8 +680,14 @@ export function summarizeDetectedObjects(objects: EngineDrawingObject[]): string
   const suffix = notTaken.length
     ? ` Chưa bóc: ${notTaken.join(', ')} — cần khoanh vùng/gán loại thủ công.`
     : '';
+  const symParts = Object.entries(symbolLike)
+    .filter(([, n]) => n > 0)
+    .map(([t, n]) => `${n}/${counts[t]} ${TYPE_LABELS_VI[t] ?? t}`);
+  const symSuffix = symParts.length
+    ? ` ${symParts.join(', ')} nghi KÝ HIỆU (tiết diện < ${MIN_SECTION_M * 100}cm) — KHÔNG đo khối lượng, cần khoanh vùng/gán mặt cắt thật.`
+    : '';
   const ambSuffix = ambiguous ? ` ${ambiguous} đối tượng chưa chốt loại (không tính khối lượng).` : '';
-  return `Đối tượng nhận diện: ${parts.join(', ')}.${suffix}${ambSuffix}`;
+  return `Đối tượng nhận diện: ${parts.join(', ')}.${suffix}${symSuffix}${ambSuffix}`;
 }
 
 /**
@@ -688,6 +709,7 @@ export function computeTakeoffRows(
   for (const obj of objects) {
     if (!isCountableObject(obj)) continue;
     if (!AGG_TYPES.has(obj.type)) continue;
+    if (!isRealSection(obj, factor)) continue; // ký hiệu, không phải tiết diện cấu kiện — không đo
     const m = measure(obj, factor);
     const g = totals.get(obj.type) ?? { count: 0, length: 0, area: 0, perimeter: 0 };
     g.count += 1;
@@ -1175,7 +1197,7 @@ export class TakeoffEngineService {
       '',
       renderChecklistQs(existingDisciplines),
       '',
-      summarizeDetectedObjects(objects as unknown as EngineDrawingObject[]),
+      summarizeDetectedObjects(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit),
     ].join('\n');
 
     const hs = hatchSlabStats(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit);
