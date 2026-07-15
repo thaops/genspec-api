@@ -25,6 +25,7 @@ import { CloudinaryService } from '../storage/cloudinary.service';
 import { SceneBuilderService } from '../drawing/services/scene-builder.service';
 import { DrawingSceneService } from '../drawing/services/drawing-scene.service';
 import { DrawingSceneEntity, DrawingSceneSchema } from '../drawing/schemas/drawing-scene.schema';
+import { CatalogModule } from '../catalog/catalog.module';
 
 // BullModule.forRoot() is registered globally in AppModule.
 // This module only registers the queue and its processor.
@@ -40,6 +41,7 @@ import { DrawingSceneEntity, DrawingSceneSchema } from '../drawing/schemas/drawi
       { name: DrawingLayerRule.name,    schema: DrawingLayerRuleSchema },
       { name: DrawingObjectOverride.name, schema: DrawingObjectOverrideSchema },
     ]),
+    CatalogModule,
   ],
   providers: [
     DrawingJobProcessor,
