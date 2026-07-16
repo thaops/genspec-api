@@ -197,6 +197,10 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
               formula: a.formula ?? ex?.formula,
               note: a.note ?? ex?.note,
               quantity: a.quantity != null ? num(a.quantity) : computed != null ? computed : num(ex?.quantity),
+              // Giá: nếu action gửi (kể cả undefined khi bóc lại mất giá) thì lấy theo
+              // action; action không có field này (edit thủ công) thì giữ giá cũ.
+              unitPrice: 'unitPrice' in a ? a.unitPrice : ex?.unitPrice,
+              source: 'source' in a ? a.source : ex?.source,
             };
           },
         ),

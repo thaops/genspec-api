@@ -11,7 +11,7 @@ import { DrawingObject, DrawingObjectDocument } from '../drawing/schemas/drawing
 import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
 import { Discipline, isDiscipline } from '../drawing/discipline';
 import { EstimateService } from './estimate.service';
-import { Action, EstimateState, ValidationFinding, ValidationReport } from './estimate.types';
+import { Action, EstimateState, TakeoffItem, ValidationFinding, ValidationReport } from './estimate.types';
 import { rowsToUpdateCells, nameMatchScore } from './markdown-table-actions';
 import { NormWebLookupService } from './norm-web-lookup.service';
 import { PriceWebLookupService, WebPriceHit } from './price-web-lookup.service';
@@ -477,6 +477,86 @@ const ROWKEY_SHEET: Record<TakeoffRowKey, string> = {
 };
 
 /**
+ * rowKey → nhóm HÌNH HỌC (cột "Nhóm đối tượng"/D). Cần khi render GỘP: dòng của bản vẽ
+ * KHÁC nằm trong `state.takeoff` chỉ còn id+giá, phải suy lại nhóm hình học từ rowKey.
+ * MEP suy bằng cách bỏ tiền tố `mep_` (mep_light → light) — khớp `group` gốc lúc bóc.
+ */
+const ROWKEY_GEOM_GROUP: Record<TakeoffRowKey, string> = {
+  ...mepRecord((k) => k.replace(/^mep_/, '')),
+  wall_volume: 'wall', wall_area: 'wall', wall_paint: 'wall', skirting: 'wall',
+  column_concrete: 'column', column_formwork: 'column',
+  beam_concrete: 'beam', beam_formwork: 'beam',
+  footing_concrete: 'footing', footing_formwork: 'footing',
+  slab: 'slab', floor_screed: 'slab', floor_finish: 'slab', ceiling: 'slab', ceiling_paint: 'slab',
+  pile_concrete: 'pile',
+  door: 'door', window: 'window',
+};
+
+/** id engine = `tk_engine_<drawingId 24hex>_<rowKey>` → tách rowKey (null nếu không khớp). */
+export function engineRowKeyFromId(id: string): TakeoffRowKey | null {
+  const m = /^tk_engine_[0-9a-fA-F]{24}_(.+)$/.exec(id);
+  const key = m?.[1];
+  return key && key in ROWKEY_GEOM_GROUP ? (key as TakeoffRowKey) : null;
+}
+
+const isEngineTakeoffId = (id: string) => /^tk_engine_[0-9a-fA-F]{24}_/.test(id);
+
+/**
+ * QUYẾT ĐỊNH GỘP nhiều bản vẽ — PURE, tách khỏi `run()` để test khoá hành vi.
+ *
+ * Trả về:
+ *  - `staleIds`: dòng cần XOÁ = dòng cũ CỦA CHÍNH bản này (rowKey không còn) + dòng legacy
+ *    (id không theo scheme engine). TUYỆT ĐỐI KHÔNG xoá dòng bản KHÁC (bug cũ: gộp mất
+ *    sạch bản trước, chỉ còn bản cuối).
+ *  - `mergedRows`: render-set TOÀN CỤC = dòng bản KHÁC (dựng lại từ state.takeoff) + dòng
+ *    MỚI của bản này, sắp theo thứ tự rowKey chuẩn để STT ổn định khi bóc lại. Mirror phải
+ *    render set này, không chỉ dòng bản hiện tại — nếu không bản sau ghi đè bản trước.
+ */
+export function planEngineTakeoffMerge(
+  existing: TakeoffItem[],
+  drawingId: string,
+  rows: TakeoffEngineRow[],
+): { staleIds: string[]; mergedRows: TakeoffEngineRow[] } {
+  const thisPrefix = `tk_engine_${drawingId}_`;
+  const newIds = new Set(rows.map((r) => `${thisPrefix}${r.key}`));
+  const staleIds = existing
+    .filter(
+      (t) =>
+        typeof t.note === 'string' &&
+        t.note.includes('[nhóm:') &&
+        !newIds.has(t.id) &&
+        (t.id.startsWith(thisPrefix) || !isEngineTakeoffId(t.id)),
+    )
+    .map((t) => t.id);
+  const deleted = new Set(staleIds);
+  const otherRows: TakeoffEngineRow[] = existing
+    .filter((t) => isEngineTakeoffId(t.id) && !t.id.startsWith(thisPrefix) && !deleted.has(t.id))
+    .map((t): TakeoffEngineRow | null => {
+      const key = engineRowKeyFromId(t.id);
+      if (!key) return null;
+      return {
+        key,
+        group: ROWKEY_GEOM_GROUP[key],
+        boqGroup: t.group ?? BOQ_GROUP[key],
+        code: t.code ?? '',
+        name: t.name,
+        unit: t.unit,
+        quantity: t.quantity,
+        note: t.note ?? '',
+        source: t.source,
+        unitPrice: t.unitPrice,
+        totalPrice: t.unitPrice != null ? Math.round(t.unitPrice * t.quantity) : undefined,
+      };
+    })
+    .filter((r): r is TakeoffEngineRow => r !== null);
+  const KEY_ORDER = Object.keys(ROWKEY_GEOM_GROUP) as TakeoffRowKey[];
+  const mergedRows = [...otherRows, ...rows].sort(
+    (x, y) => KEY_ORDER.indexOf(x.key) - KEY_ORDER.indexOf(y.key),
+  );
+  return { staleIds, mergedRows };
+}
+
+/**
  * Tên hiển thị cột "Tên công tác": mã web LUÔN dùng tên chuẩn engine; tên DB
  * chỉ dùng khi gọn (≤60 ký tự và ≤50% chữ viết hoa) — ngược lại rơi về tên chuẩn.
  * Chống tên web "SB.82510 SƠN DẦM, TRẦN, CỘT, TƯỜNG TRONG NHÀ...". PURE.
@@ -510,13 +590,14 @@ export const CHECKLIST_QS: {
     name: 'Cốt thép cột/dầm/sàn/móng',
     reason: 'cần bản KẾT CẤU (KT.dwg là bản kiến trúc, không có thông tin thép)',
     need: ['KC'],
-    haveReason: 'đã có bản KẾT CẤU — chưa nhận diện được thép/móng, cần khoanh vùng/gán loại',
+    // KHÔNG nói "chưa nhận diện" — mâu thuẫn với finding "đã nhận ra N cấu kiện KC".
+    haveReason: 'đã có bản KẾT CẤU — cấu kiện/thép vẽ nét đơn/ký hiệu, cần khoanh vùng để đo (xem finding cấu kiện KC)',
   },
   {
     name: 'Đào đất, bê tông lót, móng',
     reason: 'cần bản kết cấu móng',
     need: ['KC'],
-    haveReason: 'đã có bản KẾT CẤU — chưa nhận diện được móng, cần khoanh vùng/gán loại',
+    haveReason: 'đã có bản KẾT CẤU — móng vẽ nét đơn/ký hiệu, cần khoanh vùng để đo (xem finding cấu kiện KC)',
   },
   {
     name: 'Điện, nước, PCCC',
@@ -544,7 +625,8 @@ function checklistReason(c: (typeof CHECKLIST_QS)[number], existing?: Set<string
  */
 export function renderChecklistQs(existing?: Set<string>): string {
   const lines = CHECKLIST_QS.map((c, i) => `${i + 1}. ${c.name} — ${checklistReason(c, existing)}`);
-  return `CẦN BỔ SUNG (chưa bóc được từ bản kiến trúc — KHÔNG tạo số khống):\n${lines.join('\n')}`;
+  // Header trung lập bộ môn: bản KC không phải "bản kiến trúc".
+  return `CẦN BỔ SUNG (chưa bóc được từ bản vẽ hiện tại — KHÔNG tạo số khống):\n${lines.join('\n')}`;
 }
 
 const DEFAULT_NAMES: Record<TakeoffRowKey, string> = {
@@ -935,7 +1017,7 @@ export function unmeasuredSections(
 
 const TYPE_LABELS_VI: Record<string, string> = {
   wall: 'tường', column: 'cột', beam: 'dầm', door: 'cửa', window: 'cửa sổ',
-  slab: 'sàn', hatch: 'hatch', text: 'text', block: 'block', pile: 'cọc',
+  slab: 'sàn', footing: 'móng', hatch: 'hatch', text: 'text', block: 'block', pile: 'cọc',
   dimension: 'dimension', unknown: 'chưa phân loại',
 };
 
@@ -1696,13 +1778,10 @@ export class TakeoffEngineService {
 
     // Id deterministic theo bản vẽ + dòng → bóc lại N lần vẫn chỉ 1 bộ (reducer upsert theo id).
     const engineTakeoffId = (key: string) => `tk_engine_${input.drawingId}_${key}`;
-    const newEngineIds = new Set(rows.map((r) => engineTakeoffId(r.key)));
-    // Dọn bộ bóc cũ (engine/LLM đã nhân bản trước fix): item có token [nhóm:
-    // mà không thuộc bộ id engine mới → delete để bộ MỚI NHẤT thay thế trọn.
-    const staleTakeoffs = (state.takeoff ?? []).filter(
-      (t) => typeof t.note === 'string' && t.note.includes('[nhóm:') && !newEngineIds.has(t.id),
-    );
-    const cleanupActions: Action[] = staleTakeoffs.map((t) => ({ type: 'delete_takeoff', id: t.id }));
+    // GỘP nhiều bản: quyết định xoá dòng nào (chỉ của bản này) + render-set toàn cục
+    // (dòng mọi bản). Tách hàm pure để test khoá hành vi — xem takeoff-merge.spec.
+    const { staleIds, mergedRows } = planEngineTakeoffMerge(state.takeoff ?? [], input.drawingId, rows);
+    const cleanupActions: Action[] = staleIds.map((id) => ({ type: 'delete_takeoff', id }));
 
     const takeoffActions: Action[] = rows.map((r) => ({
       type: 'upsert_takeoff',
@@ -1713,13 +1792,17 @@ export class TakeoffEngineService {
       unit: r.unit,
       quantity: r.quantity,
       note: r.note,
+      // Lưu giá vào state → bóc gộp render lại được giá của bản này ở lần bóc bản khác.
+      unitPrice: r.unitPrice,
+      source: r.source,
     }));
     const a = input.assumptions;
-    // Route mỗi dòng vào sheet công tác của nó (structure/finishing/openings) —
+
+    // Route mỗi dòng vào sheet công tác của nó (structure/finishing/openings/mep) —
     // STT khởi động lại theo từng sheet, header màu riêng. Chú thích giả định chỉ
     // ghi ở sheet cuối cùng có dữ liệu để tránh lặp.
     const rowsBySheet = new Map<string, TakeoffEngineRow[]>();
-    for (const r of rows) {
+    for (const r of mergedRows) {
       const sk = ROWKEY_SHEET[r.key] ?? BOQ_SHEETS[0].key;
       (rowsBySheet.get(sk) ?? rowsBySheet.set(sk, []).get(sk)!).push(r);
     }
@@ -2076,7 +2159,7 @@ export class TakeoffEngineService {
           ? [`Hatch: ${hs.used}/${hs.count} mảng đủ tin cậy → diện tích sàn/nền ${hs.area} m² (bỏ ${hs.dropped} ngoài ngưỡng).`]
           : []),
         `Tra mã định mức trong norm_items: ${rows.length - missingCode.length - webCode.length}/${rows.length} dòng có mã DB.`,
-        ...(staleTakeoffs.length > 0 ? [`Thay thế ${staleTakeoffs.length} dòng bóc cũ.`] : []),
+        ...(cleanupActions.length > 0 ? [`Thay thế ${cleanupActions.length} dòng bóc cũ của bản này.`] : []),
         ...(webLookedUp > 0
           ? [
               `Tra mã từ web (grounded search) cho ${webLookedUp} công tác thiếu mã DB: ${webHitCount} mã tìm thấy (đã qua 3 rào chống bịa — grounding, regex format, khớp nguyên văn).`,

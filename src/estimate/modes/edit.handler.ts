@@ -776,7 +776,9 @@ export class EditModeHandler {
     };
 
     return actions.map((a) => {
-      if ('source' in a && a.source && !a.source.url) {
+      // Chỉ action mang PriceSource (object). upsert_takeoff giờ cũng có `source` nhưng
+      // là STRING (nguồn giá dạng text) → bỏ qua, không phải PriceSource để gắn url.
+      if ('source' in a && a.source && typeof a.source === 'object' && !a.source.url) {
         const url = linkFor(a.source as PriceSource);
         if (url) return { ...a, source: { ...(a.source as PriceSource), url } } as Action;
       }

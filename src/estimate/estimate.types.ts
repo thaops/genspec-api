@@ -106,6 +106,13 @@ export interface TakeoffItem {
   formula?: string; // công thức (text, để truy vết)
   note?: string; // diễn giải dòng bóc tách (vd "Sàn tầng 1", "Dầm biên trục A")
   quantity: number; // khối lượng kết quả
+  /**
+   * Đơn giá + nguồn khi CÓ mã thật (directPrice). Lưu ở đây để bóc GỘP nhiều bản vẽ
+   * render lại được toàn bộ sheet mà KHÔNG mất giá của bản khác — state.takeoff là
+   * nguồn sự thật, sheet chỉ là view. undefined = chưa có giá (KHÔNG bịa).
+   */
+  unitPrice?: number;
+  source?: string;
 }
 
 // Sheet 09 — hệ số chi phí
@@ -191,6 +198,8 @@ export type Action =
       formula?: string;
       note?: string;
       quantity?: number;
+      unitPrice?: number;
+      source?: string;
     }
   | { type: 'delete_takeoff'; id: string }
   | {
