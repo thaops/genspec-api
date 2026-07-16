@@ -6,12 +6,13 @@ import { Model } from 'mongoose';
 import { NormComponent, NormItem } from '../catalog/catalog-db.schemas';
 import { CatalogService, lookupComponentPrice } from '../catalog/catalog.service';
 import { UnitPriceService } from '../catalog/unit-price.service';
+import { UnitPrice } from '../catalog/unit-price.schema';
 import { DrawingObject, DrawingObjectDocument } from '../drawing/schemas/drawing-object.schema';
 import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
 import { Discipline, isDiscipline } from '../drawing/discipline';
 import { EstimateService } from './estimate.service';
 import { Action, EstimateState, ValidationFinding, ValidationReport } from './estimate.types';
-import { rowsToUpdateCells } from './markdown-table-actions';
+import { rowsToUpdateCells, nameMatchScore } from './markdown-table-actions';
 import { NormWebLookupService } from './norm-web-lookup.service';
 import { PriceWebLookupService, WebPriceHit } from './price-web-lookup.service';
 import { previewActions } from './transparency';
@@ -1116,6 +1117,41 @@ export class TakeoffEngineService {
     private readonly unitPrices: UnitPriceService,
   ) {}
 
+  /**
+   * RÀO DUY NHẤT cho MỌI nguồn mã (mã phổ thông hardcode, mã LLM tra web, sau này là
+   * mã agent gán): một mã chỉ dùng được khi ĐỦ CẢ HAI —
+   *   (a) TỒN TẠI trong sách đơn giá thật của tỉnh (`unit_prices`), và
+   *   (b) TÊN của mã đó KHỚP NGHĨA với công tác đang bóc.
+   *
+   * (a) một mình là KHÔNG ĐỦ — bài học đo được trên production: mã phổ thông
+   * `AK.57110` CÓ tồn tại trong bộ Đơn giá Hà Nội nhưng tên thật là "Bó vỉa hè,
+   * đường bằng tấm bê tông đúc sẵn", trong khi engine dán nhãn "Ốp/len chân tường"
+   * → hiện ra "Ốp/len chân tường — 74.248đ — TT 13/2021/TT-BXD": mã sai + giá thật +
+   * nguồn chính thống = SAI MỘT CÁCH TỰ TIN, tệ hơn hẳn để trống. Tương tự
+   * `AK.98110` ("Loại đá Dmax ≤ 4") bị dán nhãn "Cán nền vữa xi măng".
+   *
+   * (b) cũng chặn luôn mã LLM tự chế: `AE.00000`, `AH.30000` (dùng chung cho cả cửa
+   * đi lẫn cửa sổ) — 4/5 mã web đo được KHÔNG tồn tại trong sách.
+   *
+   * Không tra được sách của tỉnh (chưa import) → trả null: KHÔNG cho mã đi tiếp vô
+   * điều kiện. Thà thiếu còn hơn sai.
+   */
+  private async verifyCodeInBook(
+    code: string,
+    expectedWorkName: string,
+    province?: string,
+  ): Promise<{ ok: true; hit: UnitPrice } | { ok: false; reason: 'not_in_book' | 'name_mismatch'; actualName?: string }> {
+    const hit = await this.unitPrices.byCode(code, province).catch(() => null);
+    if (!hit) return { ok: false, reason: 'not_in_book' };
+    // Ngưỡng >0: nameMatchScore trả 0 khi không có ≥2 từ khoá chung và không chứa
+    // nhau — đã kiểm trên đúng các ca thật ở trên (bó vỉa/cốt liệu đá → 0 → loại;
+    // "Ván khuôn cột" ↔ "VÁN KHUÔN CỘT vuông" → 103 → giữ). Thiên về thận trọng.
+    if (nameMatchScore(expectedWorkName, hit.name) <= 0) {
+      return { ok: false, reason: 'name_mismatch', actualName: hit.name };
+    }
+    return { ok: true, hit };
+  }
+
   /** Tra norm_items theo keyword — KHÔNG hardcode mã; không có DB match → undefined. */
   private async findNormCandidates(keys: TakeoffRowKey[]): Promise<NormCandidateMap> {
     const map: NormCandidateMap = {};
@@ -1259,25 +1295,35 @@ export class TakeoffEngineService {
     // rất chính thống = sai một cách tự tin, tệ hơn hẳn để trống. Nên: chỉ GỢI Ý
     // ứng viên cho QS/agent chốt (suggestions), engine KHÔNG tự chọn.
     let pricedFromUnitPrice = 0;
+    /** Mã bị LOẠI vì tồn tại trong sách nhưng tên lệch nghĩa — minh bạch cho QS. */
+    const rejectedMismatch: string[] = [];
+    /** Mã web bị LOẠI vì không có trong sách đơn giá (LLM tự chế, vd AE.00000). */
+    const rejectedWebCodes: string[] = [];
     const suggestions = new Map<TakeoffRowKey, UnitPriceSuggestion[]>();
     const province = state.projectInfo?.location;
     if (input.editPermission) {
       const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys);
       for (const r of probe.filter((row) => !row.code)) {
         const fb = COMMON_FALLBACK_CODES[r.key];
-        // a) Mã phổ thông CÓ THẬT trong đơn giá tỉnh → dùng + lấy giá trọn gói.
+        // a) Mã phổ thông chỉ dùng được khi QUA RÀO: có thật trong sách đơn giá tỉnh
+        //    VÀ tên khớp nghĩa công tác. Qua rào → lấy luôn giá trọn gói + nguồn.
         if (fb) {
-          const hit = await this.unitPrices.byCode(fb.code, province).catch(() => null);
-          if (hit) {
+          const v = await this.verifyCodeInBook(fb.code, DEFAULT_NAMES[r.key], province);
+          if (v.ok) {
             normCandidates[r.key] = {
-              code: hit.code,
+              code: v.hit.code,
               name: fb.name,
-              unit: hit.unit ?? '',
-              sourceDoc: hit.sourceDoc,
-              directPrice: { unitPrice: hit.unitPrice, sourceDoc: hit.sourceDoc },
+              unit: v.hit.unit ?? '',
+              sourceDoc: v.hit.sourceDoc,
+              directPrice: { unitPrice: v.hit.unitPrice, sourceDoc: v.hit.sourceDoc },
             };
             pricedFromUnitPrice++;
             continue;
+          }
+          if (v.reason === 'name_mismatch') {
+            // Mã tồn tại nhưng LỆCH NGHĨA — nguy hiểm nhất (giá thật + nguồn thật cho
+            // công tác sai). Đếm để báo minh bạch, KHÔNG dùng.
+            rejectedMismatch.push(`${fb.code} (${DEFAULT_NAMES[r.key]} ≠ "${v.actualName}")`);
           }
         }
         // b) Không có mã thật → KHÔNG gán mã bịa. Gợi ý ứng viên để QS chốt.
@@ -1307,15 +1353,26 @@ export class TakeoffEngineService {
         );
         for (const key of missingKeys) {
           const hit = hits.get(key);
-          if (hit) {
-            webHitCount++;
-            normCandidates[key] = {
-              code: hit.code,
-              name: hit.name,
-              unit: '',
-              webSource: { title: hit.sourceTitle, uri: hit.sourceUri },
-            };
+          if (!hit) continue;
+          // Mã web phải QUA CÙNG RÀO như mã phổ thông. LLM chế mã rất giỏi trông thật:
+          // đo trên production 4/5 mã web KHÔNG tồn tại trong sách đơn giá — `AE.00000`,
+          // `AH.30000` (dùng CHUNG cho cả "Cửa đi" lẫn "Cửa sổ"), nguồn hiển thị lại là
+          // "Web: phuckhanggroup.com" (trang doanh nghiệp) → càng dễ tin nhầm.
+          const v = await this.verifyCodeInBook(hit.code, DEFAULT_NAMES[key], province);
+          if (!v.ok) {
+            rejectedWebCodes.push(`${hit.code} (${DEFAULT_NAMES[key]})`);
+            continue; // KHÔNG cho mã web vào BOQ — để trống + ứng viên, QS chốt.
           }
+          // Qua rào → mã đã được sách đơn giá xác nhận ⇒ nguồn là ĐƠN GIÁ TỈNH
+          // (government), không phải trang web; và lấy luôn giá trọn gói.
+          webHitCount++;
+          normCandidates[key] = {
+            code: v.hit.code,
+            name: hit.name,
+            unit: v.hit.unit ?? '',
+            sourceDoc: v.hit.sourceDoc,
+            directPrice: { unitPrice: v.hit.unitPrice, sourceDoc: v.hit.sourceDoc },
+          };
         }
       }
     }
@@ -1478,6 +1535,11 @@ export class TakeoffEngineService {
             `Mã hiệu: ${webCode.length} công tác không có trong norm_items — đã tra từ web (grounded search, chậm hơn bình thường); mã web CẦN KIỂM CHỨNG trước khi dùng.`,
           ]
         : []),
+      ...(rejectedMismatch.length + rejectedWebCodes.length > 0
+        ? [
+            `Đã CHẶN ${rejectedMismatch.length + rejectedWebCodes.length} mã không đáng tin (${rejectedMismatch.length} lệch nghĩa với đơn giá tỉnh, ${rejectedWebCodes.length} mã web không có trong sách) — thà để trống còn hơn gán mã sai kèm giá thật. Chi tiết ở "Điểm cần kiểm tra".`,
+          ]
+        : []),
       ...(fallbackRows.length > 0
         ? [
             `Đã điền mã phổ thông cho ${fallbackRows.length} dòng (cần kiểm chứng theo chỉ dẫn kỹ thuật).`,
@@ -1590,6 +1652,32 @@ export class TakeoffEngineService {
         area: 'missing',
         title: `${fallbackRows.length} mã phổ thông mặc định — cần kiểm chứng`,
         detail: `${fallbackRows.length} công tác dùng mã phổ thông mặc định (TT12/2021) do chưa import định mức — cần kiểm chứng theo chỉ dẫn kỹ thuật; chưa có đơn giá.`,
+      });
+    }
+    // MINH BẠCH RÀO MÃ: cho QS thấy engine đã CHẶN cái gì — quan trọng để tin được
+    // những dòng CÓ mã. Tách 2 loại vì bản chất khác hẳn nhau.
+    if (rejectedMismatch.length > 0) {
+      findings.push({
+        id: 'takeoff-engine-code-mismatch-rejected',
+        severity: 'info',
+        area: 'missing',
+        title: `Đã loại ${rejectedMismatch.length} mã phổ thông vì LỆCH NGHĨA với đơn giá tỉnh`,
+        detail:
+          `Mã có tồn tại trong sách đơn giá nhưng tên công tác KHÔNG khớp → dùng sẽ ra "giá thật của ` +
+          `công tác khác" (sai mà trông rất chính thống). Engine bỏ, để QS chọn từ ứng viên:\n` +
+          rejectedMismatch.map((s) => `· ${s}`).join('\n'),
+      });
+    }
+    if (rejectedWebCodes.length > 0) {
+      findings.push({
+        id: 'takeoff-engine-web-code-rejected',
+        severity: 'info',
+        area: 'missing',
+        title: `Đã loại ${rejectedWebCodes.length} mã tra từ web vì KHÔNG có trong đơn giá tỉnh`,
+        detail:
+          `Mã do AI tra web không tìm thấy trong bộ đơn giá của tỉnh → nhiều khả năng là mã tự chế ` +
+          `(đã gặp thật: AE.00000, AH.30000 dùng chung cho cả cửa đi lẫn cửa sổ). Engine KHÔNG đưa vào ` +
+          `BOQ:\n${rejectedWebCodes.map((s) => `· ${s}`).join('\n')}`,
       });
     }
     // ỨNG VIÊN MÃ THẬT: dòng chưa có mã → liệt kê mã CÓ THẬT trong đơn giá tỉnh kèm

@@ -491,7 +491,7 @@ function nameKeywords(s: string): string[] {
  * Điểm fuzzy-match 2 tên công tác: contains 2 chiều (sau normalize + bỏ
  * stopwords) → 100 + số từ trùng; ngược lại số từ trùng nếu ≥2; else 0.
  */
-function nameMatchScore(a: string, b: string): number {
+export function nameMatchScore(a: string, b: string): number {
   const wa = nameKeywords(a);
   const wb = nameKeywords(b);
   if (wa.length === 0 || wb.length === 0) return 0;
