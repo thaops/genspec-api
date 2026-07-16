@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsDefined,
   IsIn,
   IsNumber,
   IsOptional,
@@ -85,6 +86,13 @@ export class TakeoffEngineDto {
   @IsPositive()
   unitsPerDrawingUnit: number;
 
+  /**
+   * `@ValidateNested()` KHÔNG tự bắt thiếu field: class-validator bỏ qua giá trị
+   * `undefined` nên request thiếu `assumptions` LỌT qua validation → engine destructure
+   * `{ floorHeight, wallThickness, beamDepth } = assumptions` → TypeError → **500**
+   * (đã dựng lại được trên production). `@IsDefined()` để trả 400 đúng nghĩa.
+   */
+  @IsDefined()
   @ValidateNested()
   @Type(() => TakeoffAssumptionsDto)
   assumptions: TakeoffAssumptionsDto;

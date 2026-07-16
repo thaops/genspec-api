@@ -96,8 +96,9 @@ export interface NormCandidate {
  * quy cách) rồi để QS chốt biến thể. Đây cũng là lý do KHÔNG dùng `$text` theo tên: đã đo
  * `"bê tông cột"` → khớp nhầm `"cọc tiêu bê tông cốt thép, cột km"` (cọc tiêu đường bộ).
  *
- * `window` và `ceiling` (trần thạch cao) KHÔNG có trong Phụ lục Phần Xây dựng → để trống,
- * không bịa. (Cửa sổ/trần nằm ở phụ lục Lắp đặt — chưa nạp.)
+ * `window` KHÔNG có trong Phụ lục Phần Xây dựng (tra 7490 mã: chỉ có `AG.13231` gia công CỐT THÉP
+ * cửa sổ và `AG.114` bê tông cửa sổ TRỜI — đều không phải công tác lắp cửa sổ) → để trống, không
+ * bịa; cửa sổ nằm ở phụ lục Lắp đặt, chưa nạp.
  */
 export const NORM_FAMILIES: Partial<Record<TakeoffRowKey, { prefixes: string[]; spec: string }>> = {
   wall_volume: { prefixes: ['AE.221'], spec: 'chiều dày tường, chiều cao, mác vữa' },
@@ -114,9 +115,15 @@ export const NORM_FAMILIES: Partial<Record<TakeoffRowKey, { prefixes: string[]; 
   floor_screed: { prefixes: ['AK.411'], spec: 'chiều dày lớp láng, mác vữa, có/không đánh màu' },
   floor_finish: { prefixes: ['AK.512'], spec: 'kích thước viên gạch, mác vữa' },
   skirting: { prefixes: ['AK.312'], spec: 'tiết diện viên gạch ốp' },
+  // Trần: AK.66 = thạch cao (phẳng AK.66110 / giật cấp AK.66210), AK.64 = tấm nhựa,
+  // AK.61 = gỗ dán/ván ép → giữ cả ba, vật liệu trần do QS chốt (bản vẽ không nói).
+  ceiling: { prefixes: ['AK.66', 'AK.64', 'AK.61'], spec: 'vật liệu tấm (thạch cao/nhựa/gỗ), trần phẳng hay giật cấp' },
   ceiling_paint: { prefixes: ['AK.841'], spec: 'trong/ngoài nhà, số nước phủ' },
   pile_concrete: { prefixes: ['AC.251'], spec: 'kích thước cọc, chiều dài đoạn cọc, lực ép' },
-  door: { prefixes: ['AH.321'], spec: 'cửa có khuôn / không khuôn' },
+  // `door` CỐ Ý không có: dòng cửa nay tính theo **cái** (xem DERIVE.door — m² không suy
+  // được từ mặt bằng), trong khi mã lắp cửa `AH.321` tính theo **m²** ⇒ gợi ý nó chỉ dẫn
+  // QS tới đúng chỗ `unitPriceScale` chặn. Khi QS có m² từ bảng thống kê cửa thì chốt mã
+  // thủ công. `window` không có mã trong Phần Xây dựng (xem doc ở trên).
 };
 
 export type TakeoffRowKey =
@@ -265,6 +272,39 @@ export function priceNormComponents(
  * Trước đây CHỈ có (2) → `norm_items` rỗng thì dù mã đúng giá vẫn null (đo thật trên
  * production: 13/13 dòng không giá dù đã có 4305 đơn giá thật trong DB).
  */
+/** Chuẩn hoá đơn vị để so sánh: "M²" / "m2 " / "1m2" → "m2". */
+export function normalizeUnit(u?: string): string {
+  return (u ?? '')
+    .toLowerCase()
+    .replace(/²/g, '2')
+    .replace(/³/g, '3')
+    .replace(/\s+/g, '')
+    .replace(/^1(?=[a-z])/, ''); // "1m2" (đơn giá hay ghi vậy) ≡ "m2"
+}
+
+/**
+ * Hệ số quy đổi giá của đơn giá tỉnh về ĐƠN VỊ CỦA DÒNG, hoặc `null` nếu KHÔNG quy đổi
+ * được → không được áp giá.
+ *
+ * BUG THẬT chặn ở đây: đơn giá tỉnh nhiều mã tính theo **100m²/100m** trong khi dòng
+ * engine tính theo m²/m — `AF.83411` ván khuôn cột = 8.387.228đ/**100m²**,
+ * `AC.25111` ép cọc = 15.280.110đ/**100m**. Nhân thẳng `unitPrice × quantity` là
+ * **đội giá 100 lần**. Quy đổi ÷100 là số học chính xác (không phải giả định), nhưng
+ * đơn vị khác loại (vd "cái" vs "m2") thì KHÔNG có hệ số nào đúng ⇒ để trống.
+ */
+export function unitPriceScale(candUnit?: string, rowUnit?: string): number | null {
+  const c = normalizeUnit(candUnit);
+  const r = normalizeUnit(rowUnit);
+  if (!c || !r) return null;
+  if (c === r) return 1;
+  const m = c.match(/^(\d+)(.+)$/); // "100m2" → ["100","m2"]
+  if (m && m[2] === r) {
+    const n = Number(m[1]);
+    if (isFinite(n) && n > 0) return 1 / n;
+  }
+  return null;
+}
+
 export function applyPricingToRows(
   rows: TakeoffEngineRow[],
   candidates: NormCandidateMap,
@@ -276,14 +316,25 @@ export function applyPricingToRows(
     // 1. Đơn giá tỉnh trọn gói — có nguồn thật (sourceDoc), không phụ thuộc ctx.
     const direct = cand?.directPrice;
     if (direct) {
+      // Đơn vị phải khớp (hoặc quy đổi được) — xem unitPriceScale. Lệch đơn vị mà vẫn
+      // nhân = sai 100 lần nhưng kèm nguồn thật ⇒ nguy hiểm hơn để trống.
+      const scale = unitPriceScale(cand?.unit, r.unit);
+      if (scale == null) {
+        return {
+          ...r,
+          note: `${r.note} ⚠ Mã ${r.code} tính theo "${cand?.unit ?? '?'}" nhưng dòng tính theo "${r.unit}" — không quy đổi được nên KHÔNG áp giá (tránh sai đơn vị).`,
+        };
+      }
+      const unitPrice = Math.round(direct.unitPrice * scale);
       // Nguồn mã và nguồn giá là CÙNG một văn bản đơn giá tỉnh → không nối 2 lần
       // ("TT 13/2021 · TT 13/2021"). Chỉ nối khi thật sự là 2 nguồn khác nhau.
       const base = r.source && r.source !== '—' && !r.source.includes(direct.sourceDoc) ? `${r.source} · ` : '';
+      const conv = scale === 1 ? '' : ` (quy đổi từ ${Math.round(direct.unitPrice).toLocaleString('vi-VN')}đ/${cand?.unit})`;
       return {
         ...r,
-        unitPrice: direct.unitPrice,
-        totalPrice: Math.round(direct.unitPrice * r.quantity),
-        source: `${base}${direct.sourceDoc}`,
+        unitPrice,
+        totalPrice: Math.round(unitPrice * r.quantity),
+        source: `${base}${direct.sourceDoc}${conv}`,
       };
     }
     // 2. Định mức × công bố giá tỉnh (đường cũ).
@@ -644,10 +695,32 @@ export const DERIVE_RULES: Record<string, DeriveRule[]> = {
       qty: (t, a) => t.area * a.PL,
       note: (t, a) => `${f3(t.area)} m² tiết diện (${t.count} cọc) × ${f3(a.PL)}m dài (giả định) = ${f3(t.area * a.PL)} m³` },
   ],
+  /**
+   * CỬA ĐI ĐẾM THEO **CÁI**, KHÔNG suy m² từ hình học mặt bằng.
+   *
+   * Trước đây: `qty = t.area` = tổng diện tích **bbox mặt bằng** của cửa. Sai về bản chất —
+   * bbox cửa trong mặt bằng là *bề rộng × cung quét cánh* (vệt sàn), không phải diện tích
+   * cánh cửa. m² cửa trong BOQ = **rộng × cao**, mà **chiều cao không tồn tại trong mặt bằng**.
+   *
+   * Đo thật trên "KT.dwg" (221 cửa) — đủ để bác bỏ MỌI công thức suy m²/bề rộng từ bbox:
+   *  · chỉ 27% cửa có bbox "vuông" (cánh+cung quét); median tỉ lệ cạnh 2,40
+   *  · chỉ 10% có cạnh nhỏ nằm trong dải cửa thật 0,6–1,2m
+   *  · 67/201 có cạnh nhỏ < 0,3m (không thể là cửa)
+   * ⇒ cả `area` lẫn `width` đều KHÔNG suy được. Gốc là luật layer `"cua"` vơ hết mọi thứ
+   * trên layer đó (ký hiệu, phụ kiện, mặt đứng), không phải công thức sai.
+   *
+   * Nên chỉ báo thứ BẢO VỆ ĐƯỢC: **số lượng cửa đếm được**. m² để QS điền từ bảng thống kê
+   * cửa (file này KHÔNG có bảng đó — đã tra: 0 kết quả "THỐNG KÊ", 0 mã D1/P1 dạng text).
+   * Nâng cấp về sau: đọc bảng thống kê khi bản vẽ có → m² CÓ NGUỒN THẬT, vẫn không giả định.
+   */
   door: [
-    { key: 'door', group: 'door', unit: 'm2',
-      qty: (t) => t.area,
-      note: (t) => `tổng diện tích ${t.count} cửa = ${f3(t.area)} m²${t.outliersDropped ? ` (đã loại ${t.outliersDropped} cửa diện tích bất thường — dữ liệu block lỗi, cần kiểm tra thủ công)` : ''}` },
+    { key: 'door', group: 'door', unit: 'cái',
+      qty: (t) => t.count,
+      note: (t) =>
+        `${t.count} cửa đếm được từ block bản vẽ` +
+        `${t.outliersDropped ? ` (đã loại ${t.outliersDropped} block lỗi kích thước bất thường)` : ''}` +
+        ` — ⚠ m² cửa cần rộng×cao từ bảng thống kê cửa; mặt bằng KHÔNG có chiều cao nên engine không suy m² (thà thiếu còn hơn sai).`,
+    },
   ],
 };
 
@@ -695,13 +768,32 @@ export function hatchSlabStats(objects: EngineDrawingObject[], factor: number): 
  * → nhiều cụm; "bóc toàn bộ" sẽ CỘNG DỒN tất cả → khối lượng phồng. eps ~ kích
  * thước 1 công trình để KHÔNG xé nhỏ 1 mặt bằng thành nhiều cụm. PURE.
  */
-export function countObjectClusters(
+export interface ObjectCluster {
+  /** Vùng bbox của cụm (world coords bản vẽ) — dùng thẳng làm `region` để bóc lại. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Số đối tượng đo được trong cụm. */
+  count: number;
+  /** Đếm theo type — để QS nhận ra cụm nào là mặt bằng (nhiều tường/cửa). */
+  byType: Record<string, number>;
+}
+
+/**
+ * Như `countObjectClusters` nhưng GIỮ LẠI thành phần từng cụm (bbox + đếm theo type).
+ * Cần thiết vì engine KHÔNG được tự đoán cụm nào là mặt bằng cần bóc (đo thật: ghép nét
+ * tường ngây thơ ra 6403m thay vì ~150-200m) — thay vào đó phơi bày cấu trúc để QS chọn,
+ * và trả sẵn `region` để bóc lại đúng cụm đó. PURE.
+ */
+export function objectClusters(
   objects: EngineDrawingObject[],
   factor: number,
   epsMeters = 25,
-): { clusters: number; spanM: number } {
+): { clusters: ObjectCluster[]; spanM: number } {
   const cell = epsMeters / (factor || 1);
-  const centers: [number, number][] = [];
+  /** [cx, cy, type, bbox] của từng object đo được. */
+  const pts: { cx: number; cy: number; type: string; b: EngineDrawingObject['boundingBox'] }[] = [];
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const o of objects) {
     if (!isCountableObject(o)) continue;
@@ -710,11 +802,24 @@ export function countObjectClusters(
     const cx = (b.x ?? 0) + (b.w ?? 0) / 2;
     const cy = (b.y ?? 0) + (b.h ?? 0) / 2;
     if (!isFinite(cx) || !isFinite(cy)) continue;
-    centers.push([cx, cy]);
+    pts.push({ cx, cy, type: o.type, b });
     if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
     if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
   }
-  if (centers.length < 8) return { clusters: centers.length ? 1 : 0, spanM: 0 };
+  const spanM = pts.length ? Math.max(maxX - minX, maxY - minY) * factor : 0;
+  const asCluster = (list: typeof pts): ObjectCluster => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const byType: Record<string, number> = {};
+    for (const p of list) {
+      const bx = p.b.x ?? 0, by = p.b.y ?? 0;
+      x0 = Math.min(x0, bx); y0 = Math.min(y0, by);
+      x1 = Math.max(x1, bx + (p.b.w ?? 0)); y1 = Math.max(y1, by + (p.b.h ?? 0));
+      byType[p.type] = (byType[p.type] ?? 0) + 1;
+    }
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, count: list.length, byType };
+  };
+  // <8 đối tượng: quá ít để nói về "nhiều bản vẽ" → coi như 1 cụm (giữ nguyên hành vi cũ).
+  if (pts.length < 8) return { clusters: pts.length ? [asCluster(pts)] : [], spanM: 0 };
 
   const parent = new Map<string, string>();
   const find = (x: string): string => {
@@ -723,9 +828,10 @@ export function countObjectClusters(
     return r;
   };
   const key = (ix: number, iy: number) => `${ix}:${iy}`;
+  const cellOf = (p: { cx: number; cy: number }) => key(Math.floor(p.cx / cell), Math.floor(p.cy / cell));
   const cells = new Set<string>();
-  for (const [x, y] of centers) {
-    const k = key(Math.floor(x / cell), Math.floor(y / cell));
+  for (const p of pts) {
+    const k = cellOf(p);
     cells.add(k);
     if (!parent.has(k)) parent.set(k, k);
   }
@@ -739,9 +845,49 @@ export function countObjectClusters(
       }
     }
   }
-  const roots = new Set<string>();
-  for (const c of cells) roots.add(find(c));
-  return { clusters: roots.size, spanM: Math.max(maxX - minX, maxY - minY) * factor };
+  const groups = new Map<string, typeof pts>();
+  for (const p of pts) {
+    const root = find(cellOf(p));
+    (groups.get(root) ?? groups.set(root, []).get(root)!).push(p);
+  }
+  return {
+    // Cụm đông đối tượng nhất lên đầu — thường là mặt bằng chính; QS vẫn tự chọn.
+    clusters: [...groups.values()].map(asCluster).sort((a, b) => b.count - a.count),
+    spanM,
+  };
+}
+
+/**
+ * Mô tả từng cụm cho QS đọc: kích thước thật, thành phần, và TOẠ ĐỘ VÙNG để bóc lại
+ * đúng cụm đó (agent đọc được toạ độ này → gọi lại takeoff với `region`, QS không phải
+ * kéo tay). KHÔNG kết luận cụm nào là mặt bằng — chỉ bày ra. PURE.
+ */
+export function describeClusters(clusters: ObjectCluster[], factor: number, max = 8): string {
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  return clusters
+    .slice(0, max)
+    .map((c, i) => {
+      const parts = Object.entries(c.byType)
+        .sort((a, b) => b[1] - a[1])
+        .map(([t, n]) => `${n} ${TYPE_LABELS_VI[t] ?? t}`)
+        .join(', ');
+      return (
+        `· Cụm ${i + 1}: ${c.count} đối tượng (${parts}) — kích thước ~${r1(c.w * factor)}×${r1(c.h * factor)}m, ` +
+        `vùng x=${Math.round(c.x)} y=${Math.round(c.y)} w=${Math.round(c.w)} h=${Math.round(c.h)}`
+      );
+    })
+    .concat(clusters.length > max ? [`· … và ${clusters.length - max} cụm nhỏ hơn`] : [])
+    .join('\n');
+}
+
+/** Wrapper giữ nguyên chữ ký cũ (chỉ cần số cụm + span). */
+export function countObjectClusters(
+  objects: EngineDrawingObject[],
+  factor: number,
+  epsMeters = 25,
+): { clusters: number; spanM: number } {
+  const r = objectClusters(objects, factor, epsMeters);
+  return { clusters: r.clusters.length, spanM: r.spanM };
 }
 
 // Guard tiết diện cấu kiện KC: cạnh nhỏ hơn ngưỡng vật lý = ký hiệu/điểm/bọt lưới
@@ -749,6 +895,14 @@ export function countObjectClusters(
 // Cột/dầm thật cạnh ≥ ~100mm; 0.08m an toàn dưới mọi tiết diện thật.
 export const SECTION_TYPES = new Set(['column', 'beam', 'footing', 'pile']);
 export const MIN_SECTION_M = 0.08;
+
+/**
+ * ⚠ KHÔNG áp ngưỡng cạnh nhỏ cho cửa/cửa sổ. Đã thử ngưỡng 0,3m và **số liệu thật bác bỏ**:
+ * 67/221 "cửa" trên "KT.dwg" có cạnh nhỏ < 0,3m nhưng là **CỬA THẬT VẼ MỎNG** —
+ * `1050×200`, `800×200`, `1500×200`, `200×900` mm, trong đó 200mm chính là BỀ DÀY TƯỜNG
+ * (cửa vẽ dạng khối chữ nhật cắt ngang tường, không vẽ cung quét). Ngưỡng đó xoá cửa thật.
+ * Cột/dầm khác hẳn: chúng là MẶT CẮT nên cạnh nhỏ = tiết diện thật ⇒ ngưỡng có nghĩa.
+ */
 /** true nếu object là cấu kiện KC có tiết diện đủ lớn để đo (không phải ký hiệu). */
 export function isRealSection(obj: EngineDrawingObject, factor: number): boolean {
   if (!SECTION_TYPES.has(obj.type)) return true;
@@ -901,7 +1055,9 @@ export function computeTakeoffRows(
       name = standardDisplayName(key, cand.name);
       source = cand.sourceDoc || 'định mức import';
     } else {
-      note += ' ⚠ cần chọn mã — chưa import định mức';
+      // KHÔNG nói "chưa import định mức": mã CÓ sẵn trong bộ đơn giá tỉnh, engine đang
+      // gợi ý chính nó. Lý do trống là chưa chốt QUY CÁCH (xem NORM_FAMILIES).
+      note += ' ⚠ cần chọn mã (theo quy cách) — xem gợi ý ở "Điểm cần kiểm tra"';
     }
     rows.push({ key, group, boqGroup: BOQ_GROUP[key], code, name, unit, quantity: q, note, source, ...(webSourced && { webSourced }) });
   };
@@ -925,18 +1081,22 @@ export function computeTakeoffRows(
     }
   }
 
-  // Cửa sổ + lỗ mở (opening): gộp diện tích — opening trên mặt bằng không có cánh
-  // thường là cửa sổ/ô thoáng. Đo m² như cửa.
+  // Cửa sổ + lỗ mở (opening): ĐẾM THEO CÁI, không suy m² — cùng lý do như cửa đi
+  // (xem DERIVE.door), và ở cửa sổ còn rõ hơn: trên MẶT BẰNG cửa sổ là vệt mỏng cắt
+  // ngang tường ⇒ bbox = bề rộng × BỀ DÀY TƯỜNG, không liên quan gì tới diện tích cửa
+  // sổ. Đo thật "KT.dwg": 37 cửa sổ ra 18,08 m² = 0,49 m²/cái — vô nghĩa (cửa sổ thật
+  // ~1,5-2 m²). Chiều cao cửa sổ + cao bệ chỉ có ở mặt đứng/bảng thống kê.
   const window = totals.get('window');
   const opening = totals.get('opening');
-  const winArea = (window?.area ?? 0) + (opening?.area ?? 0);
   const winCount = (window?.count ?? 0) + (opening?.count ?? 0);
-  if (winArea > 0) {
+  if (winCount > 0) {
     const openNote = opening?.count ? ` (gồm ${opening.count} lỗ mở)` : '';
-    const dropNote = window?.outliersDropped
-      ? ` (đã loại ${window.outliersDropped} cửa sổ diện tích bất thường — dữ liệu block lỗi, cần kiểm tra thủ công)`
-      : '';
-    push('window', 'window', 'm2', winArea, `tổng diện tích ${winCount} cửa sổ/lỗ mở = ${f3(winArea)} m²${openNote}${dropNote}`);
+    const dropNote = window?.outliersDropped ? ` (đã loại ${window.outliersDropped} block lỗi kích thước bất thường)` : '';
+    push(
+      'window', 'window', 'cái', winCount,
+      `${winCount} cửa sổ/lỗ mở đếm được${openNote}${dropNote} — ⚠ m² cần rộng×cao từ bảng thống kê cửa; ` +
+        `mặt bằng chỉ cho bề rộng nên engine không suy m² (thà thiếu còn hơn sai).`,
+    );
   }
 
   // Sàn/nền: ưu tiên đo từ hatch (lọc outlier). Nếu không có hatch đủ tin cậy
@@ -1502,9 +1662,12 @@ export class TakeoffEngineService {
     // Phát hiện DWG chứa nhiều bản vẽ con (nhiều mặt bằng/mặt đứng/chi tiết cạnh
     // nhau trong 1 model space). Chỉ cảnh báo khi KHÔNG bóc theo vùng — vì lúc đó
     // "bóc toàn bộ" cộng dồn tất cả cụm → khối lượng phồng.
+    const clusterList = input.region
+      ? { clusters: [] as ObjectCluster[], spanM: 0 }
+      : objectClusters(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit);
     const clusterInfo = input.region
       ? { clusters: 1, spanM: 0 }
-      : countObjectClusters(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit);
+      : { clusters: clusterList.clusters.length, spanM: clusterList.spanM };
     const multiDrawing = clusterInfo.clusters >= 2;
 
     // Id deterministic theo bản vẽ + dòng → bóc lại N lần vẫn chỉ 1 bộ (reducer upsert theo id).
@@ -1630,20 +1793,38 @@ export class TakeoffEngineService {
 
     const hs = hatchSlabStats(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit);
 
-    const findings: ValidationFinding[] = missingCode.map((r, i) => ({
-      id: `takeoff-engine-code-${i + 1}`,
-      severity: 'warn',
-      area: 'missing',
-      title: `Thiếu mã định mức: ${r.name}`,
-      detail: `Dòng "${r.name}" (${r.quantity} ${r.unit}) chưa có mã trong norm_items — cần import bộ định mức hoặc chọn mã thủ công.`,
-    }));
+    // GỘP 1 finding thay vì mỗi dòng 1 warn: 9 warn "Thiếu mã: X" + 1 warn giá + 1 finding
+    // gợi ý = 11 mục nói cùng một chuyện ⇒ nhiễu. Danh sách dòng đủ để QS biết thiếu ở đâu;
+    // ứng viên mã nằm ở finding gợi ý ngay dưới.
+    const findings: ValidationFinding[] = [];
+    if (missingCode.length > 0) {
+      findings.push({
+        id: 'takeoff-engine-code',
+        severity: 'warn',
+        area: 'missing',
+        title: `${missingCode.length} công tác chưa chốt mã định mức`,
+        // KHÔNG bảo "cần import bộ định mức": mã ĐÃ có sẵn trong bộ đơn giá tỉnh (engine
+        // đang gợi ý chính nó ở finding dưới). Lý do để trống là QS chưa chốt QUY CÁCH
+        // (mác bê tông/vữa…), không phải thiếu dữ liệu.
+        detail:
+          `Engine không tự chọn mã vì mỗi công tác có nhiều biến thể chỉ khác quy cách (mác bê tông, ` +
+          `mác vữa, tiết diện…) — không suy được từ bản vẽ. Chọn mã ở mục gợi ý bên dưới, giá sẽ tự áp:\n` +
+          missingCode.map((r) => `· ${r.name} (${r.quantity} ${r.unit})`).join('\n'),
+      });
+    }
     if (missingPrice.length > 0) {
       findings.push({
         id: 'takeoff-engine-price',
         severity: 'warn',
         area: 'unitPrice',
         title: `Chưa có đơn giá cho ${missingPrice.length} công tác`,
-        detail: `${missingPrice.length}/${rows.length} công tác chưa có đơn giá${priceCtx ? ` trong công bố giá ${priceCtx.province} (${priceCtx.sourceDoc} ${priceCtx.effectiveDate})` : ' — chưa khớp công bố giá tỉnh nào'} — import công bố giá tỉnh tại /settings. Engine KHÔNG ước lượng giá.`,
+        // Nguyên nhân THẬT thường là chưa chốt mã, không phải thiếu bộ đơn giá — bảo QS
+        // "import công bố giá tỉnh" khi bộ đơn giá đã nạp là chỉ dẫn cụt, sai nguyên nhân.
+        detail: priceCtx
+          ? `${missingPrice.length}/${rows.length} công tác chưa có đơn giá. Đã nạp bộ đơn giá ${priceCtx.province} ` +
+            `(${priceCtx.sourceDoc} ${priceCtx.effectiveDate}) — giá sẽ tự áp ngay khi chốt mã. Engine KHÔNG ước lượng giá.`
+          : `${missingPrice.length}/${rows.length} công tác chưa có đơn giá — chưa khớp công bố giá tỉnh nào. ` +
+            `Kiểm tra tỉnh của dự án, hoặc import công bố giá tỉnh tại /settings. Engine KHÔNG ước lượng giá.`,
       });
     } else if (priceCtx) {
       findings.push({
@@ -1686,7 +1867,12 @@ export class TakeoffEngineService {
         severity: 'error',
         area: 'quantity',
         title: `⚠ Cần bóc theo vùng: bản vẽ có ~${clusterInfo.clusters} cụm — số hiện tại là TỔNG, chưa dùng để nộp được`,
-        detail: `Model space có ~${clusterInfo.clusters} cụm đối tượng cách xa nhau (trải ~${Math.round(clusterInfo.spanM)}m) — thường là nhiều mặt bằng/mặt đứng/chi tiết đặt cạnh nhau trong cùng file. "Bóc toàn bộ" đã cộng dồn TẤT CẢ nên khối lượng bị phồng. BƯỚC TIẾP THEO (nên làm ngay): dùng "Bóc trong vùng" — kéo chọn vùng bao quanh ĐÚNG 1 mặt bằng cần bóc rồi bóc lại.`,
+        detail:
+          `Model space có ~${clusterInfo.clusters} cụm đối tượng cách xa nhau (trải ~${Math.round(clusterInfo.spanM)}m) — ` +
+          `thường là nhiều mặt bằng/mặt đứng/chi tiết đặt cạnh nhau trong cùng file. "Bóc toàn bộ" đã cộng dồn TẤT CẢ ` +
+          `nên khối lượng bị phồng. Các cụm đo được (engine KHÔNG tự chọn — cụm nào là mặt bằng cần bóc do QS quyết):\n` +
+          describeClusters(clusterList.clusters, input.unitsPerDrawingUnit) +
+          `\nBƯỚC TIẾP THEO: bấm "Bóc trong vùng" và kéo chọn quanh cụm cần bóc, hoặc bảo agent "bóc cụm 1".`,
       });
     }
     if (factorOverridden) {
