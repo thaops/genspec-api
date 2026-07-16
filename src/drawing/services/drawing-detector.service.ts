@@ -122,10 +122,9 @@ const LAYER_TYPE_MAP: Record<string, string> = {
   DIEUHOA: 'hvac_unit', 'DIEU-HOA': 'hvac_unit', 'MAY-LANH': 'hvac_unit', FCU: 'hvac_unit', AHU: 'hvac_unit', CHILLER: 'hvac_unit', HVAC: 'hvac_unit',
 };
 
-/** Loại đối tượng MEP đếm theo SỐ LƯỢNG (block/fixture) — không đo diện tích/thể tích. */
-export const MEP_COUNT_TYPES = new Set(['light', 'socket', 'switch', 'electric_panel', 'sanitary', 'valve', 'floor_drain', 'diffuser', 'hvac_unit', 'smoke_detector']);
-/** Loại đối tượng MEP đo theo CHIỀU DÀI (tuyến ống/dây/máng) — polyline length. */
-export const MEP_LENGTH_TYPES = new Set(['wire', 'conduit', 'cable_tray', 'pipe', 'duct']);
+// 2 Set MEP nay da chuyen sang '../mep-types' (module trung lap, pha vong import
+// detector <-> takeoff-engine). Re-export de khong pha importer cu.
+export { MEP_COUNT_TYPES, MEP_LENGTH_TYPES } from '../mep-types';
 
 // Layer chú thích/ký hiệu/kích thước/chi tiết/khung tên — object trên đây KHÔNG phải
 // cấu kiện xây dựng (thường là circle/arc/text ký hiệu, hay bị geometry đoán nhầm thành

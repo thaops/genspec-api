@@ -46,6 +46,20 @@ export const TAKEOFF_COL_WIDTHS_PX = [40, 110, 300, 120, 60, 90, 420, 100, 120, 
 /** Chỉ số cột số (Khối lượng=F/5, Đơn giá=H/7, Thành tiền=I/8) — căn phải. */
 const NUMERIC_COL_INDEXES = [5, 7, 8];
 
+/**
+ * Number format theo cột — GIÁ TRỊ Ô là số thô, phần hiển thị "1.500.000" do pattern
+ * này lo. Trước đây ghi sẵn chuỗi đã format → reducer không ép được thành số → cột
+ * Thành tiền là TEXT → Excel không cộng/sort nổi (BOQ không tổng được tiền = hỏng).
+ */
+const NUMBER_FORMATS: Record<number, string> = {
+  5: '#,##0.###', // Khối lượng — giữ tối đa 3 số lẻ (m³/m²/m)
+  7: '#,##0',     // Đơn giá — VNĐ, không số lẻ
+  8: '#,##0',     // Thành tiền — VNĐ
+};
+
+/** Cột chữ dài cần xuống dòng (Tên công tác=C/2, Diễn giải=G/6) — tránh cắt/tràn chữ. */
+const WRAP_COL_INDEXES = [2, 6];
+
 const THIN_BORDER = { s: 1, cl: { rgb: '#d0d0d0' } };
 const CELL_BORDER = { t: THIN_BORDER, b: THIN_BORDER, l: THIN_BORDER, r: THIN_BORDER };
 
@@ -293,6 +307,8 @@ export function buildTakeoffFormatAction(
       const s: Record<string, any> = { bd: CELL_BORDER, vt: 2 };
       if (zebra) s.bg = { rgb: ZEBRA_BG };
       if (NUMERIC_COL_INDEXES.includes(i)) s.ht = 3; // số căn phải
+      if (NUMBER_FORMATS[i]) s.n = { pattern: NUMBER_FORMATS[i] }; // ô giữ SỐ, hiển thị có phân cách
+      if (WRAP_COL_INDEXES.includes(i)) s.tb = 3; // wrap text — chữ dài không bị cắt
       cells.push({ cell: `${letter}${r}`, s });
     });
   }
@@ -303,7 +319,22 @@ export function buildTakeoffFormatAction(
     ? [{ startRow: titleRow - 1, startColumn: 0, endRow: titleRow - 1, endColumn: COL_LETTERS.length - 1 }]
     : undefined;
 
-  return { type: 'format_sheet', sheetId, columnWidths, cells, ...(merges ? { merges } : {}) };
+  // Đóng băng qua hết dòng header (title + header cột) → cuộn bảng dài vẫn thấy tên
+  // cột. Tính từ headerRow THẬT chứ không hardcode 2: sheet không có title thì header
+  // ở dòng 1. Sheet của user (headerRow = null) → KHÔNG đụng freeze của họ.
+  const freeze =
+    headerRow != null
+      ? { xSplit: 0, ySplit: headerRow, startRow: headerRow, startColumn: 0 }
+      : undefined;
+
+  return {
+    type: 'format_sheet',
+    sheetId,
+    columnWidths,
+    cells,
+    ...(merges ? { merges } : {}),
+    ...(freeze ? { freeze } : {}),
+  };
 }
 
 /**
@@ -435,7 +466,10 @@ export function rowsToUpdateCells(
     row++;
   }
 
-  const startRow = titleRow ?? headerRow;
+  // Sheet của user không có title/header do GenSpec ghi (headerRow = null) → dòng bắt
+  // đầu chính là dòng data đầu tiên. Thiếu `?? row` thì startRow = null → message hiện
+  // "dòng null-5" (SWC không typecheck nên lỗi này lọt qua build).
+  const startRow = titleRow ?? headerRow ?? row;
   const dataStartRow = row;
   for (const record of rows) {
     COLUMN_ORDER.forEach((key, i) => push(`${COL_LETTERS[i]}${row}`, record[key] ?? ''));

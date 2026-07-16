@@ -9,7 +9,7 @@
  * Đơn giá MEP (thiết bị → mã định mức) là bước riêng cần dữ liệu norm MEP — ở đây
  * chỉ trả KHỐI LƯỢNG có truy vết, không gắn giá bịa.
  */
-import { MEP_COUNT_TYPES, MEP_LENGTH_TYPES } from './services/drawing-detector.service';
+import { MEP_COUNT_TYPES, MEP_LENGTH_TYPES } from './mep-types';
 
 export interface MepObject {
   type: string;

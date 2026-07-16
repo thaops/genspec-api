@@ -75,7 +75,18 @@ function resolveSheetIndex(sheets: Sheet[], sheetId: string): number {
 }
 
 function makeTakeoffSheet(id: string) {
-  return { id, name: 'Khối lượng', data: { cellData: {}, rowCount: 100, columnCount: 20 } };
+  // freeze giống hệt sheet do FE tạo (ensureQuantitySheet) — thiếu nó thì sheet
+  // fallback này cuộn là mất header, lệch trải nghiệm so với 3 sheet BOQ chuẩn.
+  return {
+    id,
+    name: 'Khối lượng',
+    data: {
+      cellData: {},
+      rowCount: 100,
+      columnCount: 20,
+      freeze: { xSplit: 0, ySplit: 2, startRow: 2, startColumn: 0 },
+    },
+  };
 }
 
 function upsert<T extends { id: string }>(list: T[], match: (x: T) => boolean, build: (existing?: T) => T): T[] {
@@ -285,6 +296,9 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
           }
           data.mergeData = existing;
         }
+        // Univer đọc `freeze` ngay trong sheet data (FE spread nguyên s.data vào
+        // snapshot) → chỉ cần gán, không cần map gì thêm.
+        if (a.freeze) data.freeze = a.freeze;
         return { ...s, data };
       });
       return { ...state, sheets: nextSheets };

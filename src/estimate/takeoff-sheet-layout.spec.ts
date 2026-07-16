@@ -142,6 +142,7 @@ describe('BOQ_SHEET_NAMES — contract với FE (sửa BE phải sửa FE)', () 
       '1. Kết cấu & bao che',
       '2. Hoàn thiện bề mặt',
       '3. Cửa & phụ kiện',
+      '4. Điện & Nước',
     ]);
   });
 });

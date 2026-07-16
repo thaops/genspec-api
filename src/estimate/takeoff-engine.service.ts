@@ -17,6 +17,8 @@ import { NormWebLookupService } from './norm-web-lookup.service';
 import { PriceWebLookupService, WebPriceHit } from './price-web-lookup.service';
 import { previewActions } from './transparency';
 import { aggregateRebar, RebarTakeoff } from '../drawing/rebar-takeoff';
+import { MEP_COUNT_TYPES, MEP_LENGTH_TYPES, DIEN_MEP_TYPES, NUOC_MEP_TYPES } from '../drawing/mep-types';
+import { mepTakeoff, MEP_LABEL, MEP_UNIT } from '../drawing/mep-takeoff';
 
 // ===== Pure core (không Mongo — verify script gọi trực tiếp từ dist) =====
 
@@ -76,34 +78,45 @@ export interface NormCandidate {
   directPrice?: { unitPrice: number; sourceDoc: string };
   /** Có mặt = mã tra từ WEB (grounded search) chứ không phải DB — cần kiểm chứng. */
   webSource?: { title?: string; uri?: string };
-  /** Mã phổ thông mặc định (COMMON_FALLBACK_CODES) khi Edit bật — cần kiểm chứng, KHÔNG có giá. */
-  fallback?: boolean;
 }
 
 /**
- * Mã phổ thông mặc định theo TT12/2021 — dùng khi Edit bật và dòng vẫn thiếu mã
- * (không có DB, không tra được web) để "hoàn thiện bảng" 1 lệnh. Chỉ mã + tên
- * chuẩn, KHÔNG kèm giá; nguồn ghi rõ "AI đề xuất mã phổ thông — cần kiểm chứng".
+ * HỌ MÃ định mức TT12/2021 theo từng công tác — tra từ bản định mức thật
+ * (`TongHop Dinh muc_ Thong tu 12-2021-BXD`, 7490 mã Phần Xây dựng), KHÔNG tự chế.
+ *
+ * ⚠️ CỐ Ý KHÔNG phải `rowKey → 1 mã`. Bảng `COMMON_FALLBACK_CODES` cũ làm vậy và **17/18
+ * mã sai** (12 mã không tồn tại; `AF.86411` là ván khuôn TRƯỢT, `AF.61120` là CỐT THÉP
+ * móng, `AK.98110` là đá đệm móng, `AK.57110` là bó vỉa hè). Sai không phải vì tra ẩu —
+ * mà vì **không tồn tại "một mã đúng"**: `AF.122` (bê tông cột) có **48 biến thể** khác
+ * nhau ở tiết diện × chiều cao × mác bê tông × cỡ đá; `AE.221` (xây tường) có 16 biến thể
+ * theo chiều dày × chiều cao × mác vữa. Những thông số đó nằm ở **thuyết minh/chỉ dẫn kỹ
+ * thuật, KHÔNG suy được từ hình học bản vẽ** ⇒ máy tự chọn 1 mã = **đoán mác bê tông**.
+ *
+ * Nên engine chỉ thu hẹp về ĐÚNG HỌ (mọi ứng viên chắc chắn cùng loại công tác, chỉ khác
+ * quy cách) rồi để QS chốt biến thể. Đây cũng là lý do KHÔNG dùng `$text` theo tên: đã đo
+ * `"bê tông cột"` → khớp nhầm `"cọc tiêu bê tông cốt thép, cột km"` (cọc tiêu đường bộ).
+ *
+ * `window` và `ceiling` (trần thạch cao) KHÔNG có trong Phụ lục Phần Xây dựng → để trống,
+ * không bịa. (Cửa sổ/trần nằm ở phụ lục Lắp đặt — chưa nạp.)
  */
-export const COMMON_FALLBACK_CODES: Record<TakeoffRowKey, { code: string; name: string }> = {
-  wall_area: { code: 'AK.21110', name: 'Trát tường' },
-  wall_volume: { code: 'AE.62210', name: 'Xây tường gạch' },
-  column_concrete: { code: 'AF.61520', name: 'Bê tông cột đá 1x2 M250' },
-  column_formwork: { code: 'AF.86411', name: 'Ván khuôn cột' },
-  beam_concrete: { code: 'AF.61620', name: 'Bê tông dầm đá 1x2 M250' },
-  beam_formwork: { code: 'AF.86511', name: 'Ván khuôn dầm' },
-  footing_concrete: { code: 'AF.61120', name: 'Bê tông móng đá 1x2 M250' },
-  footing_formwork: { code: 'AF.86111', name: 'Ván khuôn móng' },
-  wall_paint: { code: 'AK.84210', name: 'Bả + sơn tường' },
-  door: { code: 'AH.11120', name: 'Cửa đi' },
-  window: { code: 'AH.12110', name: 'Cửa sổ' },
-  slab: { code: 'AF.61720', name: 'Bê tông sàn đá 1x2 M250' },
-  floor_screed: { code: 'AK.98110', name: 'Cán nền vữa xi măng' },
-  floor_finish: { code: 'AK.51110', name: 'Lát nền gạch' },
-  ceiling: { code: 'AK.64110', name: 'Trần thạch cao khung xương' },
-  ceiling_paint: { code: 'AK.84330', name: 'Sơn trần' },
-  skirting: { code: 'AK.57110', name: 'Ốp/len chân tường' },
-  pile_concrete: { code: 'AC.24110', name: 'Cọc bê tông đúc sẵn ép' },
+export const NORM_FAMILIES: Partial<Record<TakeoffRowKey, { prefixes: string[]; spec: string }>> = {
+  wall_volume: { prefixes: ['AE.221'], spec: 'chiều dày tường, chiều cao, mác vữa' },
+  wall_area: { prefixes: ['AK.211'], spec: 'trát trong/ngoài, chiều dày lớp trát, mác vữa' },
+  wall_paint: { prefixes: ['AK.841'], spec: 'trong/ngoài nhà, số nước phủ (bả riêng: AK.825)' },
+  column_concrete: { prefixes: ['AF.122'], spec: 'tiết diện cột, chiều cao, mác bê tông, cỡ đá' },
+  beam_concrete: { prefixes: ['AF.123'], spec: 'chiều cao, mác bê tông, cỡ đá' },
+  slab: { prefixes: ['AF.124'], spec: 'mác bê tông, cỡ đá' },
+  footing_concrete: { prefixes: ['AF.112'], spec: 'chiều rộng móng, mác bê tông, cỡ đá' },
+  // Ván khuôn: AF.83x = ván ép công nghiệp, AF.811x = gỗ → giữ cả hai để QS chọn vật liệu.
+  column_formwork: { prefixes: ['AF.834', 'AF.8113'], spec: 'vật liệu ván khuôn, chiều cao, tiết diện cột' },
+  beam_formwork: { prefixes: ['AF.833', 'AF.8114'], spec: 'vật liệu ván khuôn, chiều cao' },
+  footing_formwork: { prefixes: ['AF.8111', 'AF.8112'], spec: 'loại móng (băng/bè/cột), vật liệu ván khuôn' },
+  floor_screed: { prefixes: ['AK.411'], spec: 'chiều dày lớp láng, mác vữa, có/không đánh màu' },
+  floor_finish: { prefixes: ['AK.512'], spec: 'kích thước viên gạch, mác vữa' },
+  skirting: { prefixes: ['AK.312'], spec: 'tiết diện viên gạch ốp' },
+  ceiling_paint: { prefixes: ['AK.841'], spec: 'trong/ngoài nhà, số nước phủ' },
+  pile_concrete: { prefixes: ['AC.251'], spec: 'kích thước cọc, chiều dài đoạn cọc, lực ép' },
+  door: { prefixes: ['AH.321'], spec: 'cửa có khuôn / không khuôn' },
 };
 
 export type TakeoffRowKey =
@@ -124,7 +137,30 @@ export type TakeoffRowKey =
   | 'floor_finish'
   | 'ceiling'         // trần (= diện tích sàn) — suy ra
   | 'ceiling_paint'   // sơn trần (= diện tích trần)
-  | 'skirting';       // len/chân tường (= chiều dài tường)
+  | 'skirting'        // len/chân tường (= chiều dài tường)
+  | MepRowKey;
+
+/**
+ * RowKey cho MEP — 1 key / 1 loại thiết bị hoặc tuyến, khớp 1-1 với type detector đã
+ * nhận diện được (`MEP_COUNT_TYPES` đếm cái/bộ, `MEP_LENGTH_TYPES` đo mét).
+ * Khối lượng do `mep-takeoff.ts` tính (module đã hoàn chỉnh từ trước, chỉ chưa nối
+ * vào engine — giống hệt ca `rebar-takeoff.ts`).
+ */
+export type MepRowKey =
+  // đếm số lượng (MEP_COUNT_TYPES)
+  | 'mep_light' | 'mep_socket' | 'mep_switch' | 'mep_electric_panel' | 'mep_sanitary'
+  | 'mep_valve' | 'mep_floor_drain' | 'mep_diffuser' | 'mep_hvac_unit' | 'mep_smoke_detector'
+  // đo chiều dài tuyến (MEP_LENGTH_TYPES)
+  | 'mep_wire' | 'mep_conduit' | 'mep_cable_tray' | 'mep_pipe' | 'mep_duct';
+
+/** type detector → rowKey MEP. Nguồn chân lý là 2 Set trong detector, KHÔNG chép tay. */
+export const mepRowKeyOf = (type: string) => `mep_${type}` as MepRowKey;
+
+/** Tất cả rowKey MEP — sinh từ 2 Set của detector để không bao giờ lệch nhau. */
+export const MEP_ROW_KEYS: MepRowKey[] = [...MEP_COUNT_TYPES, ...MEP_LENGTH_TYPES].map(mepRowKeyOf);
+
+/** MEP rowKey → type gốc (bỏ tiền tố) để tra `MEP_LABEL`/`MEP_UNIT` sẵn có. */
+const mepTypeOf = (key: MepRowKey) => key.slice('mep_'.length);
 
 export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
 
@@ -144,8 +180,10 @@ export type NormCandidateMap = Partial<Record<TakeoffRowKey, NormCandidate>>;
 export const DISCIPLINE_ROWKEYS: Record<Discipline, TakeoffRowKey[] | null> = {
   KT: ['wall_area', 'wall_volume', 'wall_paint', 'door', 'window', 'floor_screed', 'floor_finish', 'ceiling', 'ceiling_paint', 'skirting'],
   KC: ['footing_concrete', 'footing_formwork', 'column_concrete', 'column_formwork', 'beam_concrete', 'beam_formwork', 'slab', 'pile_concrete'],
-  DIEN: [],
-  NUOC: [],
+  // MEP: rowKey sinh tu type detector nhan dien duoc (mep-takeoff da tinh khoi luong).
+  // Truoc day = [] nen bo ve DIEN/NUOC luon ra 0 dong du detector thay 136 den.
+  DIEN: MEP_ROW_KEYS.filter((k) => DIEN_MEP_TYPES.has(k.slice(4))),
+  NUOC: MEP_ROW_KEYS.filter((k) => NUOC_MEP_TYPES.has(k.slice(4))),
   KHAC: null,
 };
 
@@ -178,8 +216,6 @@ export interface TakeoffEngineRow {
   totalPrice?: number;
   /** true = mã tra từ web (không phải norm_items DB) — không tính là "đủ mã" cho score 90. */
   webSourced?: boolean;
-  /** true = mã phổ thông mặc định (COMMON_FALLBACK_CODES) — cần kiểm chứng, không có giá. */
-  fallback?: boolean;
   /** true = ĐƠN GIÁ tra từ web (không phải công bố giá tỉnh) — cần kiểm chứng. */
   pricedFromWeb?: boolean;
 }
@@ -281,7 +317,7 @@ export const HATCH_MIN_AREA = 0.5;
 export const HATCH_MAX_SHARE = 0.9;
 
 /** Keyword tra norm_items theo từng dòng khối lượng (regex, thử theo thứ tự). */
-export const NORM_KEYWORDS: Record<TakeoffRowKey, string[]> = {
+export const NORM_KEYWORDS: Partial<Record<TakeoffRowKey, string[]>> = {
   wall_area: ['trát tường', 'xây tường'],
   wall_volume: ['xây tường', 'xây.*gạch'],
   wall_paint: ['sơn.*tường', 'bả.*tường', 'sơn'],
@@ -307,7 +343,15 @@ export const BOQ_GROUP_THO = 'PHẦN THÔ - KẾT CẤU';
 export const BOQ_GROUP_FINISH = 'PHẦN HOÀN THIỆN';
 export const BOQ_GROUP_OTHER = 'PHẦN KHÁC';
 
+/** MEP la hang muc rieng, khong thuoc PHAN THO/HOAN THIEN. */
+export const BOQ_GROUP_MEP = 'PHẦN ĐIỆN - NƯỚC';
+
+/** Sinh Record cho moi rowKey MEP tu MOT nguon (MEP_ROW_KEYS) — khong chep tay 15 dong. */
+const mepRecord = <T,>(fn: (k: MepRowKey) => T): Record<MepRowKey, T> =>
+  Object.fromEntries(MEP_ROW_KEYS.map((k) => [k, fn(k)])) as Record<MepRowKey, T>;
+
 const BOQ_GROUP: Record<TakeoffRowKey, string> = {
+  ...mepRecord(() => BOQ_GROUP_MEP),
   wall_volume: BOQ_GROUP_THO,
   footing_concrete: BOQ_GROUP_THO,
   footing_formwork: BOQ_GROUP_THO,
@@ -349,6 +393,7 @@ export const BOQ_SHEETS: readonly BoqSheetDef[] = [
   { key: 'structure', name: '1. Kết cấu & bao che', tint: '#dbe4f0', accent: '#1e3a5f' }, // xanh dương
   { key: 'finishing', name: '2. Hoàn thiện bề mặt', tint: '#d7ead9', accent: '#14532d' }, // xanh lá
   { key: 'openings', name: '3. Cửa & phụ kiện', tint: '#f0e4cf', accent: '#713f12' }, // hổ phách
+  { key: 'mep', name: '4. Điện & Nước', tint: '#e6dcf2', accent: '#4c1d95' }, // tím — MEP là hạng mục riêng
 ] as const;
 
 /** Tên 3 sheet (thứ tự) — FE dùng để tạo sheet trước khi bóc. */
@@ -359,6 +404,7 @@ export const BOQ_SHEET_NAMES = BOQ_SHEETS.map((s) => s.name);
  * bả/sơn + lát nền → sheet 2; cửa đi/sổ → sheet 3.
  */
 const ROWKEY_SHEET: Record<TakeoffRowKey, string> = {
+  ...mepRecord(() => 'mep'),
   wall_volume: 'structure',
   wall_area: 'structure',
   footing_concrete: 'structure',
@@ -380,7 +426,7 @@ const ROWKEY_SHEET: Record<TakeoffRowKey, string> = {
 };
 
 /**
- * Tên hiển thị cột "Tên công tác": web/fallback LUÔN dùng tên chuẩn engine; tên DB
+ * Tên hiển thị cột "Tên công tác": mã web LUÔN dùng tên chuẩn engine; tên DB
  * chỉ dùng khi gọn (≤60 ký tự và ≤50% chữ viết hoa) — ngược lại rơi về tên chuẩn.
  * Chống tên web "SB.82510 SƠN DẦM, TRẦN, CỘT, TƯỜNG TRONG NHÀ...". PURE.
  */
@@ -451,6 +497,7 @@ export function renderChecklistQs(existing?: Set<string>): string {
 }
 
 const DEFAULT_NAMES: Record<TakeoffRowKey, string> = {
+  ...mepRecord((k) => MEP_LABEL[mepTypeOf(k)] ?? mepTypeOf(k)),
   wall_area: 'Xây/trát tường',
   wall_volume: 'Xây tường',
   wall_paint: 'Bả + sơn tường',
@@ -840,17 +887,7 @@ export function computeTakeoffRows(
     let name = DEFAULT_NAMES[key];
     let source = '—';
     let webSourced: boolean | undefined;
-    let fallback: boolean | undefined;
-    if (cand && cand.code && cand.fallback) {
-      // Mã phổ thông mặc định (Edit bật) — badge vàng như web, KHÔNG có giá, KHÔNG 'government'.
-      // Tên hiển thị LUÔN dùng tên chuẩn engine (không lấy tên web dài/viết hoa).
-      code = cand.code;
-      name = DEFAULT_NAMES[key];
-      source = 'AI đề xuất mã phổ thông — cần kiểm chứng';
-      // ⚠ không lặp vào Diễn giải từng dòng (nhiễu) — đã có finding tổng + cột Nguồn.
-      webSourced = true;
-      fallback = true;
-    } else if (cand && cand.code && cand.webSource) {
+    if (cand && cand.code && cand.webSource) {
       // Mã tra từ web: tên hiển thị LUÔN dùng tên chuẩn engine; tên web chỉ để đối
       // chiếu (ghi ngắn trong Nguồn). Nguồn "Web: …" — KHÔNG BAO GIỜ 'government'.
       code = cand.code;
@@ -866,7 +903,7 @@ export function computeTakeoffRows(
     } else {
       note += ' ⚠ cần chọn mã — chưa import định mức';
     }
-    rows.push({ key, group, boqGroup: BOQ_GROUP[key], code, name, unit, quantity: q, note, source, ...(webSourced && { webSourced }), ...(fallback && { fallback }) });
+    rows.push({ key, group, boqGroup: BOQ_GROUP[key], code, name, unit, quantity: q, note, source, ...(webSourced && { webSourced }) });
   };
 
   // RULE ENGINE: mỗi nhóm hình học chạy bảng công tác dẫn xuất (DERIVE_RULES).
@@ -1086,6 +1123,46 @@ export function emptyResultVerdict(
   };
 }
 
+/**
+ * Dòng BOQ cho MEP — khối lượng do `mep-takeoff.ts` tính (module PURE đã hoàn chỉnh
+ * từ trước: đếm thiết bị / đo chiều dài tuyến). Engine chỉ ĐÓNG GÓI lại thành
+ * TakeoffEngineRow, KHÔNG tự tính lại, KHÔNG tự đặt tên/đơn vị (dùng `MEP_LABEL`/
+ * `MEP_UNIT` sẵn có).
+ *
+ * KHÔNG có mã, KHÔNG có giá: chưa có định mức/đơn giá MEP trong DB → để trống + để
+ * finding "thiếu mã" sẵn có lo. Thà thiếu còn hơn bịa.
+ * PURE (nhận objects đã lọc) để test không cần Mongo.
+ */
+export function computeMepRows(
+  objects: { type: string; geometry?: number[][]; ambiguous?: boolean }[],
+  factor: number,
+  allowedKeys?: Set<TakeoffRowKey> | null,
+): TakeoffEngineRow[] {
+  return mepTakeoff(objects, factor)
+    .map((m) => {
+      const key = mepRowKeyOf(m.type);
+      if (allowedKeys && !allowedKeys.has(key)) return null;
+      const q = round3(m.quantity);
+      if (q <= 0) return null;
+      const how =
+        m.kind === 'count'
+          ? `đếm ${m.quantity} ${m.unit} từ block/thiết bị nhận diện trên layer MEP`
+          : `tổng chiều dài tuyến = ${f3(q)} ${m.unit} (đo polyline × tỉ lệ)`;
+      return {
+        key,
+        group: m.type,
+        boqGroup: BOQ_GROUP_MEP,
+        code: '',
+        name: m.label,
+        unit: m.unit,
+        quantity: q,
+        note: `${how} [nhóm:${m.type}] ⚠ cần chọn mã — chưa có định mức MEP`,
+        source: '—',
+      } as TakeoffEngineRow;
+    })
+    .filter((r): r is TakeoffEngineRow => r !== null);
+}
+
 export function assumptionFootnote(a: TakeoffAssumptions): string {
   return `Thông số áp dụng (người dùng xác nhận khi bóc): cao tầng ${a.floorHeight}m · dày tường ${a.wallThickness}m · sâu dầm ${a.beamDepth}m · bề rộng dầm ${ASSUMED_BEAM_WIDTH}m`;
 }
@@ -1157,7 +1234,9 @@ export class TakeoffEngineService {
     const map: NormCandidateMap = {};
     await Promise.all(
       keys.map(async (key) => {
-        for (const kw of NORM_KEYWORDS[key]) {
+        // MEP không có keyword (không có định mức MEP trong norm_items) → bỏ qua,
+        // KHÔNG bịa mã. NORM_KEYWORDS là Partial nên phải guard.
+        for (const kw of NORM_KEYWORDS[key] ?? []) {
           const hit = await this.normModel
             .findOne({ name: { $regex: kw, $options: 'i' } })
             .sort({ code: 1 })
@@ -1294,9 +1373,6 @@ export class TakeoffEngineService {
     // tiêu bê tông... cột km"). Auto-gán = mã SAI + giá THẬT + nguồn TT 13/2021 trông
     // rất chính thống = sai một cách tự tin, tệ hơn hẳn để trống. Nên: chỉ GỢI Ý
     // ứng viên cho QS/agent chốt (suggestions), engine KHÔNG tự chọn.
-    let pricedFromUnitPrice = 0;
-    /** Mã bị LOẠI vì tồn tại trong sách nhưng tên lệch nghĩa — minh bạch cho QS. */
-    const rejectedMismatch: string[] = [];
     /** Mã web bị LOẠI vì không có trong sách đơn giá (LLM tự chế, vd AE.00000). */
     const rejectedWebCodes: string[] = [];
     const suggestions = new Map<TakeoffRowKey, UnitPriceSuggestion[]>();
@@ -1304,32 +1380,19 @@ export class TakeoffEngineService {
     if (input.editPermission) {
       const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys);
       for (const r of probe.filter((row) => !row.code)) {
-        const fb = COMMON_FALLBACK_CODES[r.key];
-        // a) Mã phổ thông chỉ dùng được khi QUA RÀO: có thật trong sách đơn giá tỉnh
-        //    VÀ tên khớp nghĩa công tác. Qua rào → lấy luôn giá trọn gói + nguồn.
-        if (fb) {
-          const v = await this.verifyCodeInBook(fb.code, DEFAULT_NAMES[r.key], province);
-          if (v.ok) {
-            normCandidates[r.key] = {
-              code: v.hit.code,
-              name: fb.name,
-              unit: v.hit.unit ?? '',
-              sourceDoc: v.hit.sourceDoc,
-              directPrice: { unitPrice: v.hit.unitPrice, sourceDoc: v.hit.sourceDoc },
-            };
-            pricedFromUnitPrice++;
-            continue;
-          }
-          if (v.reason === 'name_mismatch') {
-            // Mã tồn tại nhưng LỆCH NGHĨA — nguy hiểm nhất (giá thật + nguồn thật cho
-            // công tác sai). Đếm để báo minh bạch, KHÔNG dùng.
-            rejectedMismatch.push(`${fb.code} (${DEFAULT_NAMES[r.key]} ≠ "${v.actualName}")`);
-          }
-        }
-        // b) Không có mã thật → KHÔNG gán mã bịa. Gợi ý ứng viên để QS chốt.
-        const found = await this.unitPrices
-          .search(standardDisplayName(r.key, undefined), province, 3)
-          .catch(() => []);
+        // KHÔNG auto-gán mã. Một họ có tới 48 biến thể chỉ khác mác bê tông/tiết diện —
+        // thông số nằm ở thuyết minh, không có trong hình học ⇒ máy chọn = đoán (xem
+        // NORM_FAMILIES). Thay vào đó thu hẹp về ĐÚNG HỌ rồi để QS chốt biến thể.
+        const fam = NORM_FAMILIES[r.key];
+        const found = fam
+          ? (
+              await Promise.all(
+                // `search()` đã tự nhận prefix mã hiệu (`^[A-Z]{2}\.\d`) → lọc theo mã,
+                // KHÔNG dùng $text theo tên (đã đo: sai ngữ nghĩa).
+                fam.prefixes.map((p) => this.unitPrices.search(p, province, 6).catch(() => [])),
+              )
+            ).flat()
+          : [];
         if (found.length > 0) {
           suggestions.set(
             r.key,
@@ -1339,8 +1402,8 @@ export class TakeoffEngineService {
       }
     }
 
-    // Tầng web: CHỈ tra cho dòng VẪN thiếu mã sau DB + fallback (nhóm chuẩn đã có
-    // fallback thắng ở trên) → grounded search, chống bịa 3 rào. Tránh đốt quota.
+    // Tầng web: CHỈ tra cho dòng VẪN thiếu mã sau DB → grounded search, chống bịa 3
+    // rào. Tránh đốt quota.
     let webLookedUp = 0;
     let webHitCount = 0;
     if (this.webLookup.enabled) {
@@ -1377,7 +1440,12 @@ export class TakeoffEngineService {
       }
     }
 
-    const bareRows = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys);
+    // Hình học (KT/KC) + MEP (đếm thiết bị / đo tuyến). MEP đi đường riêng vì cách đo
+    // khác hẳn: không suy từ bbox/hatch mà đếm block + đo polyline (mep-takeoff.ts).
+    const bareRows = [
+      ...computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys),
+      ...computeMepRows(objects as any, input.unitsPerDrawingUnit, allowedKeys),
+    ];
 
     // Giá THẬT từ price_set tỉnh mới nhất khớp projectInfo.location — không có thì cột giá trống.
     const priceCtxRaw = await this.catalog
@@ -1473,8 +1541,13 @@ export class TakeoffEngineService {
     filledSheets.forEach((sheetDef, si) => {
       const sheetRows = rowsBySheet.get(sheetDef.key)!;
       const isLast = si === filledSheets.length - 1;
+      // Ghi SỐ THÔ, KHÔNG format sẵn. Reducer ép kiểu bằng
+      // `isFinite(Number(v)) ? Number(v) : v` → "1500000" thành SỐ, còn "1.500.000"
+      // (toLocaleString) thành NaN → giữ nguyên CHUỖI ⇒ Excel không cộng/sort được
+      // cột Thành tiền = BOQ vô dụng. Hiển thị "1.500.000" do number format
+      // (`n.pattern` trong format_sheet) lo, không phải do chuỗi.
       // Ô giá thiếu → "" (KHÔNG "0"/"—"): đúng convention sheet, không bịa số chưa có nguồn.
-      const cellVnd = (n?: number) => (n != null ? Math.round(n).toLocaleString('vi-VN') : '');
+      const cellVnd = (n?: number) => (n != null ? String(Math.round(n)) : '');
       const mirror = rowsToUpdateCells(
         sheetRows.map((r, i) => ({
           stt: String(i + 1),
@@ -1515,8 +1588,7 @@ export class TakeoffEngineService {
 
     const groups = [...new Set(rows.map((r) => r.group))];
     const missingCode = rows.filter((r) => !r.code);
-    const fallbackRows = rows.filter((r) => r.fallback);
-    const webCode = rows.filter((r) => r.webSourced && !r.fallback);
+    const webCode = rows.filter((r) => r.webSourced);
     const missingPrice = rows.filter((r) => r.unitPrice == null);
     const pricedCount = rows.length - missingPrice.length;
     const message = [
@@ -1535,19 +1607,9 @@ export class TakeoffEngineService {
             `Mã hiệu: ${webCode.length} công tác không có trong norm_items — đã tra từ web (grounded search, chậm hơn bình thường); mã web CẦN KIỂM CHỨNG trước khi dùng.`,
           ]
         : []),
-      ...(rejectedMismatch.length + rejectedWebCodes.length > 0
+      ...(rejectedWebCodes.length > 0
         ? [
-            `Đã CHẶN ${rejectedMismatch.length + rejectedWebCodes.length} mã không đáng tin (${rejectedMismatch.length} lệch nghĩa với đơn giá tỉnh, ${rejectedWebCodes.length} mã web không có trong sách) — thà để trống còn hơn gán mã sai kèm giá thật. Chi tiết ở "Điểm cần kiểm tra".`,
-          ]
-        : []),
-      ...(fallbackRows.length > 0
-        ? [
-            `Đã điền mã phổ thông cho ${fallbackRows.length} dòng (cần kiểm chứng theo chỉ dẫn kỹ thuật).`,
-          ]
-        : []),
-      ...(pricedFromUnitPrice > 0
-        ? [
-            `Mã hiệu + đơn giá: ${pricedFromUnitPrice} công tác khớp ĐƠN GIÁ TỈNH thật (có mã trong bộ đơn giá) → giá + nguồn lấy thẳng từ đó.`,
+            `Đã CHẶN ${rejectedWebCodes.length} mã web không có trong sách đơn giá — thà để trống còn hơn gán mã sai kèm giá thật. Chi tiết ở "Điểm cần kiểm tra".`,
           ]
         : []),
       ...(suggestions.size > 0
@@ -1645,29 +1707,8 @@ export class TakeoffEngineService {
         detail: `${webCode.length} mã tra từ web — kiểm chứng trước khi dùng; import bộ định mức để có nguồn chính thống.`,
       });
     }
-    if (fallbackRows.length > 0) {
-      findings.push({
-        id: 'takeoff-engine-fallback-code',
-        severity: 'warn',
-        area: 'missing',
-        title: `${fallbackRows.length} mã phổ thông mặc định — cần kiểm chứng`,
-        detail: `${fallbackRows.length} công tác dùng mã phổ thông mặc định (TT12/2021) do chưa import định mức — cần kiểm chứng theo chỉ dẫn kỹ thuật; chưa có đơn giá.`,
-      });
-    }
     // MINH BẠCH RÀO MÃ: cho QS thấy engine đã CHẶN cái gì — quan trọng để tin được
-    // những dòng CÓ mã. Tách 2 loại vì bản chất khác hẳn nhau.
-    if (rejectedMismatch.length > 0) {
-      findings.push({
-        id: 'takeoff-engine-code-mismatch-rejected',
-        severity: 'info',
-        area: 'missing',
-        title: `Đã loại ${rejectedMismatch.length} mã phổ thông vì LỆCH NGHĨA với đơn giá tỉnh`,
-        detail:
-          `Mã có tồn tại trong sách đơn giá nhưng tên công tác KHÔNG khớp → dùng sẽ ra "giá thật của ` +
-          `công tác khác" (sai mà trông rất chính thống). Engine bỏ, để QS chọn từ ứng viên:\n` +
-          rejectedMismatch.map((s) => `· ${s}`).join('\n'),
-      });
-    }
+    // những dòng CÓ mã.
     if (rejectedWebCodes.length > 0) {
       findings.push({
         id: 'takeoff-engine-web-code-rejected',
@@ -1689,7 +1730,10 @@ export class TakeoffEngineService {
         const opts = list
           .map((s) => `${s.code} "${s.name}" — ${Math.round(s.unitPrice).toLocaleString('vi-VN')}đ/${s.unit || '?'}`)
           .join('  |  ');
-        return `· ${DEFAULT_NAMES[key]}: ${opts}`;
+        // Nêu rõ THÔNG SỐ phải quyết: tên trong đơn giá là tên con (vd "Tiết diện gạch
+        // ≤0,023m2") nên đứng một mình vô nghĩa — QS cần biết mình đang chốt cái gì.
+        const spec = NORM_FAMILIES[key]?.spec;
+        return `· ${DEFAULT_NAMES[key]}${spec ? ` — chọn theo: ${spec}` : ''}\n    ${opts}`;
       });
       const doc = [...suggestions.values()][0]?.[0]?.sourceDoc;
       findings.push({
@@ -1698,9 +1742,11 @@ export class TakeoffEngineService {
         area: 'missing',
         title: `Có ${suggestions.size} công tác tra được mã thật trong đơn giá tỉnh — chọn để ra giá`,
         detail:
-          `Các mã dưới đây CÓ THẬT trong bộ đơn giá${doc ? ` (${doc})` : ''}, kèm giá + nguồn. Engine KHÔNG tự ` +
-          `chọn vì khớp theo tên tiếng Việt không đủ tin cậy — QS chọn đúng mã (hoặc bảo agent "điền mã cho ` +
-          `dòng X là <mã>"), giá sẽ tự áp theo đơn giá tỉnh:\n${lines.join('\n')}`,
+          `Các mã dưới đây CÓ THẬT trong bộ đơn giá${doc ? ` (${doc})` : ''}, kèm giá + nguồn, và đã lọc về ` +
+          `ĐÚNG họ mã định mức TT12/2021 của từng công tác. Engine KHÔNG tự chọn vì các biến thể trong họ chỉ ` +
+          `khác nhau ở quy cách (mác bê tông, mác vữa, tiết diện…) — những thông số này nằm ở thuyết minh/chỉ ` +
+          `dẫn kỹ thuật, KHÔNG suy được từ hình học bản vẽ; máy chọn hộ = đoán. QS chốt biến thể (hoặc bảo ` +
+          `agent "điền mã cho dòng X là <mã>"), giá sẽ tự áp theo đơn giá tỉnh:\n${lines.join('\n')}`,
       });
     }
     if (hs.count > 0 && hs.used === 0) {
@@ -1729,7 +1775,7 @@ export class TakeoffEngineService {
     });
     if (empty) findings.push(empty.finding);
     // đủ mã DB + đủ giá → 90; có mã web/mã phổ thông → 70; đủ mã DB thiếu giá → 75; thiếu mã hẳn → 55
-    const softCode = webCode.length + fallbackRows.length;
+    const softCode = webCode.length;
     const score =
       empty ? empty.score
       : missingCode.length > 0 ? 55 : softCode > 0 ? 70 : missingPrice.length > 0 ? 75 : 90;

@@ -211,6 +211,12 @@ export type Action =
       cells?: { cell: string; s: Record<string, any> }[];
       /** Vùng merge (0-based, Univer IRange) — vd thanh tiêu đề trải hết cột. */
       merges?: { startRow: number; startColumn: number; endRow: number; endColumn: number }[];
+      /**
+       * Đóng băng hàng/cột (Univer IFreeze) — giữ header luôn nhìn thấy khi cuộn.
+       * Trước đây CHỈ FE set lúc tạo sheet; BE không bao giờ gửi nên sheet do BE tự
+       * tạo (makeTakeoffSheet) cuộn là mất header.
+       */
+      freeze?: { xSplit: number; ySplit: number; startRow: number; startColumn: number };
     }
   | { type: 'set_sheets'; sheets: Sheet[] }
   | { type: 'clear' };
