@@ -1,3 +1,4 @@
+import { normalizeLayerName } from './layer-name';
 // Bộ môn bản vẽ (discipline) — hằng số + auto-detect từ tên file.
 // Pure, không phụ thuộc engine takeoff. GĐ2 sẽ dùng để định tuyến bóc tách.
 
@@ -43,7 +44,9 @@ export function detectDisciplineFromLayers(layers: string[]): Discipline {
   let kc = 0;
   let kt = 0;
   for (const layer of layers ?? []) {
-    const tokens = (layer ?? '').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+    // Bỏ dấu trước khi tokenize — nếu không, layer tiếng Việt có dấu ("Tường bao
+    // mặt đứng") bị [^A-Z0-9] cắt vụn thành rác và không khớp token nào.
+    const tokens = normalizeLayerName(layer).split(/[^A-Z0-9]+/).filter(Boolean);
     for (const t of tokens) {
       if (KC_LAYER_TOKEN_RE.test(t)) kc++;
       else if (KT_LAYER_TOKEN_RE.test(t)) kt++;

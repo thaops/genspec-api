@@ -15,6 +15,7 @@ import { DrawingLayerRuleService } from '../drawing/services/drawing-layer-rule.
 import { DrawingObjectOverrideService } from '../drawing/services/drawing-object-override.service';
 import { DrawingIndexerService } from '../drawing/services/drawing-indexer.service';
 import { inferUnitFactor } from '../drawing/services/drawing-unit';
+import { expandInsertEntities } from '../drawing/services/dwg-insert-expand';
 import { DrawingGraphService } from '../drawing/services/drawing-graph.service';
 import { DrawingParserFactory } from '../drawing/parsers/drawing-parser.factory';
 import { DxfParserService } from '../drawing/parsers/dxf-parser.service';
@@ -150,6 +151,16 @@ export class DrawingJobProcessor extends WorkerHost {
         }
       }
       if (!result) throw new Error('Parse không trả kết quả');
+
+      // 3b. Expand block INSERT (cửa/cửa sổ/nội thất...) thành geometry THẬT —
+      // chỉ đường WASM DWG trực tiếp thiếu bước này (DXF/converted đã expand lúc
+      // parse). Thiếu → mọi INSERT chỉ có insertion point → bbox fallback 1×1 →
+      // khối lượng SAI (xác nhận thật: 221 cửa "KT.dwg" đều 1×1).
+      if (parseExt === 'dwg-done') {
+        const blocks = (result.metadata?.blocks ?? {}) as Record<string, import('../drawing/parsers/dwg-parser.service').DwgBlockDef>;
+        result = { ...result, pages: result.pages.map((p) => ({ ...p, entities: expandInsertEntities(p.entities, blocks) })) };
+        await this.plog(drawingId, `[expand] block INSERT → geometry thật (${Object.keys(blocks).length} block def)`);
+      }
 
       // 4. Normalize + Detect
       await this.progress(job, 'detecting', 'Đang phân tích đối tượng...', 55);

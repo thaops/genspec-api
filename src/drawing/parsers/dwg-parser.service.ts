@@ -200,14 +200,18 @@ export class DwgParserService implements DrawingParserInterface {
 
   /**
    * Block definitions live in db.tables.BLOCK_RECORD.entries (NOT db.blocks).
-   * Skips system blocks (*Model_Space, *Paper_Space, anonymous *X/*D).
+   * Skips CHỈ container hệ thống (*Model_Space, *Paper_Space) — KHÔNG bỏ block
+   * ẩn danh (*U<n>/*D<n>/*X<n>). Trước đây lọc bằng blanket `startsWith('*')`
+   * làm mất hết block *U — xác nhận thật trên file KT.dwg: phần lớn tên block
+   * mà các INSERT cửa tham chiếu là *U<n> (AutoCAD tự sinh tên khi tạo block
+   * không đặt tên/dynamic block), chứa geometry cửa THẬT, không phải rác hệ thống.
    */
   private extractBlocks(db: any): Record<string, DwgBlockDef> {
     const entries: any[] = db?.tables?.BLOCK_RECORD?.entries ?? [];
     const blocks: Record<string, DwgBlockDef> = {};
     for (const rec of entries) {
       const name: string = rec?.name ?? '';
-      if (!name || name.startsWith('*')) continue;
+      if (!name || /^\*(Model_Space|Paper_Space)/i.test(name)) continue;
       const raw: any[] = rec?.entities ?? [];
       if (!raw.length) continue;
       const mapped: RawEntity[] = [];

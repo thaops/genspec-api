@@ -10,6 +10,7 @@ import { DrawingDetectorService } from './drawing-detector.service';
 import { DrawingIndexerService } from './drawing-indexer.service';
 import { inferUnitFactor } from './drawing-unit';
 import { detectDisciplineFromLayers } from '../discipline';
+import { expandInsertEntities } from './dwg-insert-expand';
 import {
   DrawingUploadedEvent,
   DrawingConvertedEvent,
@@ -124,6 +125,20 @@ export class DrawingParserService {
         // Reuse the libredwg parse result — no second parse, no CLI converter
         await this.scene.buildAndPersistFromDwgResult(drawingId, result);
         await this.log(drawingId, `[scene] built from DWG parse result and persisted`);
+      }
+
+      // 1c. Expand block INSERT (cửa/cửa sổ/nội thất...) thành geometry THẬT trước
+      // khi detect/đo — DWG (WASM) không tự làm việc này như DXF (đã expand lúc
+      // parse). Thiếu bước này → mọi INSERT chỉ có insertion point → bbox fallback
+      // 1×1 → khối lượng SAI (đã xác nhận thật: 221 cửa trong "KT.dwg" đều 1×1).
+      if (ext === 'dwg' && !dxfFallbackPath) {
+        const blocks = (result.metadata?.blocks ?? {}) as Record<string, import('../parsers/dwg-parser.service').DwgBlockDef>;
+        const blockCount = Object.keys(blocks).length;
+        result = {
+          ...result,
+          pages: result.pages.map((p) => ({ ...p, entities: expandInsertEntities(p.entities, blocks) })),
+        };
+        await this.log(drawingId, `[expand] block INSERT → geometry thật (${blockCount} block def) trước khi detect`);
       }
 
       // 2. Normalize

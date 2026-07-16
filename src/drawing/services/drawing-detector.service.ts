@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { MIN_SECTION_M, SECTION_TYPES } from '../../estimate/takeoff-engine.service';
+import { normalizeLayerName } from '../layer-name';
 
 export interface NormalizedObject {
   stableId: string;
@@ -341,7 +342,12 @@ export class DrawingDetectorService {
       }
     }
 
-    const layerUpper = obj.layer.toUpperCase();
+    // BỎ DẤU trước mọi so khớp layer: file CAD Việt Nam đặt layer có dấu
+    // ("5- Cắt tường", "3- Tường bao mặt đứng", "Lưới trục"). Trước đây so chuỗi
+    // THÔ nên chữ có dấu không bao giờ khớp key ASCII, và tokenizer [^A-Z0-9]
+    // còn coi ắ/ư/ờ là DẤU PHÂN CÁCH → "CẮT TƯỜNG" vỡ thành ["C","T","T","NG"].
+    // Hệ quả thật (F550): 445 entity layer "5- Cắt tường" vô hình với detector.
+    const layerUpper = normalizeLayerName(obj.layer);
 
     // 0b. Token "tim/trục" ở bất kỳ đâu trong tên layer → đường trục, KHÔNG phải cấu
     // kiện. Chạy TRƯỚC LAYER_TYPE_MAP vì "TIM-COT"/"TRUC-DAM" là tim cột/tim dầm (nét

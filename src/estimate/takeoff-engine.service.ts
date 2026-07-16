@@ -480,6 +480,8 @@ interface GroupTotals {
   length: number;
   area: number;
   perimeter: number;
+  /** Số object bị loại vì outlier diện tích (chỉ door/window — xem OUTLIER_PRONE_TYPES). */
+  outliersDropped?: number;
 }
 
 // ===== RULE ENGINE — 1 đối tượng → N công tác (khai báo, không hardcode nhánh) =====
@@ -558,7 +560,7 @@ export const DERIVE_RULES: Record<string, DeriveRule[]> = {
   door: [
     { key: 'door', group: 'door', unit: 'm2',
       qty: (t) => t.area,
-      note: (t) => `tổng diện tích ${t.count} cửa = ${f3(t.area)} m²` },
+      note: (t) => `tổng diện tích ${t.count} cửa = ${f3(t.area)} m²${t.outliersDropped ? ` (đã loại ${t.outliersDropped} cửa diện tích bất thường — dữ liệu block lỗi, cần kiểm tra thủ công)` : ''}` },
   ],
 };
 
@@ -748,18 +750,41 @@ export function computeTakeoffRows(
   // Ngoài MEASURED_TYPES, còn gom 'opening' (lỗ mở/cửa sổ) và 'slab' (sàn vẽ
   // dạng polygon) để có nhánh đo — tăng coverage cho type đã nhận diện.
   const AGG_TYPES = new Set<string>([...MEASURED_TYPES, 'opening', 'slab', 'footing', 'pile']);
-  const totals = new Map<string, GroupTotals>();
+  // Cửa/cửa sổ thường vẽ bằng BLOCK (INSERT) — dwg-insert-expand.ts khôi phục
+  // kích thước thật, nhưng vẫn có thể dính DỮ LIỆU NGUỒN lỗi (block chứa 1
+  // sub-block phần cứng — bản lề/tay nắm — mang toạ độ world tuyệt đối thay vì
+  // cục bộ, xác nhận thật trên file "KT.dwg": 1/221 cửa phồng lên hàng km²).
+  // Loại theo median (cùng pattern hatchSlabStats) — CHỈ 2 type dễ dính lỗi
+  // này; không đụng wall/column/beam/footing/slab/pile (không qua block).
+  const OUTLIER_PRONE_TYPES = new Set(['door', 'window']);
+  const perType = new Map<string, { area: number; length: number; perimeter: number }[]>();
   for (const obj of objects) {
     if (!isCountableObject(obj)) continue;
     if (!AGG_TYPES.has(obj.type)) continue;
     if (!isRealSection(obj, factor)) continue; // ký hiệu, không phải tiết diện cấu kiện — không đo
     const m = measure(obj, factor);
-    const g = totals.get(obj.type) ?? { count: 0, length: 0, area: 0, perimeter: 0 };
-    g.count += 1;
-    g.length += m.length;
-    g.area += m.area;
-    g.perimeter += m.perimeter;
-    totals.set(obj.type, g);
+    (perType.get(obj.type) ?? perType.set(obj.type, []).get(obj.type)!).push(m);
+  }
+  const totals = new Map<string, GroupTotals>();
+  for (const [type, items] of perType) {
+    let kept = items;
+    let dropped = 0;
+    if (OUTLIER_PRONE_TYPES.has(type) && items.length >= 3) {
+      const areas = items.map((i) => i.area).filter((a) => a > 0).sort((a, b) => a - b);
+      const median = areas[Math.floor(areas.length / 2)] ?? 0;
+      if (median > 0) {
+        kept = items.filter((i) => i.area <= median * 20);
+        dropped = items.length - kept.length;
+      }
+    }
+    const g: GroupTotals = { count: 0, length: 0, area: 0, perimeter: 0, outliersDropped: dropped || undefined };
+    for (const m of kept) {
+      g.count += 1;
+      g.length += m.length;
+      g.area += m.area;
+      g.perimeter += m.perimeter;
+    }
+    totals.set(type, g);
   }
 
   const { floorHeight: H, wallThickness: T, beamDepth: D } = assumptions;
@@ -831,7 +856,10 @@ export function computeTakeoffRows(
   const winCount = (window?.count ?? 0) + (opening?.count ?? 0);
   if (winArea > 0) {
     const openNote = opening?.count ? ` (gồm ${opening.count} lỗ mở)` : '';
-    push('window', 'window', 'm2', winArea, `tổng diện tích ${winCount} cửa sổ/lỗ mở = ${f3(winArea)} m²${openNote}`);
+    const dropNote = window?.outliersDropped
+      ? ` (đã loại ${window.outliersDropped} cửa sổ diện tích bất thường — dữ liệu block lỗi, cần kiểm tra thủ công)`
+      : '';
+    push('window', 'window', 'm2', winArea, `tổng diện tích ${winCount} cửa sổ/lỗ mở = ${f3(winArea)} m²${openNote}${dropNote}`);
   }
 
   // Sàn/nền: ưu tiên đo từ hatch (lọc outlier). Nếu không có hatch đủ tin cậy
@@ -883,6 +911,103 @@ export function rowsToMarkdownTable(rows: TakeoffEngineRow[]): string {
 }
 
 /** 1 dòng chú thích giả định (gom về cuối bảng — không lặp mỗi dòng). */
+/**
+ * SANITY QS: số engine tự sinh phải qua nổi kiểm tra vật lý sơ đẳng TRƯỚC khi
+ * đưa cho QS. Cửa + cửa sổ KHÔNG THỂ chiếm diện tích lớn hơn sàn của chính công
+ * trình đó — vượt = gần như chắc chắn ĐẾM TRÙNG, vì file DWG thực tế đặt mặt
+ * bằng + mặt đứng + bảng thống kê cửa CÙNG một model space, nên 1 cửa vật lý
+ * xuất hiện (và bị đếm) nhiều lần.
+ *
+ * Xác nhận thật trên "F550-BENH XA LD - Thdinh.dwg": cửa 405 m² > sàn 314 m²
+ * (median mỗi cửa 0.90×2.20m = 1.98 m² — kích thước cửa THẬT, nên lỗi nằm ở SỐ
+ * LƯỢNG đếm trùng, không phải ở phép đo).
+ *
+ * KHÔNG tự sửa số: engine không biết cửa nào là bản trùng → sửa = đoán. Chỉ cảnh
+ * báo + chỉ đúng cách khắc phục (Bóc trong vùng). "Thà thiếu còn hơn sai" —
+ * nhưng số SAI đã lỡ sinh ra thì tối thiểu phải tự tố cáo, không im lặng.
+ */
+const qtyOfRow = (rows: TakeoffEngineRow[], key: TakeoffRowKey) =>
+  rows.find((r) => r.key === key)?.quantity ?? 0;
+
+/**
+ * Diện tích sàn công trình suy từ rows. KHÔNG chỉ tra 'slab': bản KT bị
+ * DISCIPLINE_ROWKEYS lọc mất 'slab' (đó là rowKey của KC) nên sàn xuất hiện dưới
+ * dạng floor_screed/floor_finish/ceiling — tất cả cùng suy từ MỘT diện tích hatch.
+ * Lấy MAX để chạy đúng trên CẢ bản KT lẫn KC (chỉ tra 'slab' → bản KT luôn = 0 →
+ * im lặng, đúng ca F550 thật đã bỏ sót).
+ */
+function floorAreaOf(rows: TakeoffEngineRow[]): number {
+  return Math.max(
+    qtyOfRow(rows, 'slab'),
+    qtyOfRow(rows, 'floor_screed'),
+    qtyOfRow(rows, 'floor_finish'),
+    qtyOfRow(rows, 'ceiling'),
+  );
+}
+
+export function openingVsFloorFinding(
+  rows: TakeoffEngineRow[],
+  clusters?: number,
+): ValidationFinding | null {
+  const qtyOf = (key: TakeoffRowKey) => qtyOfRow(rows, key);
+  const opening = qtyOf('door') + qtyOf('window');
+  const floor = floorAreaOf(rows);
+  if (floor <= 0 || opening <= floor) return null;
+  const clusterHint =
+    clusters && clusters >= 2
+      ? ` Model space có ~${clusters} cụm bản vẽ — nhiều khả năng cửa bị đếm ở CẢ mặt bằng lẫn mặt đứng/bảng thống kê.`
+      : '';
+  return {
+    id: 'takeoff-engine-opening-gt-floor',
+    severity: 'warn',
+    area: 'quantity',
+    title: `Diện tích cửa/cửa sổ (${f3(opening)} m²) VƯỢT diện tích sàn (${f3(floor)} m²) — số không hợp lý`,
+    detail:
+      `Công trình không thể có cửa nhiều hơn sàn → gần như chắc chắn ĐẾM TRÙNG.${clusterHint}` +
+      ` Khắc phục: dùng "Bóc trong vùng" — kéo chọn riêng phần mặt bằng rồi bóc lại.` +
+      ` Engine KHÔNG tự loại dòng trùng (không xác định được cái nào là bản sao) — cần QS khoanh vùng.`,
+  };
+}
+
+/**
+ * SANITY QS (chiều NGƯỢC LẠI với openingVsFloorFinding): tường quá THIẾU.
+ *
+ * Giới hạn vật lý: hình bao diện tích A nhỏ nhất có thể là HÌNH TRÒN → chu vi tối
+ * thiểu tuyệt đối = 2√(πA). Không hình dạng nào bao được A m² với chu vi nhỏ hơn.
+ * Tường ngắn hơn ngưỡng này = KHÔNG THỂ bao nổi công trình → chắc chắn thiếu.
+ * (Nhà thật là đa giác + có tường ngăn trong → thực tế còn dài hơn nhiều; dùng
+ * chu vi hình tròn làm ngưỡng để KHÔNG báo động giả.)
+ *
+ * Xác nhận thật trên "F550-BENH XA LD - Thdinh.dwg": tường 40.1m / sàn 314.7 m²
+ * (min tròn = 62.9m, min vuông = 71.0m) → bất khả thi. Gốc: tường thật nằm trên
+ * layer "5- Cắt tường" (445 entity) nhưng detector không match layer có DẤU tiếng
+ * Việt; chỉ layer "Tuong" (18 entity) lọt qua.
+ *
+ * KHÔNG tự bịa thêm tường — chỉ tố cáo số thiếu và chỉ đúng chỗ cần sửa.
+ */
+export function wallVsFloorFinding(rows: TakeoffEngineRow[]): ValidationFinding | null {
+  // wall_area = length × H → suy ngược ra chiều dài tường thực đo.
+  const wallArea = qtyOfRow(rows, 'wall_area');
+  const skirting = qtyOfRow(rows, 'skirting'); // = chiều dài tường (cùng nguồn t.length)
+  const wallLen = skirting > 0 ? skirting : 0;
+  const floor = floorAreaOf(rows);
+  if (floor <= 0 || wallLen <= 0) return null; // không đo được tường → checklist QS lo, không đoán
+  const minPerimeter = 2 * Math.sqrt(Math.PI * floor); // chu vi hình tròn — chặn dưới tuyệt đối
+  if (wallLen >= minPerimeter) return null;
+  return {
+    id: 'takeoff-engine-wall-lt-perimeter',
+    severity: 'warn',
+    area: 'quantity',
+    title: `Tường (${f3(wallLen)}m) KHÔNG ĐỦ bao sàn ${f3(floor)} m² — tối thiểu ${f3(round3(minPerimeter))}m`,
+    detail:
+      `Không hình dạng nào bao được ${f3(floor)} m² bằng ${f3(wallLen)}m tường (chu vi nhỏ nhất khả dĩ = ` +
+      `${f3(round3(minPerimeter))}m, chưa kể tường ngăn trong) → tường đang bị BỎ SÓT, mọi số liên quan ` +
+      `(xây/trát/sơn/len chân tường${wallArea > 0 ? ` — hiện ${f3(wallArea)} m²` : ''}) đều thiếu theo.` +
+      ` Nguyên nhân thường gặp: layer tường đặt tên không chuẩn nên không nhận ra được.` +
+      ` Khắc phục: gán layer rule cho đúng layer tường, rồi bóc lại. Engine KHÔNG suy thêm tường (sẽ là số bịa).`,
+  };
+}
+
 export function assumptionFootnote(a: TakeoffAssumptions): string {
   return `Thông số áp dụng (người dùng xác nhận khi bóc): cao tầng ${a.floorHeight}m · dày tường ${a.wallThickness}m · sâu dầm ${a.beamDepth}m · bề rộng dầm ${ASSUMED_BEAM_WIDTH}m`;
 }
@@ -1283,6 +1408,12 @@ export class TakeoffEngineService {
         detail: `Toàn bộ ${rows.length} công tác gán đơn giá từ công bố giá ${priceCtx.province}, hiệu lực ${priceCtx.effectiveDate}.`,
       });
     }
+    // Engine tự soi số của chính mình, CẢ 2 CHIỀU: thừa (cửa > sàn = đếm trùng)
+    // và thiếu (tường < chu vi tối thiểu = bỏ sót layer).
+    const sanityOver = openingVsFloorFinding(rows, clusterInfo.clusters);
+    if (sanityOver) findings.push(sanityOver);
+    const sanityUnder = wallVsFloorFinding(rows);
+    if (sanityUnder) findings.push(sanityUnder);
     // Minh bạch phạm vi: bản kiến trúc chỉ bóc được 1 phần BOQ — liệt kê nhóm còn thiếu.
     // Đây là ghi chú (info), KHÔNG sinh action/số cho các mục cần bổ sung.
     findings.push({
