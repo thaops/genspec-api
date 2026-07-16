@@ -46,7 +46,20 @@ export function expandInsertEntities(
     const geomParts: RawEntity[] = [];
     const attribParts: RawEntity[] = [];
     const resolved = collectOne(e, (x, y) => [x, y], 1, 0, geomParts, attribParts, blocks, 0, new Set());
-    out.push(...attribParts);
+
+    // stableId (DrawingNormalizerService) = hash(layer, type, bbox, `handle|text`).
+    // ATTRIB của INSERT LỒNG lấy thẳng từ ĐỊNH NGHĨA block — dùng chung cho MỌI lần
+    // chèn → cùng handle + cùng text + cùng bbox → TRÙNG stableId → `insertMany` ném
+    // E11000 và parse CHẾT TOÀN BỘ bản vẽ. Đã xảy ra thật trên production
+    // ("dup key: stableId 29b508bfe966cc56", 551 nhóm trùng trên F550).
+    // Gắn handle dẫn xuất từ handle của chính INSERT (duy nhất trong file) + chỉ số:
+    // vừa DUY NHẤT, vừa TẤT ĐỊNH (parse lại ra id y hệt — không phá stableId contract).
+    const insHandle = String(e.properties?.handle ?? '');
+    for (let i = 0; i < attribParts.length; i++) {
+      const a = attribParts[i];
+      out.push({ ...a, properties: { ...a.properties, handle: `${insHandle}/a${i}` } });
+    }
+
     if (!resolved || geomParts.length === 0) {
       out.push(e); // không có block def → giữ nguyên (không bịa), guard downstream tự loại
       continue;
@@ -68,8 +81,14 @@ function collectOne(
   depth: number,
   visiting: Set<string>,
 ): boolean {
-  // ATTRIB đã ở toạ độ WORLD sẵn — giữ nguyên, KHÔNG áp transform, KHÔNG gộp bbox.
-  if (e.attribs) attribParts.push(...e.attribs);
+  // ATTRIB áp transform của CHA (`tf`), KHÔNG áp transform của chính insert này —
+  // giống hệt `dwg-scene-adapter.ts` (bản render vốn đã đúng).
+  //  · depth 0  : tf = identity → attrib giữ nguyên toạ độ WORLD (DWG trả sẵn world).
+  //  · depth > 0: attrib nằm trong ĐỊNH NGHĨA block → toạ độ BLOCK-LOCAL → phải qua
+  //    tf của cha mới thành world. Bỏ bước này (bản đầu) khiến MỌI lần chèn đặt attrib
+  //    trùng một chỗ → sai vị trí VÀ sinh trùng stableId → parse chết.
+  // KHÔNG gộp vào bbox cấu kiện (attrib là text nhãn, không phải hình học cửa).
+  if (e.attribs) attribParts.push(...e.attribs.map((a) => transformEntity(a, tf, scaleMag, rotDeg)));
 
   const name = String(e.blockName ?? e.properties?.blockName ?? '');
   const def = blocks[name];
