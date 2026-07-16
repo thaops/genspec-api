@@ -18,7 +18,7 @@ function applyToSheet(sheet: Sheet, r: ReturnType<typeof rowsToUpdateCells>): Sh
   const cd: Record<string, Record<string, any>> = JSON.parse(JSON.stringify(sheet.data?.cellData ?? {}));
   for (const a of r!.actions) {
     if (a.type !== 'update_cells') continue;
-    const m = a.cell.match(/^([A-J])(\d+)$/)!;
+    const m = a.cell.match(/^([A-K])(\d+)$/)!;
     const col = m[1].charCodeAt(0) - 65;
     const rowIdx = Number(m[2]) - 1;
     (cd[String(rowIdx)] ??= {})[String(col)] = a.newValue === '' ? { v: '' } : { v: a.newValue };
@@ -26,22 +26,27 @@ function applyToSheet(sheet: Sheet, r: ReturnType<typeof rowsToUpdateCells>): Sh
   return { ...sheet, data: { ...sheet.data, cellData: cd } };
 }
 const val = (s: Sheet, cell: string) => {
-  const m = cell.match(/^([A-J])(\d+)$/)!;
+  const m = cell.match(/^([A-K])(\d+)$/)!;
   return s.data?.cellData?.[String(Number(m[2]) - 1)]?.[String(m[1].charCodeAt(0) - 65)]?.v ?? '';
 };
 
 describe('layout sheet BOQ — tiêu đề + header + footnote', () => {
-  it('ghi mới: A1=title, A2/I2=header cột, data từ dòng 3', () => {
+  // Layout: A=STT B=Mã hiệu C=Tên D=Nhóm E=ĐVT F=Khối lượng G=Đơn giá H=Thành tiền
+  // I=Nguồn giá J=Bản vẽ K=Diễn giải. Diễn giải xuống CUỐI để cột tiền đứng cạnh Khối
+  // lượng; "Bản vẽ" = truy vết dòng bóc từ bản nào (BOQ gộp nhiều bản).
+  it('ghi mới: A1=title, A2/K2=header cột, data từ dòng 3', () => {
     const sheet = emptySheet('1. Kết cấu & bao che');
     const r = rowsToUpdateCells(ROWS, stateWith(sheet), '1. Kết cấu & bao che',
       { title: '1. KẾT CẤU & BAO CHE', footnote: 'ghi chú giả định', engineOwnedSheet: true });
     const after = applyToSheet(sheet, r);
     expect(val(after, 'A1')).toBe('1. KẾT CẤU & BAO CHE');
     expect(val(after, 'A2')).toBe('STT');
-    expect(val(after, 'G2')).toBe('Diễn giải');
-    expect(val(after, 'H2')).toBe('Đơn giá');
-    expect(val(after, 'I2')).toBe('Thành tiền');
-    expect(val(after, 'J2')).toBe('Nguồn giá');
+    expect(val(after, 'F2')).toBe('Khối lượng');
+    expect(val(after, 'G2')).toBe('Đơn giá');
+    expect(val(after, 'H2')).toBe('Thành tiền');
+    expect(val(after, 'I2')).toBe('Nguồn giá');
+    expect(val(after, 'J2')).toBe('Bản vẽ');
+    expect(val(after, 'K2')).toBe('Diễn giải');
     expect(val(after, 'B3')).toBe('AE.62210');
     expect(val(after, 'B4')).toBe('AK.21110');
     // footnote NGAY dưới data cuối (dòng 5), không chừa dòng trống
@@ -77,7 +82,7 @@ describe('layout sheet BOQ — tiêu đề + header + footnote', () => {
     // Header đã khớp → KHÔNG xoá vùng title/header (dòng 1-2) để ghi lại từ đầu.
     // (Ô trống ở dòng data là giá trị thật của cột objectGroup, không phải wipe.)
     const wipedHeader = r2!.actions.filter(
-      (a: any) => a.type === 'update_cells' && a.newValue === '' && /^[A-J][12]$/.test(a.cell),
+      (a: any) => a.type === 'update_cells' && a.newValue === '' && /^[A-K][12]$/.test(a.cell),
     );
     expect(wipedHeader).toHaveLength(0);
     // và không ghi đè lại nhãn header (A2=STT) vì đã đúng chỗ
@@ -87,7 +92,7 @@ describe('layout sheet BOQ — tiêu đề + header + footnote', () => {
 });
 
 describe('cột giá/nguồn — trace giá thật ghi vào Excel (không chỉ chat)', () => {
-  it('row có unitPrice/totalPrice/source → 3 ô H/I/J nhận đúng giá trị, không bịa số khi thiếu', () => {
+  it('row có unitPrice/totalPrice/source → 3 ô G/H/I nhận đúng giá trị, không bịa số khi thiếu', () => {
     const sheet = emptySheet('1. Kết cấu & bao che');
     const rows: RescueRow[] = [
       { stt: '1', code: 'AE.62210', name: 'Xây tường', unit: 'm3', quantity: '10', note: 'x',
@@ -97,13 +102,13 @@ describe('cột giá/nguồn — trace giá thật ghi vào Excel (không chỉ 
     // Không truyền title → header ở dòng 1, data bắt đầu dòng 2.
     const r = rowsToUpdateCells(rows, stateWith(sheet), '1. Kết cấu & bao che', { engineOwnedSheet: true });
     const after = applyToSheet(sheet, r);
-    expect(val(after, 'H2')).toBe('1.500.000');
-    expect(val(after, 'I2')).toBe('15.000.000');
-    expect(val(after, 'J2')).toBe('CB giá Hà Nội 07/2025');
+    expect(val(after, 'G2')).toBe('1.500.000'); // Đơn giá
+    expect(val(after, 'H2')).toBe('15.000.000'); // Thành tiền
+    expect(val(after, 'I2')).toBe('CB giá Hà Nội 07/2025'); // Nguồn giá
     // dòng thiếu giá → trống, KHÔNG "0"/ước lượng
+    expect(val(after, 'G3')).toBe('');
     expect(val(after, 'H3')).toBe('');
     expect(val(after, 'I3')).toBe('');
-    expect(val(after, 'J3')).toBe('');
   });
 });
 

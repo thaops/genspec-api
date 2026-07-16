@@ -5,9 +5,12 @@ import { Action, EstimateState, Sheet } from './estimate.types';
 import { parseExcelCell } from './reducer';
 import { NORM_CODE_CORE } from '../catalog/norm-code';
 
-// Layout 10 cột: A=STT B=Mã hiệu C=Tên công tác D=Nhóm đối tượng E=Đơn vị
-// F=Khối lượng G=Diễn giải H=Đơn giá I=Thành tiền J=Nguồn giá. Ô thiếu giá trị → "".
-// (Billing Gemini đã bật → giá/nguồn hiện thẳng trên Excel, không chỉ trong chat.)
+/**
+ * Thứ tự cột. `note` (Diễn giải) để CUỐI có chủ ý: nó là cột dài nhất (420px, chứa công
+ * thức truy vết), đặt giữa Khối lượng và Đơn giá thì đẩy Đơn giá/Thành tiền ra khỏi tầm
+ * nhìn — QS phải cuộn ngang mới thấy tiền. Nay: KL → Đơn giá → Thành tiền → Nguồn đứng
+ * liền nhau (đọc được ngay), Diễn giải nằm cuối cho ai muốn soi công thức.
+ */
 const COLUMN_ORDER = [
   'stt',
   'code',
@@ -15,10 +18,11 @@ const COLUMN_ORDER = [
   'objectGroup',
   'unit',
   'quantity',
-  'note',
   'unitPrice',
   'totalPrice',
   'source',
+  'drawing',
+  'note',
 ] as const;
 type ColumnKey = (typeof COLUMN_ORDER)[number];
 
@@ -33,32 +37,38 @@ const HEADER_LABELS: Record<ColumnKey, string> = {
   unitPrice: 'Đơn giá',
   totalPrice: 'Thành tiền',
   source: 'Nguồn giá',
+  drawing: 'Bản vẽ',
 };
 
-const COL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'] as const;
+const COL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'] as const;
 
-/** Cột cuối của layout (Nguồn giá). Suy ra từ COL_LETTERS — đổi số cột không phải sửa tay. */
+/** Cột cuối của layout (Diễn giải). Suy ra từ COL_LETTERS — đổi số cột không phải sửa tay. */
 const LAST_COL = COL_LETTERS[COL_LETTERS.length - 1];
 
-/** Độ rộng cột (px) theo thứ tự A→J. */
-export const TAKEOFF_COL_WIDTHS_PX = [40, 110, 300, 120, 60, 90, 420, 100, 120, 260] as const;
+// A=STT B=Mã hiệu C=Tên D=Nhóm E=ĐVT F=Khối lượng G=Đơn giá H=Thành tiền I=Nguồn
+// J=Bản vẽ K=Diễn giải. Cột "Bản vẽ" = TRUY VẾT: dòng khối lượng này bóc từ bản vẽ nào —
+// bắt buộc với BOQ nhiều bản (KC+KT+MEP gộp chung sheet), và là thứ QS soi đầu tiên khi
+// nghi ngờ một con số.
+export const TAKEOFF_COL_WIDTHS_PX = [40, 110, 300, 120, 60, 90, 100, 120, 260, 150, 420] as const;
 
-/** Chỉ số cột số (Khối lượng=F/5, Đơn giá=H/7, Thành tiền=I/8) — căn phải. */
-const NUMERIC_COL_INDEXES = [5, 7, 8];
+/** Chỉ số cột số (Khối lượng=F/5, Đơn giá=G/6, Thành tiền=H/7) — căn phải. */
+const NUMERIC_COL_INDEXES = [5, 6, 7];
 
 /**
- * Number format theo cột — GIÁ TRỊ Ô là số thô, phần hiển thị "1.500.000" do pattern
- * này lo. Trước đây ghi sẵn chuỗi đã format → reducer không ép được thành số → cột
- * Thành tiền là TEXT → Excel không cộng/sort nổi (BOQ không tổng được tiền = hỏng).
+ * ⚠ Khối lượng CỐ Ý không có number format. Pattern `#,##0.###` in ra DẤU CHẤM THỪA cho số
+ * nguyên — đo thật trên sheet: "93 cái" hiện thành **"93."**, "136 bộ" → "136." (dấu `.`
+ * trong pattern là ký tự literal, luôn hiện dù không có phần lẻ). Không có pattern Excel
+ * nào vừa có phân cách nghìn vừa giấu được dấu chấm khi số nguyên ⇒ để mặc định (General):
+ * 93 → "93", 314.701 → "314.701". Khối lượng BOQ hiếm khi lớn tới mức cần phân cách nghìn.
+ * Đơn giá/Thành tiền vẫn format được vì pattern `#,##0` KHÔNG có dấu chấm.
  */
 const NUMBER_FORMATS: Record<number, string> = {
-  5: '#,##0.###', // Khối lượng — giữ tối đa 3 số lẻ (m³/m²/m)
-  7: '#,##0',     // Đơn giá — VNĐ, không số lẻ
-  8: '#,##0',     // Thành tiền — VNĐ
+  6: '#,##0', // Đơn giá — VNĐ, không số lẻ
+  7: '#,##0', // Thành tiền — VNĐ
 };
 
-/** Cột chữ dài cần xuống dòng (Tên công tác=C/2, Diễn giải=G/6) — tránh cắt/tràn chữ. */
-const WRAP_COL_INDEXES = [2, 6];
+/** Wrap text: Tên công tác (C/2) + Diễn giải (K/10) — 2 cột chữ dài. */
+const WRAP_COL_INDEXES = [2, 10];
 
 const THIN_BORDER = { s: 1, cl: { rgb: '#d0d0d0' } };
 const CELL_BORDER = { t: THIN_BORDER, b: THIN_BORDER, l: THIN_BORDER, r: THIN_BORDER };
@@ -112,7 +122,7 @@ const REQUIRED_KEYS = ['stt', 'code', 'name', 'unit', 'quantity', 'note'] as con
 /** Dòng chuẩn — 6 cột lõi bắt buộc + objectGroup/unitPrice/totalPrice/source (optional,
  * để "" khi chưa có giá — KHÔNG bịa). */
 export type RescueRow = Record<(typeof REQUIRED_KEYS)[number], string> &
-  Partial<Record<'objectGroup' | 'unitPrice' | 'totalPrice' | 'source', string>>;
+  Partial<Record<'objectGroup' | 'unitPrice' | 'totalPrice' | 'source' | 'drawing', string>>;
 
 /** Bỏ dấu tiếng Việt + lowercase để so khớp fuzzy. */
 function normalize(s: string): string {
@@ -133,6 +143,7 @@ function detectColumn(header: string): ColumnKey | null {
   if (h.includes('don vi') || h === 'dvt' || h === 'dv') return 'unit';
   if (h.includes('ten cong tac') || h.includes('noi dung') || h.includes('cong tac') || h.includes('ten')) return 'name';
   if (h.includes('khoi luong') || h === 'kl' || h.includes('so luong')) return 'quantity';
+  if (h.includes('ban ve') || h.includes('drawing')) return 'drawing';
   if (h.includes('ghi chu') || h.includes('dien giai')) return 'note';
   return null;
 }

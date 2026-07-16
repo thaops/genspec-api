@@ -132,6 +132,30 @@ export { MEP_COUNT_TYPES, MEP_LENGTH_TYPES } from '../mep-types';
 const ANNOTATION_LAYER_RE =
   /KIHIEU|KYHIEU|GHICHU|CHUTHICH|CHIDAN|THUYETMINH|KICHTHUOC|COTATION|TIEUDE|BORDER|KHUNGBO|KHUNGTEN|TITLE|LEGEND|CHITIET|CHU-?THICH/;
 
+/**
+ * Tier 1c — layer đặt tên bằng CỤM TỪ tiếng Việt có dấu cách: "ỐNG CẤP", "CẤP THOÁT NƯỚC".
+ * `LAYER_TYPE_MAP` (exact/`-`/token) không khớp được vì key là 1 từ (`CAP-NUOC`, `ONGNUOC`).
+ *
+ * ⚠ CHỈ nhận cụm KHÔNG MẬP MỜ. Token `CAP` đứng một mình BỊ LOẠI có chủ ý: bản nước là
+ * "cấp", bản điện là "cáp" (máng cáp) — đoán = sai. Cùng lý do, layer "N - CẤP" (301
+ * entity thật) KHÔNG nhận ở đây dù gần chắc là nước: thà thiếu còn hơn sai.
+ *
+ * Đo thật (4 bản "THỰC HÀNH 2"): khớp 458 entity, TẤT CẢ nằm đúng bản NUOC, 0 nhầm sang
+ * KC/KT/DIEN. Bản nước trước đó chỉ nhận 13/7321 entity (0,2%).
+ */
+const PHRASE_TYPE_RULES: Array<{ phrase: string; type: string }> = [
+  { phrase: 'CAP THOAT NUOC', type: 'pipe' },
+  { phrase: 'CAP NUOC', type: 'pipe' },
+  { phrase: 'THOAT NUOC', type: 'pipe' },
+  { phrase: 'NUOC THOAT', type: 'pipe' },
+  { phrase: 'ONG CAP', type: 'pipe' },
+  { phrase: 'ONG THOAT', type: 'pipe' },
+  { phrase: 'THOAT MUA', type: 'pipe' },
+  { phrase: 'ONG GIO', type: 'duct' },
+  { phrase: 'MIENG GIO', type: 'diffuser' },
+  { phrase: 'THIET BI VE SINH', type: 'sanitary' },
+];
+
 // ---------------------------------------------------------------------------
 // Tier 1b — layer KẾT CẤU đặt tên tự do (bản KC thực tế: "netCOT", "KC-COT-500",
 // "COT_TANG1", "MONG-BANG", "BTCT-DAM"). LAYER_TYPE_MAP chỉ khớp exact/`-`-delimited
@@ -368,6 +392,28 @@ export class DrawingDetectorService {
       if (layerUpper === k || layerUpper.startsWith(k + '-') || layerUpper.endsWith('-' + k) || layerUpper.includes('-' + k + '-')) {
         return this.single(type, 0.95, 'layer_map', `Layer "${obj.layer}" matched rule "${key}" → ${type}`, false);
       }
+    }
+
+    // 1a. Cùng LAYER_TYPE_MAP nhưng tách TOKEN (mọi ký tự không phải chữ/số làm dấu tách),
+    // không chỉ `-`. File CAD Việt Nam đặt tên layer có DẤU CÁCH: "5- Cắt tường",
+    // "3- Tường bao mặt đứng" → tier 1 (chỉ nhận `-TUONG`/`TUONG-`) trượt hết, entity rơi
+    // xuống geometry → `polyline` chưa phân loại. Đo thật trên 3 bản "THỰC HÀNH 2":
+    // **714 entity TƯỜNG** bị bỏ theo kiểu này (bản kiến trúc chỉ nhận 18 tường ⇒ engine
+    // tự báo "Tường 40m KHÔNG ĐỦ bao sàn 314 m²"). Chạy SAU tier 1 nên không đổi hành vi
+    // cũ — chỉ vớt thứ đang trượt. Rào chú thích (ANNOTATION_LAYER_RE) đã chặn ở trên.
+    const layerTokens = new Set(layerUpper.split(/[^A-Z0-9]+/).filter(Boolean));
+    if (layerTokens.size > 0) {
+      for (const [key, type] of Object.entries(LAYER_TYPE_MAP)) {
+        if (layerTokens.has(key.toUpperCase())) {
+          return this.single(type, 0.9, 'layer_map', `Layer "${obj.layer}" chứa token "${key}" → ${type}`, false);
+        }
+      }
+    }
+
+    // 1c. Cụm từ tiếng Việt có dấu cách ("ỐNG CẤP", "CẤP THOÁT NƯỚC") — xem PHRASE_TYPE_RULES.
+    const phrase = PHRASE_TYPE_RULES.find((r) => layerUpper.includes(r.phrase));
+    if (phrase) {
+      return this.single(phrase.type, 0.9, 'layer_map', `Layer "${obj.layer}" chứa cụm "${phrase.phrase}" → ${phrase.type}`, false);
     }
 
     // 1b. Layer KC đặt tên tự do (COT/DAM/MONG/COC/THEP…) → type kết cấu. Kèm kiểm tra

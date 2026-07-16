@@ -103,7 +103,8 @@ const NORM_COLUMNS: ColumnPatterns = {
   material: /^(vat lieu|vl)$/,
   labor: /^(nhan cong|nc)$/,
   machine: /^(may( thi cong)?|m|ca may)$/,
-  refCode: /ma (vat tu|hao phi|tai nguyen)/,
+  // "Mã hiệu VL, NC, M" là cách file định mức TT12 gốc đặt tên cột mã tài nguyên.
+  refCode: /ma (vat tu|hao phi|tai nguyen)|ma hieu vl/,
   group: /^(nhom|chuong|loai cong tac)$/,
 };
 
@@ -115,7 +116,7 @@ const PRICE_COLUMNS: ColumnPatterns = {
   kind: /^loai$|^phan loai$/,
 };
 
-function detectHeader(rows: string[][], patterns: ColumnPatterns): HeaderDetection | null {
+function detectHeader(rows: CellRow[], patterns: ColumnPatterns): HeaderDetection | null {
   let best: HeaderDetection | null = null;
   let bestScore = 0;
   const scan = Math.min(rows.length, 30);
@@ -123,7 +124,7 @@ function detectHeader(rows: string[][], patterns: ColumnPatterns): HeaderDetecti
     const cols: Record<string, number> = {};
     let score = 0;
     for (let c = 0; c < rows[r].length; c++) {
-      const cell = normalizeText(rows[r][c]);
+      const cell = normalizeText(String(rows[r][c] ?? ''));
       if (!cell) continue;
       for (const [key, re] of Object.entries(patterns)) {
         if (cols[key] === undefined && re.test(cell)) {
@@ -161,10 +162,24 @@ function groupFromCode(code: string): string {
   return m ? m[1].toUpperCase() : '';
 }
 
-const cell = (row: string[], idx: number | undefined): string =>
+/** Ô dạng CHỮ (mã, tên, đơn vị). */
+const cell = (row: CellRow, idx: number | undefined): string =>
   idx === undefined ? '' : (row[idx] ?? '').toString().trim();
 
-export function parseNormRows(rows: string[][]): NormParseResult {
+/**
+ * Ô dạng SỐ — giữ NGUYÊN kiểu number từ Excel, KHÔNG qua chuỗi.
+ *
+ * BUG THẬT (đo khi nạp định mức TT12): `workbookToRows` ép mọi ô về chuỗi → hao phí
+ * xi măng `308.525` thành `"308.525"` → `parseNumber` khớp regex "kiểu Việt"
+ * (`308.525` = 308 nghìn 525) → **308525**, SAI 1000 LẦN. Với số ≥100 có đúng 3 số lẻ,
+ * `308.525` (thập phân) và `308.525` (phân cách nghìn) KHÔNG phân biệt được bằng chuỗi —
+ * dấu phẩy cũng vậy (`308,525` khớp regex "kiểu Anh"). Cách đúng duy nhất: đừng ép về
+ * chuỗi. Định mức sai 1000× = đơn giá vô nghĩa, mà vẫn kèm nguồn "TT12/2021" trông thật.
+ */
+const cellNum = (row: CellRow, idx: number | undefined): number | null =>
+  idx === undefined ? null : parseNumber(row[idx]);
+
+export function parseNormRows(rows: CellRow[]): NormParseResult {
   const errors: string[] = [];
   const header = detectHeader(rows, NORM_COLUMNS);
   if (!header) return { header: null, items: [], errors: ['Không nhận diện được header (cần cột Mã hiệu/Tên công tác...)'] };
@@ -198,7 +213,7 @@ export function parseNormRows(rows: string[][]): NormParseResult {
           ['machine', c.machine, 'Máy thi công'],
         ];
         for (const [kind, idx, label] of defs) {
-          const n = parseNumber(cell(row, idx));
+          const n = cellNum(row, idx);
           if (n != null && n > 0) current.components.push({ kind, name: label, unit: '', norm: n });
         }
       }
@@ -210,7 +225,7 @@ export function parseNormRows(rows: string[][]): NormParseResult {
     // hierarchical: dòng không có mã → section header hoặc component
     const compName = cell(row, c.compName) || name;
     if (!compName) continue;
-    const normVal = parseNumber(cell(row, c.norm));
+    const normVal = cellNum(row, c.norm);
     const asSection = kindFromText(compName);
     if (asSection && normVal == null) {
       sectionKind = asSection;
@@ -235,7 +250,7 @@ export function parseNormRows(rows: string[][]): NormParseResult {
   return { header, items: valid, errors };
 }
 
-export function parsePriceRows(rows: string[][]): PriceParseResult {
+export function parsePriceRows(rows: CellRow[]): PriceParseResult {
   const errors: string[] = [];
   const header = detectHeader(rows, PRICE_COLUMNS);
   if (!header) return { header: null, items: [], errors: ['Không nhận diện được header (cần cột Tên vật liệu/Đơn giá...)'] };
@@ -265,18 +280,23 @@ export function parsePriceRows(rows: string[][]): PriceParseResult {
   return { header, items, errors };
 }
 
-/** Chuyển buffer xlsx → string[][] (sheet đầu tiên có dữ liệu) bằng ExcelJS. */
-export async function workbookToRows(buffer: Buffer): Promise<string[][]> {
+/** 1 dòng sheet: ô CHỮ giữ string, ô SỐ giữ number (xem cellNum). */
+export type CellRow = (string | number)[];
+
+/** Chuyển buffer xlsx → CellRow[] (sheet đầu tiên có dữ liệu) bằng ExcelJS. */
+export async function workbookToRows(buffer: Buffer): Promise<CellRow[]> {
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as unknown as ArrayBuffer);
-  const rows: string[][] = [];
+  const rows: CellRow[] = [];
   const ws = wb.worksheets.find((w) => w.rowCount > 0) ?? wb.worksheets[0];
   if (!ws) return rows;
   ws.eachRow({ includeEmpty: true }, (row, n) => {
-    const out: string[] = [];
+    const out: CellRow = [];
     row.eachCell({ includeEmpty: true }, (cellObj, col) => {
-      out[col - 1] = cellValueText(cellObj.value);
+      const v = cellObj.value;
+      // Số giữ NGUYÊN kiểu — ép về chuỗi là mất phân biệt thập phân/phân cách nghìn.
+      out[col - 1] = typeof v === 'number' && isFinite(v) ? v : cellValueText(v);
     });
     rows[n - 1] = out;
   });

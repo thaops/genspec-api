@@ -24,7 +24,10 @@ describe('computeMepRows — MEP vào BOQ (module đã có, nay được nối)'
     expect(den.code).toBe('');
     expect(den.unitPrice).toBeUndefined();
     expect(den.source).toBe('—');
-    expect(den.note).toMatch(/cần chọn mã/);
+    // Mã trống + Nguồn "—" đã nói "chưa có mã"; KHÔNG lặp cảnh báo vào Diễn giải mọi
+    // dòng (làm bảng không đọc nổi) — cảnh báo gộp nằm ở finding.
+    expect(den.note).not.toMatch(/cần chọn mã/);
+    expect(den.note).not.toMatch(/\[nhóm:/); // không rò token máy
   });
 
   it('tuyến ống đo theo MÉT (polyline × tỉ lệ), không phải đếm', () => {

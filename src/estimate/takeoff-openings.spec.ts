@@ -30,9 +30,20 @@ describe('Cửa / cửa sổ — đếm CÁI, không bịa m² từ mặt bằng
     expect(r.quantity).toBe(3);
   });
 
-  it('note nói RÕ vì sao trống m² và cần gì để có — không im lặng', () => {
-    expect(rowOf(doors, 'door')!.note).toMatch(/bảng thống kê cửa/);
-    expect(rowOf(doors, 'door')!.note).toMatch(/không suy m²/);
+  /**
+   * Diễn giải trong Ô phải NGẮN — chỉ cách ra số. Lý do "vì sao không có m²" nằm ở finding
+   * `takeoff-engine-openings-count` (summary-first). Nhét cả đoạn văn vào ô làm cột Diễn
+   * giải dài gấp mấy lần và che mất công thức — đo thật trên sheet, QS không đọc nổi.
+   */
+  it('note NGẮN, chỉ nói cách ra số — không nhét đoạn văn vào ô', () => {
+    const note = rowOf(doors, 'door')!.note;
+    expect(note).toMatch(/đếm 5 cửa từ block/);
+    expect(note.length).toBeLessThan(60);
+  });
+
+  it('note KHÔNG rò token máy `[nhóm:x]` ra cho QS đọc', () => {
+    expect(rowOf(doors, 'door')!.note).not.toMatch(/\[nhóm:/);
+    expect(rowOf(Array.from({ length: 3 }, (_, i) => o('window', 1200, 220, i)), 'window')!.note).not.toMatch(/\[nhóm:/);
   });
 
   /**

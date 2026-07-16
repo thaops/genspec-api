@@ -49,25 +49,33 @@ describe('Cột tiền phải là SỐ, không phải text', () => {
 describe('format_sheet: number format + wrap + freeze', () => {
   const fmt: any = buildTakeoffFormatAction('s1', 2, 3, 5, undefined, undefined, 1);
 
-  it('cột Đơn giá(H)/Thành tiền(I) có number format #,##0 — hiển thị có phân cách mà giá trị vẫn là số', () => {
-    const h3 = fmt.cells.find((c: any) => c.cell === 'H3');
-    const i3 = fmt.cells.find((c: any) => c.cell === 'I3');
-    expect(h3.s.n).toEqual({ pattern: '#,##0' });
-    expect(i3.s.n).toEqual({ pattern: '#,##0' });
+  // Layout: A=STT B=Mã hiệu C=Tên D=Nhóm E=ĐVT F=Khối lượng G=Đơn giá H=Thành tiền
+  // I=Nguồn J=Bản vẽ K=Diễn giải. Diễn giải để CUỐI: nó dài 420px, đặt giữa KL và Đơn giá thì
+  // đẩy cột tiền ra khỏi tầm nhìn — QS phải cuộn ngang mới thấy tiền.
+  it('cột Đơn giá(G)/Thành tiền(H) có number format #,##0 — hiển thị có phân cách mà giá trị vẫn là số', () => {
+    expect(fmt.cells.find((c: any) => c.cell === 'G3').s.n).toEqual({ pattern: '#,##0' });
+    expect(fmt.cells.find((c: any) => c.cell === 'H3').s.n).toEqual({ pattern: '#,##0' });
   });
 
-  it('cột Khối lượng(F) giữ tối đa 3 số lẻ', () => {
-    expect(fmt.cells.find((c: any) => c.cell === 'F3').s.n).toEqual({ pattern: '#,##0.###' });
+  /**
+   * BUG THẬT (thấy trên sheet): pattern `#,##0.###` in DẤU CHẤM THỪA cho số nguyên —
+   * "93 cái" → **"93."**, "136 bộ" → "136.". Dấu `.` trong pattern là literal, luôn hiện.
+   * ⇒ Khối lượng KHÔNG gán number format, để General: 93 → "93", 314.701 → "314.701".
+   */
+  it('cột Khối lượng(F) KHÔNG có number format — tránh dấu chấm thừa "93."', () => {
+    expect(fmt.cells.find((c: any) => c.cell === 'F3').s.n).toBeUndefined();
   });
 
-  it('cột Tên(C)/Diễn giải(G) có wrap text — chữ dài không bị cắt', () => {
+  it('cột Tên(C)/Diễn giải(K) có wrap text — chữ dài không bị cắt', () => {
     expect(fmt.cells.find((c: any) => c.cell === 'C3').s.tb).toBe(3);
-    expect(fmt.cells.find((c: any) => c.cell === 'G3').s.tb).toBe(3);
+    expect(fmt.cells.find((c: any) => c.cell === 'K3').s.tb).toBe(3);
   });
 
-  it('cột chữ KHÔNG bị gán number format (nếu không sẽ hỏng hiển thị mã/tên)', () => {
+  it('cột chữ KHÔNG bị gán number format (nếu không sẽ hỏng hiển thị mã/tên/nguồn)', () => {
     expect(fmt.cells.find((c: any) => c.cell === 'B3').s.n).toBeUndefined();
-    expect(fmt.cells.find((c: any) => c.cell === 'J3').s.n).toBeUndefined();
+    expect(fmt.cells.find((c: any) => c.cell === 'I3').s.n).toBeUndefined(); // Nguồn giá
+    expect(fmt.cells.find((c: any) => c.cell === 'J3').s.n).toBeUndefined(); // Bản vẽ
+    expect(fmt.cells.find((c: any) => c.cell === 'K3').s.n).toBeUndefined(); // Diễn giải
   });
 
   it('freeze tính từ headerRow THẬT (không hardcode 2)', () => {

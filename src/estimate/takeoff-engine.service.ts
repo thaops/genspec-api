@@ -225,6 +225,11 @@ export interface TakeoffEngineRow {
   webSourced?: boolean;
   /** true = ĐƠN GIÁ tra từ web (không phải công bố giá tỉnh) — cần kiểm chứng. */
   pricedFromWeb?: boolean;
+  /**
+   * Bản vẽ nguồn của dòng (truy vết). Dòng MỚI của bản đang bóc để trống (caller dùng
+   * `input.drawingId`); dòng GỘP từ bản khác thì suy từ id takeoff.
+   */
+  drawingId?: string;
 }
 
 // ===== Pricing (pure — verify script gọi trực tiếp, không Mongo) =====
@@ -367,27 +372,6 @@ export const HATCH_MIN_AREA = 0.5;
 /** Mảng hatch chiếm > tỉ lệ này của TỔNG diện tích hatch = biên/khối lớn bất thường → loại. */
 export const HATCH_MAX_SHARE = 0.9;
 
-/** Keyword tra norm_items theo từng dòng khối lượng (regex, thử theo thứ tự). */
-export const NORM_KEYWORDS: Partial<Record<TakeoffRowKey, string[]>> = {
-  wall_area: ['trát tường', 'xây tường'],
-  wall_volume: ['xây tường', 'xây.*gạch'],
-  wall_paint: ['sơn.*tường', 'bả.*tường', 'sơn'],
-  column_concrete: ['bê tông.*cột'],
-  column_formwork: ['ván khuôn.*cột'],
-  beam_concrete: ['bê tông.*dầm'],
-  beam_formwork: ['ván khuôn.*dầm'],
-  footing_concrete: ['bê tông.*móng', 'bê tông.*đài'],
-  footing_formwork: ['ván khuôn.*móng', 'ván khuôn.*đài'],
-  pile_concrete: ['bê tông.*cọc', 'ép cọc', 'cọc.*khoan nhồi', 'cọc'],
-  door: ['cửa đi', 'cửa'],
-  window: ['cửa sổ', 'cửa'],
-  slab: ['bê tông.*sàn'],
-  floor_screed: ['cán nền', 'láng.*nền', 'vữa.*lót'],
-  floor_finish: ['lát nền', 'lát.*gạch', 'lát'],
-  ceiling: ['trần thạch cao', 'trần.*khung', 'trần'],
-  ceiling_paint: ['sơn.*trần'],
-  skirting: ['len chân tường', 'len tường', 'ốp.*chân tường'],
-};
 
 /** Nhóm công tác BOQ chuẩn TT13/2021 cho mỗi dòng đo được. */
 export const BOQ_GROUP_THO = 'PHẦN THÔ - KẾT CẤU';
@@ -501,6 +485,11 @@ export function engineRowKeyFromId(id: string): TakeoffRowKey | null {
 
 const isEngineTakeoffId = (id: string) => /^tk_engine_[0-9a-fA-F]{24}_/.test(id);
 
+/** id engine → drawingId (null nếu không phải id engine). */
+export function engineDrawingIdFromId(id: string): string | null {
+  return /^tk_engine_([0-9a-fA-F]{24})_/.exec(id)?.[1] ?? null;
+}
+
 /**
  * QUYẾT ĐỊNH GỘP nhiều bản vẽ — PURE, tách khỏi `run()` để test khoá hành vi.
  *
@@ -520,13 +509,17 @@ export function planEngineTakeoffMerge(
   const thisPrefix = `tk_engine_${drawingId}_`;
   const newIds = new Set(rows.map((r) => `${thisPrefix}${r.key}`));
   const staleIds = existing
-    .filter(
-      (t) =>
-        typeof t.note === 'string' &&
-        t.note.includes('[nhóm:') &&
-        !newIds.has(t.id) &&
-        (t.id.startsWith(thisPrefix) || !isEngineTakeoffId(t.id)),
-    )
+    .filter((t) => {
+      if (newIds.has(t.id)) return false; // dòng sẽ được upsert thay tại chỗ
+      // Dòng cũ CỦA CHÍNH bản này (bóc lại, rowKey không còn) → dọn.
+      if (t.id.startsWith(thisPrefix)) return true;
+      // Dòng của bản KHÁC → GIỮ (nếu không, bóc gộp xoá sạch bản trước).
+      if (isEngineTakeoffId(t.id)) return false;
+      // Dòng LEGACY (engine/LLM bản cũ, id không theo scheme): nhận diện bằng token
+      // `[nhóm:` — token này CHỈ còn để nhận legacy, KHÔNG ghi vào note mới nữa (nó
+      // rò rỉ ra cột Diễn giải cho QS đọc: "... [nhóm:wall]").
+      return typeof t.note === 'string' && t.note.includes('[nhóm:');
+    })
     .map((t) => t.id);
   const deleted = new Set(staleIds);
   const otherRows: TakeoffEngineRow[] = existing
@@ -536,6 +529,7 @@ export function planEngineTakeoffMerge(
       if (!key) return null;
       return {
         key,
+        drawingId: engineDrawingIdFromId(t.id) ?? undefined,
         group: ROWKEY_GEOM_GROUP[key],
         boqGroup: t.group ?? BOQ_GROUP[key],
         code: t.code ?? '',
@@ -652,7 +646,16 @@ const DEFAULT_NAMES: Record<TakeoffRowKey, string> = {
 };
 
 /** Nhãn cột "Nhóm đối tượng" — cho QS truy vết công tác bóc từ đối tượng nào. */
+/**
+ * Nhãn cột "Nhóm đối tượng" cho MEP — tái dùng `MEP_LABEL` sẵn có. Thiếu nó thì cột hiện
+ * type thô tiếng Anh cho QS đọc ("light", "pipe") — đo thật trên sheet 4.
+ */
+const MEP_GROUP_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(MEP_LABEL).map(([t, vi]) => [t, `${vi} (${t})`]),
+);
+
 const OBJECT_GROUP_LABEL: Record<string, string> = {
+  ...MEP_GROUP_LABEL, // Đèn (light), Ống nước (pipe)… — không để lộ type thô tiếng Anh
   wall: 'Tường (wall)',
   column: 'Cột (column)',
   beam: 'Dầm (beam)',
@@ -798,10 +801,11 @@ export const DERIVE_RULES: Record<string, DeriveRule[]> = {
   door: [
     { key: 'door', group: 'door', unit: 'cái',
       qty: (t) => t.count,
+      // Diễn giải NGẮN — chỉ cách ra số. Lý do "vì sao không có m²" đã nằm ở finding
+      // gộp, nhét cả đoạn văn vào ô làm bảng không đọc nổi.
       note: (t) =>
-        `${t.count} cửa đếm được từ block bản vẽ` +
-        `${t.outliersDropped ? ` (đã loại ${t.outliersDropped} block lỗi kích thước bất thường)` : ''}` +
-        ` — ⚠ m² cửa cần rộng×cao từ bảng thống kê cửa; mặt bằng KHÔNG có chiều cao nên engine không suy m² (thà thiếu còn hơn sai).`,
+        `đếm ${t.count} cửa từ block bản vẽ` +
+        `${t.outliersDropped ? ` (loại ${t.outliersDropped} block lỗi kích thước)` : ''}`,
     },
   ],
 };
@@ -1142,7 +1146,10 @@ export function computeTakeoffRows(
     const q = round3(quantity);
     if (q <= 0) return;
     const cand = normCandidates[key];
-    let note = `${formula} [nhóm:${group}]`;
+    // Diễn giải = CHỈ công thức truy vết. KHÔNG gắn token `[nhóm:x]` (token máy, từng rò
+    // ra cho QS đọc: "…= 132.182 m² [nhóm:wall]") — nhận diện dòng engine nay dùng id
+    // `tk_engine_<drawingId>_<rowKey>`, xem planEngineTakeoffMerge.
+    let note = formula;
     let code = '';
     let name = DEFAULT_NAMES[key];
     let source = '—';
@@ -1160,11 +1167,10 @@ export function computeTakeoffRows(
       code = cand.code;
       name = standardDisplayName(key, cand.name);
       source = cand.sourceDoc || 'định mức import';
-    } else {
-      // KHÔNG nói "chưa import định mức": mã CÓ sẵn trong bộ đơn giá tỉnh, engine đang
-      // gợi ý chính nó. Lý do trống là chưa chốt QUY CÁCH (xem NORM_FAMILIES).
-      note += ' ⚠ cần chọn mã (theo quy cách) — xem gợi ý ở "Điểm cần kiểm tra"';
     }
+    // KHÔNG nhắc "cần chọn mã" trên TỪNG dòng: cột Mã hiệu trống đã nói điều đó, và đã có
+    // finding gộp ("N công tác chưa chốt mã" + danh sách ứng viên). Lặp ở mọi dòng chỉ làm
+    // cột Diễn giải dài gấp đôi và che mất công thức — thứ QS thật sự cần đọc.
     rows.push({ key, group, boqGroup: BOQ_GROUP[key], code, name, unit, quantity: q, note, source, ...(webSourced && { webSourced }) });
   };
 
@@ -1198,11 +1204,8 @@ export function computeTakeoffRows(
   if (winCount > 0) {
     const openNote = opening?.count ? ` (gồm ${opening.count} lỗ mở)` : '';
     const dropNote = window?.outliersDropped ? ` (đã loại ${window.outliersDropped} block lỗi kích thước bất thường)` : '';
-    push(
-      'window', 'window', 'cái', winCount,
-      `${winCount} cửa sổ/lỗ mở đếm được${openNote}${dropNote} — ⚠ m² cần rộng×cao từ bảng thống kê cửa; ` +
-        `mặt bằng chỉ cho bề rộng nên engine không suy m² (thà thiếu còn hơn sai).`,
-    );
+    // Diễn giải NGẮN — lý do không có m² nằm ở finding gộp, không nhét vào ô.
+    push('window', 'window', 'cái', winCount, `đếm ${winCount} cửa sổ/lỗ mở${openNote}${dropNote}`);
   }
 
   // Sàn/nền: ưu tiên đo từ hatch (lọc outlier). Nếu không có hatch đủ tin cậy
@@ -1422,7 +1425,7 @@ export function computeMepRows(
         name: m.label,
         unit: m.unit,
         quantity: q,
-        note: `${how} [nhóm:${m.type}] ⚠ cần chọn mã — chưa có định mức MEP`,
+        note: how,
         source: '—',
       } as TakeoffEngineRow;
     })
@@ -1496,31 +1499,32 @@ export class TakeoffEngineService {
   }
 
   /** Tra norm_items theo keyword — KHÔNG hardcode mã; không có DB match → undefined. */
-  private async findNormCandidates(keys: TakeoffRowKey[]): Promise<NormCandidateMap> {
-    const map: NormCandidateMap = {};
-    await Promise.all(
-      keys.map(async (key) => {
-        // MEP không có keyword (không có định mức MEP trong norm_items) → bỏ qua,
-        // KHÔNG bịa mã. NORM_KEYWORDS là Partial nên phải guard.
-        for (const kw of NORM_KEYWORDS[key] ?? []) {
-          const hit = await this.normModel
-            .findOne({ name: { $regex: kw, $options: 'i' } })
-            .sort({ code: 1 })
-            .lean();
-          if (hit) {
-            map[key] = {
-              code: hit.code,
-              name: hit.name,
-              unit: hit.unit,
-              sourceDoc: hit.sourceDoc,
-              components: (hit.components ?? []) as NormComponent[],
-            };
-            return;
-          }
-        }
-      }),
-    );
-    return map;
+  /**
+   * Tra định mức theo MÃ CHÍNH XÁC (mã QS đã chốt / mã web đã qua `verifyCodeInBook`).
+   *
+   * ⚠ ĐÃ BỎ đường tra theo TÊN (`NORM_KEYWORDS` + `$regex` trên `name`). Lý do đã đo
+   * trên chính 4305 dòng đơn giá Hà Nội: khớp tên tiếng Việt SAI NGỮ NGHĨA —
+   * `"bê tông cột"` → `"Thi công cọc tiêu bê tông cốt thép, cột km"` (cọc tiêu đường bộ),
+   * `"sơn tường"` → `"Miết mạch tường đá"`. Trước đây vô hại vì `norm_items` RỖNG nên
+   * luôn trả undefined; nạp định mức vào là nó bắt đầu tự gán mã sai kèm hao phí thật —
+   * sai một cách rất chính thống. Mã do QS chốt từ `NORM_FAMILIES` (đúng họ), engine
+   * chỉ tra HAO PHÍ của mã đó. Không có mã → không có định mức, để trống.
+   */
+  private async normComponentsByCode(codes: string[]): Promise<Map<string, NormCandidate>> {
+    const out = new Map<string, NormCandidate>();
+    const uniq = [...new Set(codes.filter((c) => c?.trim()))];
+    if (uniq.length === 0) return out;
+    const hits = await this.normModel.find({ code: { $in: uniq } }).lean();
+    for (const hit of hits) {
+      out.set(hit.code, {
+        code: hit.code,
+        name: hit.name,
+        unit: hit.unit,
+        sourceDoc: hit.sourceDoc,
+        components: (hit.components ?? []) as NormComponent[],
+      });
+    }
+    return out;
   }
 
   async run(userId: string, estimateId: string, input: TakeoffEngineInput) {
@@ -1532,7 +1536,12 @@ export class TakeoffEngineService {
     const drawingDoc = await this.drawingModel.findById(input.drawingId).select('discipline').lean();
     const discipline = drawingDoc?.discipline;
     const allowedKeys = rowKeysForDiscipline(discipline);
-    const estDrawings = await this.drawingModel.find({ estimateId }).select('discipline').lean();
+    const estDrawings = await this.drawingModel.find({ estimateId }).select('discipline name').lean();
+    // TRUY VẾT: dòng khối lượng ← bản vẽ nào. id takeoff đã mang drawingId
+    // (`tk_engine_<drawingId>_<rowKey>`) nên chỉ cần map id → tên.
+    const drawingNameById = new Map<string, string>(
+      estDrawings.map((d) => [String((d as any)._id), String((d as any).name ?? '')]),
+    );
     const existingDisciplines = new Set(estDrawings.map((d) => d.discipline).filter(Boolean) as string[]);
 
     const rejected = new Set(input.rejectedObjectIds ?? []);
@@ -1627,8 +1636,10 @@ export class TakeoffEngineService {
     }
     input = { ...input, unitsPerDrawingUnit: factor };
 
-    const allKeys = Object.keys(NORM_KEYWORDS) as TakeoffRowKey[];
-    const normCandidates = await this.findNormCandidates(allKeys);
+    // Bắt đầu RỖNG: engine KHÔNG tự chọn mã. Mã chỉ đến từ (a) web lookup đã qua
+    // `verifyCodeInBook`, hoặc (b) QS chốt từ gợi ý `NORM_FAMILIES`. Hao phí định mức
+    // tra sau, theo MÃ CHÍNH XÁC (xem normComponentsByCode).
+    const normCandidates: NormCandidateMap = {};
 
     // ĐƠN GIÁ TỈNH (unit_prices) — nguồn mã + giá THẬT, có sourceDoc (vd TT 13/2021).
     // Chỉ nhận mã phổ thông khi mã đó TỒN TẠI THẬT trong bộ đơn giá của tỉnh; khi đó
@@ -1821,6 +1832,8 @@ export class TakeoffEngineService {
       const mirror = rowsToUpdateCells(
         sheetRows.map((r, i) => ({
           stt: String(i + 1),
+          // Dòng của bản này → drawingId hiện tại; dòng gộp từ bản khác → lấy từ id của nó.
+          drawing: drawingNameById.get(r.drawingId ?? input.drawingId) ?? '',
           code: r.code,
           name: r.name,
           objectGroup: OBJECT_GROUP_LABEL[r.group] ?? r.group,
@@ -1975,6 +1988,21 @@ export class TakeoffEngineService {
           `mặt cắt kín để lấy tiết diện) hoặc là VÒNG TRÒN/KÝ HIỆU chưa rõ (cột? cọc? ký hiệu?) — engine ` +
           `không đoán để tránh tạo số khống. Để bóc: khoanh vùng đúng cấu kiện rồi bóc lại, hoặc mở bản ` +
           `mặt cắt/chi tiết có tiết diện. (Đây KHÔNG phải "chưa nhận diện" — đã tìm thấy, chỉ chưa đủ hình học để đo.)`,
+      });
+    }
+    // Cửa/cửa sổ đếm theo CÁI — nói rõ 1 LẦN ở đây vì sao không có m² (thay vì nhét cả
+    // đoạn vào cột Diễn giải của từng dòng, làm bảng không đọc nổi).
+    const openingRows = rows.filter((r) => (r.key === 'door' || r.key === 'window') && r.quantity > 0);
+    if (openingRows.length > 0) {
+      findings.push({
+        id: 'takeoff-engine-openings-count',
+        severity: 'info',
+        area: 'quantity',
+        title: `Cửa/cửa sổ đếm theo CÁI — m² cần bảng thống kê cửa`,
+        detail:
+          `${openingRows.map((r) => `${r.name}: ${r.quantity} cái`).join(' · ')}. Engine KHÔNG suy m² từ mặt bằng: ` +
+          `bbox cửa trên mặt bằng là bề rộng × cung quét cánh (hoặc × bề dày tường), không phải diện tích cánh; ` +
+          `m² = rộng × cao mà CHIỀU CAO không có trong mặt bằng. Điền m² từ bảng thống kê cửa của bản vẽ.`,
       });
     }
     // Minh bạch phạm vi: liệt kê nhóm công tác còn thiếu so với checklist QS.
