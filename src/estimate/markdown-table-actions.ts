@@ -347,7 +347,23 @@ export function rowsToUpdateCells(
   rows: RescueRow[],
   state: EstimateState,
   sheetNameHint?: string,
-  opts?: { footnote?: string; theme?: SheetTheme; title?: string },
+  opts?: {
+    footnote?: string;
+    theme?: SheetTheme;
+    title?: string;
+    /**
+     * true = sheet này DO ENGINE TẠO (3 sheet BOQ chuẩn) → được phép xoá+ghi lại
+     * layout. Mặc định FALSE: mọi sheet khác coi như CỦA NGƯỜI DÙNG.
+     *
+     * Vì sao mặc định false: `rowsToUpdateCells` từng xoá sạch `A1:J{lastRow}` khi
+     * header không khớp layout GenSpec. Với Workbook công ty (Template A) → **16 ô
+     * bị xoá** cả header lẫn dữ liệu thật ("Đào móng bằng thủ công 45.2 m³") rồi ghi
+     * đè layout GenSpec — đúng anti-pattern GENSPEC-VISION.md cấm (CASE 2/3:
+     * "AI KHÔNG được chuyển Workbook về template GenSpec"). Caller phải TỰ KHAI BÁO
+     * quyền, không đoán theo tên sheet.
+     */
+    engineOwnedSheet?: boolean;
+  },
 ): TableRescueResult | null {
   if (rows.length === 0) return null;
   const sheet = pickTargetSheet(state.sheets ?? [], sheetNameHint);
@@ -387,13 +403,23 @@ export function rowsToUpdateCells(
   let headerRow: number | null = null;
   let row: number;
 
+  // Sheet CỦA NGƯỜI DÙNG (Template A, file G8, Excel công ty) — không phải sheet do
+  // engine tạo. TUYỆT ĐỐI không xoá/ghi đè gì: ghi TIẾP xuống dưới dữ liệu sẵn có,
+  // giữ nguyên header + công thức + style + thứ tự của họ (GENSPEC-VISION CASE 2/3).
+  const userSheet = !opts?.engineOwnedSheet && !hasEngineHeader;
+
   if (hasEngineHeader) {
     // Bóc lại: giữ vị trí title + header, ghi lại text title (tên sheet có thể đổi).
     if (hasTitle) { titleRow = 1; push(`A1`, opts!.title!); }
     headerRow = expectedHeaderRow;
     row = expectedHeaderRow + 1;
+  } else if (userSheet) {
+    // Append sau dòng cuối cùng đang có dữ liệu — KHÔNG xoá, KHÔNG ghi header của
+    // GenSpec đè lên header của họ. Sheet trống hoàn toàn (last=0) thì ghi từ dòng 1.
+    row = last + 1;
+    headerRow = null;
   } else {
-    // Layout chưa khớp: nếu sheet có rác cũ → xoá sạch rồi ghi mới từ dòng 1.
+    // Sheet do engine tạo nhưng layout chưa khớp (đổi số cột…) → dựng lại layout chuẩn.
     if (last > 0) {
       for (let r = 1; r <= last; r++) {
         for (const letter of COL_LETTERS) {

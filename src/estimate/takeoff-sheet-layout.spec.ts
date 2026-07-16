@@ -34,7 +34,7 @@ describe('layout sheet BOQ — tiêu đề + header + footnote', () => {
   it('ghi mới: A1=title, A2/I2=header cột, data từ dòng 3', () => {
     const sheet = emptySheet('1. Kết cấu & bao che');
     const r = rowsToUpdateCells(ROWS, stateWith(sheet), '1. Kết cấu & bao che',
-      { title: '1. KẾT CẤU & BAO CHE', footnote: 'ghi chú giả định' });
+      { title: '1. KẾT CẤU & BAO CHE', footnote: 'ghi chú giả định', engineOwnedSheet: true });
     const after = applyToSheet(sheet, r);
     expect(val(after, 'A1')).toBe('1. KẾT CẤU & BAO CHE');
     expect(val(after, 'A2')).toBe('STT');
@@ -56,10 +56,10 @@ describe('layout sheet BOQ — tiêu đề + header + footnote', () => {
   it('bóc lại: giữ title dòng 1 + header dòng 2, không đẩy bảng xuống', () => {
     const sheet = emptySheet('1. Kết cấu & bao che');
     const first = applyToSheet(sheet, rowsToUpdateCells(ROWS, stateWith(sheet), '1. Kết cấu & bao che',
-      { title: '1. KẾT CẤU & BAO CHE' }));
+      { title: '1. KẾT CẤU & BAO CHE', engineOwnedSheet: true }));
     // bóc lại với ít dòng hơn
     const r2 = rowsToUpdateCells([ROWS[0]], stateWith(first), '1. Kết cấu & bao che',
-      { title: '1. KẾT CẤU & BAO CHE' });
+      { title: '1. KẾT CẤU & BAO CHE', engineOwnedSheet: true });
     const after = applyToSheet(first, r2);
     expect(val(after, 'A1')).toBe('1. KẾT CẤU & BAO CHE');
     expect(val(after, 'A2')).toBe('STT');
@@ -71,9 +71,9 @@ describe('layout sheet BOQ — tiêu đề + header + footnote', () => {
   it('bóc lại: nhận ra header engine sẵn có → KHÔNG xoá sạch rồi ghi lại từ đầu', () => {
     const sheet = emptySheet('1. Kết cấu & bao che');
     const first = applyToSheet(sheet, rowsToUpdateCells(ROWS, stateWith(sheet), '1. Kết cấu & bao che',
-      { title: '1. KẾT CẤU & BAO CHE' }));
+      { title: '1. KẾT CẤU & BAO CHE', engineOwnedSheet: true }));
     const r2 = rowsToUpdateCells(ROWS, stateWith(first), '1. Kết cấu & bao che',
-      { title: '1. KẾT CẤU & BAO CHE' });
+      { title: '1. KẾT CẤU & BAO CHE', engineOwnedSheet: true });
     // Header đã khớp → KHÔNG xoá vùng title/header (dòng 1-2) để ghi lại từ đầu.
     // (Ô trống ở dòng data là giá trị thật của cột objectGroup, không phải wipe.)
     const wipedHeader = r2!.actions.filter(
@@ -95,7 +95,7 @@ describe('cột giá/nguồn — trace giá thật ghi vào Excel (không chỉ 
       { stt: '2', code: 'AK.21110', name: 'Trát tường', unit: 'm2', quantity: '5', note: 'y' }, // thiếu giá
     ];
     // Không truyền title → header ở dòng 1, data bắt đầu dòng 2.
-    const r = rowsToUpdateCells(rows, stateWith(sheet), '1. Kết cấu & bao che');
+    const r = rowsToUpdateCells(rows, stateWith(sheet), '1. Kết cấu & bao che', { engineOwnedSheet: true });
     const after = applyToSheet(sheet, r);
     expect(val(after, 'H2')).toBe('1.500.000');
     expect(val(after, 'I2')).toBe('15.000.000');

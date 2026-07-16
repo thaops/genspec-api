@@ -5,6 +5,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { NormComponent, NormItem } from '../catalog/catalog-db.schemas';
 import { CatalogService, lookupComponentPrice } from '../catalog/catalog.service';
+import { UnitPriceService } from '../catalog/unit-price.service';
 import { DrawingObject, DrawingObjectDocument } from '../drawing/schemas/drawing-object.schema';
 import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
 import { Discipline, isDiscipline } from '../drawing/discipline';
@@ -49,6 +50,15 @@ export function isCountableObject(o: EngineDrawingObject): boolean {
   return !o.ambiguous && o.type !== 'ignored' && o.type !== 'unknown';
 }
 
+/** 1 ứng viên mã đơn giá THẬT từ `unit_prices` — để QS/agent CHỌN, engine KHÔNG tự chốt. */
+export interface UnitPriceSuggestion {
+  code: string;
+  name: string;
+  unit: string;
+  unitPrice: number;
+  sourceDoc: string;
+}
+
 export interface NormCandidate {
   code: string;
   name: string;
@@ -56,6 +66,13 @@ export interface NormCandidate {
   sourceDoc?: string;
   /** Hao phí VL/NC/M từ norm_items — nguồn tính đơn giá thật. */
   components?: { kind?: string; refCode?: string; name: string; unit?: string; norm: number }[];
+  /**
+   * ĐƠN GIÁ TRỌN GÓI từ `unit_prices` (đơn giá tỉnh) khi mã ĐÃ được chốt.
+   * Khác `components`: đơn giá tỉnh là giá trọn gói/đơn vị công tác, không cần nhân
+   * hao phí × giá tài nguyên. Thiếu đường này thì DÙ MÃ ĐÚNG giá vẫn null — đúng lỗi
+   * đã đo trên production (4305 đơn giá Hà Nội nằm im, 13/13 dòng không giá).
+   */
+  directPrice?: { unitPrice: number; sourceDoc: string };
   /** Có mặt = mã tra từ WEB (grounded search) chứ không phải DB — cần kiểm chứng. */
   webSource?: { title?: string; uri?: string };
   /** Mã phổ thông mặc định (COMMON_FALLBACK_CODES) khi Edit bật — cần kiểm chứng, KHÔNG có giá. */
@@ -200,18 +217,40 @@ export function priceNormComponents(
 }
 
 /**
- * Gán đơn giá/thành tiền vào rows từ price_set tỉnh. Mutate-free: trả rows mới.
+ * Gán đơn giá/thành tiền vào rows. Mutate-free: trả rows mới.
  * Thiếu giá → giữ nguyên dòng (cột giá trống), caller sinh finding warn.
+ *
+ * HAI nguồn giá, ưu tiên ĐƠN GIÁ TỈNH trọn gói trước:
+ *  1. `cand.directPrice` — đơn giá công tác từ `unit_prices` (vd bộ Đơn giá Hà Nội,
+ *     4305 dòng, nguồn TT 13/2021). Trọn gói/đơn vị → dùng thẳng, KHÔNG cần hao phí.
+ *  2. `components` × `price_items` (định mức + công bố giá tỉnh) — đường cũ, chỉ chạy
+ *     được khi `norm_items` đã import.
+ * Trước đây CHỈ có (2) → `norm_items` rỗng thì dù mã đúng giá vẫn null (đo thật trên
+ * production: 13/13 dòng không giá dù đã có 4305 đơn giá thật trong DB).
  */
 export function applyPricingToRows(
   rows: TakeoffEngineRow[],
   candidates: NormCandidateMap,
   ctx: PriceContextLite | null,
 ): TakeoffEngineRow[] {
-  if (!ctx) return rows;
   return rows.map((r) => {
     if (!r.code) return r;
     const cand = candidates[r.key];
+    // 1. Đơn giá tỉnh trọn gói — có nguồn thật (sourceDoc), không phụ thuộc ctx.
+    const direct = cand?.directPrice;
+    if (direct) {
+      // Nguồn mã và nguồn giá là CÙNG một văn bản đơn giá tỉnh → không nối 2 lần
+      // ("TT 13/2021 · TT 13/2021"). Chỉ nối khi thật sự là 2 nguồn khác nhau.
+      const base = r.source && r.source !== '—' && !r.source.includes(direct.sourceDoc) ? `${r.source} · ` : '';
+      return {
+        ...r,
+        unitPrice: direct.unitPrice,
+        totalPrice: Math.round(direct.unitPrice * r.quantity),
+        source: `${base}${direct.sourceDoc}`,
+      };
+    }
+    // 2. Định mức × công bố giá tỉnh (đường cũ).
+    if (!ctx) return r;
     const unitPrice = priceNormComponents(cand?.components, ctx.prices);
     if (unitPrice == null) return r;
     // MM/YYYY từ effectiveDate (yyyy-mm-dd)
@@ -1073,6 +1112,8 @@ export class TakeoffEngineService {
     private readonly catalog: CatalogService,
     private readonly webLookup: NormWebLookupService,
     private readonly priceWeb: PriceWebLookupService,
+    /** Đơn giá tỉnh THẬT (unit_prices) — nguồn mã + giá trọn gói có sourceDoc. */
+    private readonly unitPrices: UnitPriceService,
   ) {}
 
   /** Tra norm_items theo keyword — KHÔNG hardcode mã; không có DB match → undefined. */
@@ -1208,17 +1249,47 @@ export class TakeoffEngineService {
     const allKeys = Object.keys(NORM_KEYWORDS) as TakeoffRowKey[];
     const normCandidates = await this.findNormCandidates(allKeys);
 
-    // Edit bật ("hoàn thiện bảng" 1 lệnh): dòng thiếu mã DB → gán mã phổ thông
-    // chuẩn (COMMON_FALLBACK_CODES) TRƯỚC web — mã chuẩn của engine thắng mã web
-    // lạc nhóm (vd web trả AF.12400 "BÊ TÔNG SÀN MÁI" cho slab chung). KHÔNG bịa giá.
-    let fallbackCount = 0;
+    // ĐƠN GIÁ TỈNH (unit_prices) — nguồn mã + giá THẬT, có sourceDoc (vd TT 13/2021).
+    // Chỉ nhận mã phổ thông khi mã đó TỒN TẠI THẬT trong bộ đơn giá của tỉnh; khi đó
+    // lấy luôn giá trọn gói. Mã không có thật trong sách đơn giá nào = mã bịa → BỎ.
+    //
+    // Vì sao không tự tra theo TÊN rồi gán: đã đo trên production, `$text` tiếng Việt
+    // sai ngữ nghĩa (query "sơn tường" → "Miết mạch tường đá"; "bê tông cột" → "cọc
+    // tiêu bê tông... cột km"). Auto-gán = mã SAI + giá THẬT + nguồn TT 13/2021 trông
+    // rất chính thống = sai một cách tự tin, tệ hơn hẳn để trống. Nên: chỉ GỢI Ý
+    // ứng viên cho QS/agent chốt (suggestions), engine KHÔNG tự chọn.
+    let pricedFromUnitPrice = 0;
+    const suggestions = new Map<TakeoffRowKey, UnitPriceSuggestion[]>();
+    const province = state.projectInfo?.location;
     if (input.editPermission) {
       const probe = computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys);
       for (const r of probe.filter((row) => !row.code)) {
         const fb = COMMON_FALLBACK_CODES[r.key];
-        if (!fb) continue;
-        normCandidates[r.key] = { code: fb.code, name: fb.name, unit: '', fallback: true };
-        fallbackCount++;
+        // a) Mã phổ thông CÓ THẬT trong đơn giá tỉnh → dùng + lấy giá trọn gói.
+        if (fb) {
+          const hit = await this.unitPrices.byCode(fb.code, province).catch(() => null);
+          if (hit) {
+            normCandidates[r.key] = {
+              code: hit.code,
+              name: fb.name,
+              unit: hit.unit ?? '',
+              sourceDoc: hit.sourceDoc,
+              directPrice: { unitPrice: hit.unitPrice, sourceDoc: hit.sourceDoc },
+            };
+            pricedFromUnitPrice++;
+            continue;
+          }
+        }
+        // b) Không có mã thật → KHÔNG gán mã bịa. Gợi ý ứng viên để QS chốt.
+        const found = await this.unitPrices
+          .search(standardDisplayName(r.key, undefined), province, 3)
+          .catch(() => []);
+        if (found.length > 0) {
+          suggestions.set(
+            r.key,
+            found.map((u) => ({ code: u.code, name: u.name, unit: u.unit, unitPrice: u.unitPrice, sourceDoc: u.sourceDoc })),
+          );
+        }
       }
     }
 
@@ -1365,6 +1436,9 @@ export class TakeoffEngineService {
         {
           title: sheetDef.name.toUpperCase(),
           theme: { tint: sheetDef.tint, accent: sheetDef.accent },
+          // 3 sheet BOQ này DO ENGINE tạo (BOQ_SHEETS) → được phép dựng lại layout.
+          // Mọi sheet khác (Workbook công ty) mặc định KHÔNG — xem rowsToUpdateCells.
+          engineOwnedSheet: true,
           ...(isLast ? { footnote: assumptionFootnote(a) } : {}),
         },
       );
@@ -1407,6 +1481,16 @@ export class TakeoffEngineService {
       ...(fallbackRows.length > 0
         ? [
             `Đã điền mã phổ thông cho ${fallbackRows.length} dòng (cần kiểm chứng theo chỉ dẫn kỹ thuật).`,
+          ]
+        : []),
+      ...(pricedFromUnitPrice > 0
+        ? [
+            `Mã hiệu + đơn giá: ${pricedFromUnitPrice} công tác khớp ĐƠN GIÁ TỈNH thật (có mã trong bộ đơn giá) → giá + nguồn lấy thẳng từ đó.`,
+          ]
+        : []),
+      ...(suggestions.size > 0
+        ? [
+            `${suggestions.size} công tác chưa có mã: engine KHÔNG tự chế mã — đã liệt kê mã CÓ THẬT trong đơn giá tỉnh ở phần "Điểm cần kiểm tra" để bạn chọn (chọn xong giá tự áp).`,
           ]
         : []),
       `(Đơn giá/Thành tiền hiện khi CÓ nguồn giá — công bố giá tỉnh (Sở XD) hoặc web grounded có trích nguồn; ô "—" là chưa có giá, KHÔNG bịa.)`,
@@ -1508,6 +1592,29 @@ export class TakeoffEngineService {
         detail: `${fallbackRows.length} công tác dùng mã phổ thông mặc định (TT12/2021) do chưa import định mức — cần kiểm chứng theo chỉ dẫn kỹ thuật; chưa có đơn giá.`,
       });
     }
+    // ỨNG VIÊN MÃ THẬT: dòng chưa có mã → liệt kê mã CÓ THẬT trong đơn giá tỉnh kèm
+    // giá + nguồn để QS/agent CHỌN. Engine KHÔNG tự chọn: khớp theo tên tiếng Việt
+    // không đáng tin (đo thật: "sơn tường" → "Miết mạch tường đá"), tự chọn = mã sai
+    // + giá thật = sai một cách tự tin.
+    if (suggestions.size > 0) {
+      const lines = [...suggestions.entries()].map(([key, list]) => {
+        const opts = list
+          .map((s) => `${s.code} "${s.name}" — ${Math.round(s.unitPrice).toLocaleString('vi-VN')}đ/${s.unit || '?'}`)
+          .join('  |  ');
+        return `· ${DEFAULT_NAMES[key]}: ${opts}`;
+      });
+      const doc = [...suggestions.values()][0]?.[0]?.sourceDoc;
+      findings.push({
+        id: 'takeoff-engine-code-suggestions',
+        severity: 'info',
+        area: 'missing',
+        title: `Có ${suggestions.size} công tác tra được mã thật trong đơn giá tỉnh — chọn để ra giá`,
+        detail:
+          `Các mã dưới đây CÓ THẬT trong bộ đơn giá${doc ? ` (${doc})` : ''}, kèm giá + nguồn. Engine KHÔNG tự ` +
+          `chọn vì khớp theo tên tiếng Việt không đủ tin cậy — QS chọn đúng mã (hoặc bảo agent "điền mã cho ` +
+          `dòng X là <mã>"), giá sẽ tự áp theo đơn giá tỉnh:\n${lines.join('\n')}`,
+      });
+    }
     if (hs.count > 0 && hs.used === 0) {
       findings.push({
         id: 'takeoff-engine-hatch-untrusted',
@@ -1549,6 +1656,16 @@ export class TakeoffEngineService {
       priceCtx && pricedCount > 0
         ? [{ title: `${priceCtx.sourceDoc} — ${priceCtx.province}`, type: 'government' }]
         : [];
+    // Nguồn ĐƠN GIÁ TỈNH (unit_prices): giá trọn gói lấy thẳng từ bộ đơn giá — nguồn
+    // chính thống thật (vd "TT 13/2021/TT-BXD"). Trước đây `sources` chỉ đọc priceCtx
+    // (price_sets) nên dù có giá vẫn trả 0 nguồn — đúng lỗi đo trên production.
+    const seenDoc = new Set<string>();
+    for (const key of Object.keys(normCandidates) as TakeoffRowKey[]) {
+      const dp = normCandidates[key]?.directPrice;
+      if (!dp?.sourceDoc || seenDoc.has(dp.sourceDoc)) continue;
+      seenDoc.add(dp.sourceDoc);
+      sources.push({ title: `${dp.sourceDoc}${province ? ` — ${province}` : ''}`, type: 'government' });
+    }
     // Mã web: type 'web' — KHÔNG BAO GIỜ 'government'. Dedupe theo uri/title.
     const seenWeb = new Set<string>();
     for (const key of Object.keys(normCandidates) as TakeoffRowKey[]) {
