@@ -909,6 +909,30 @@ export function isRealSection(obj: EngineDrawingObject, factor: number): boolean
   return Math.min(obj.boundingBox.w, obj.boundingBox.h) * factor >= MIN_SECTION_M;
 }
 
+/**
+ * Cấu kiện KC (cột/dầm/móng/cọc) ĐÃ được detector nhận ra nhưng KHÔNG đo được — vì
+ * `ambiguous` (vd vòng tròn radial: cột? cọc? ký hiệu? — không đoán) hoặc vẽ bằng nét
+ * đơn (LINE, không có mặt cắt kín để lấy tiết diện). Gom theo type để BÁO RÕ cho QS,
+ * KHÔNG lặng lẽ bỏ.
+ *
+ * Vì sao cần: đo thật trên "KC BENH XA": detector ra 76 cột, 38 dầm, 12 móng, 1116 thép
+ * nhưng engine chỉ bóc được 1 dòng sàn — nếu chỉ báo "chưa nhận diện được" thì SAI sự
+ * thật (đã nhận diện), và QS mất trắng thông tin 126 cấu kiện đã tìm thấy. PURE.
+ */
+export function unmeasuredSections(
+  objects: EngineDrawingObject[],
+  factor: number,
+): { byType: Record<string, number>; total: number } {
+  const byType: Record<string, number> = {};
+  for (const o of objects) {
+    if (!SECTION_TYPES.has(o.type)) continue;
+    // Đã đo được (countable + tiết diện thật) → không tính vào "bỏ sót".
+    if (isCountableObject(o) && isRealSection(o, factor)) continue;
+    byType[o.type] = (byType[o.type] ?? 0) + 1;
+  }
+  return { byType, total: Object.values(byType).reduce((a, b) => a + b, 0) };
+}
+
 const TYPE_LABELS_VI: Record<string, string> = {
   wall: 'tường', column: 'cột', beam: 'dầm', door: 'cửa', window: 'cửa sổ',
   slab: 'sàn', hatch: 'hatch', text: 'text', block: 'block', pile: 'cọc',
@@ -1754,6 +1778,13 @@ export class TakeoffEngineService {
     const webCode = rows.filter((r) => r.webSourced);
     const missingPrice = rows.filter((r) => r.unitPrice == null);
     const pricedCount = rows.length - missingPrice.length;
+    // Cấu kiện KC đã nhận ra nhưng chưa đo được + nhãn bộ môn — dùng ở CẢ message lẫn
+    // findings, nên tính 1 lần ở đây (trước message).
+    const unmeasured = unmeasuredSections(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit);
+    const discLabel =
+      discipline === 'KC' ? 'bản kết cấu' :
+      discipline === 'DIEN' || discipline === 'NUOC' ? 'bản MEP' :
+      discipline === 'KT' ? 'bản kiến trúc' : 'bản vẽ này';
     const message = [
       `Đã bóc khối lượng ${rows.length} dòng từ ${groups.length} nhóm cấu kiện (${groups.join(', ')}) — ${objects.length} đối tượng hình học${rejected.size ? `, đã loại ${rejected.size} đối tượng bị từ chối` : ''}${regionKept != null ? `. Bóc TRONG VÙNG CHỌN: chỉ tính ${regionKept}/${regionTotal} đối tượng nằm trong vùng` : ''}.`,
       // Cảnh báo phạm vi lên NGAY sau dòng đầu — đây là điểm QS mất tin nhất (khối
@@ -1781,7 +1812,10 @@ export class TakeoffEngineService {
           ]
         : []),
       `(Đơn giá/Thành tiền hiện khi CÓ nguồn giá — công bố giá tỉnh (Sở XD) hoặc web grounded có trích nguồn; ô "—" là chưa có giá, KHÔNG bịa.)`,
-      `BOQ hiện chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm công tác cần bản vẽ kết cấu/MEP để bóc đầy đủ.`,
+      ...(unmeasured.total > 0
+        ? [`Đã nhận ra ${unmeasured.total} cấu kiện KC (cột/dầm/móng) nhưng chưa đo được vì vẽ nét đơn/ký hiệu — xem "Điểm cần kiểm tra" để khoanh vùng.`]
+        : []),
+      `BOQ mới từ ${discLabel} — còn ${CHECKLIST_QS.length} nhóm cần bản vẽ/khoanh vùng khác để đủ.`,
       '',
       rowsToMarkdownTable(rows),
       '',
@@ -1841,13 +1875,33 @@ export class TakeoffEngineService {
     if (sanityOver) findings.push(sanityOver);
     const sanityUnder = wallVsFloorFinding(rows);
     if (sanityUnder) findings.push(sanityUnder);
-    // Minh bạch phạm vi: bản kiến trúc chỉ bóc được 1 phần BOQ — liệt kê nhóm còn thiếu.
-    // Đây là ghi chú (info), KHÔNG sinh action/số cho các mục cần bổ sung.
+    // TRUNG THỰC về cấu kiện KC đã NHẬN RA nhưng KHÔNG đo được — báo rõ số + lý do, để
+    // QS biết mà khoanh vùng/xác nhận, KHÔNG lặng lẽ bỏ rồi nói "chưa nhận diện được".
+    if (unmeasured.total > 0) {
+      const parts = Object.entries(unmeasured.byType)
+        .sort((a, b) => b[1] - a[1])
+        .map(([t, n]) => `${n} ${TYPE_LABELS_VI[t] ?? t}`)
+        .join(', ');
+      findings.push({
+        id: 'takeoff-engine-unmeasured-sections',
+        severity: 'warn',
+        area: 'missing',
+        title: `Đã nhận ra ${unmeasured.total} cấu kiện KC nhưng CHƯA đo được — cần xác nhận`,
+        detail:
+          `Detector nhận ra ${parts} nhưng engine KHÔNG đo vì chúng vẽ bằng NÉT ĐƠN (LINE, không có ` +
+          `mặt cắt kín để lấy tiết diện) hoặc là VÒNG TRÒN/KÝ HIỆU chưa rõ (cột? cọc? ký hiệu?) — engine ` +
+          `không đoán để tránh tạo số khống. Để bóc: khoanh vùng đúng cấu kiện rồi bóc lại, hoặc mở bản ` +
+          `mặt cắt/chi tiết có tiết diện. (Đây KHÔNG phải "chưa nhận diện" — đã tìm thấy, chỉ chưa đủ hình học để đo.)`,
+      });
+    }
+    // Minh bạch phạm vi: liệt kê nhóm công tác còn thiếu so với checklist QS.
+    // Ghi chú (info), KHÔNG sinh action/số cho các mục cần bổ sung. Tiêu đề dùng discLabel
+    // (tính ở trên) để phản ánh ĐÚNG bộ môn — gọi bản KC là "bản kiến trúc" là sai sự thật.
     findings.push({
       id: 'takeoff-engine-checklist-qs',
       severity: 'info',
       area: 'missing',
-      title: `BOQ chỉ từ bản kiến trúc — ${CHECKLIST_QS.length} nhóm cần bản vẽ kết cấu/MEP`,
+      title: `BOQ mới từ ${discLabel} — còn ${CHECKLIST_QS.length} nhóm cần bản vẽ/khoanh vùng khác`,
       detail: `${renderChecklistQs(existingDisciplines)}`,
     });
     if (webPricedCount > 0) {
