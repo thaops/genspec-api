@@ -40,6 +40,28 @@ const KT_LAYER_TOKEN_RE = /^(?:TUONG|WALL|CUA|DOOR|CUASO|WINDOW|NEN|FLOOR|HOANTH
  * khớp KC vs KT trên mọi layer; đa số thắng, hoà/0 vẫn 'KHAC' — thà thiếu còn hơn
  * đoán sai bộ môn (routing checklist/CHECKLIST_QS phụ thuộc giá trị này).
  */
+/**
+ * Bộ môn cần GHI ĐÈ sau khi parse, hay không. Trả `null` = giữ nguyên.
+ *
+ * Dùng CHUNG cho cả 2 luồng parse — in-process (`drawing-parser.service.ts`) và
+ * worker BullMQ (`queue/drawing.processor.ts`, production chạy đường này). Tách
+ * ra vì logic này từng chỉ được cài ở luồng in-process → production (worker) KHÔNG
+ * có → file "F550" mãi là KHAC → bản kiến trúc đẻ ra công tác kết cấu. Đây là lần
+ * thứ 2 dính bẫy "2 luồng song song" (lần đầu: expandInsertEntities). Giữ MỘT nguồn
+ * sự thật để không lặp lại.
+ *
+ * Chỉ NÂNG CẤP từ 'KHAC' — không bao giờ đè lên bộ môn đã rõ từ filename hoặc do
+ * user tự chọn tay (setDiscipline).
+ */
+export function disciplineUpgradeFromLayers(
+  current: string | undefined,
+  layerNames: string[],
+): Discipline | null {
+  if (current !== 'KHAC') return null;
+  const fromLayers = detectDisciplineFromLayers(layerNames);
+  return fromLayers === 'KHAC' ? null : fromLayers;
+}
+
 export function detectDisciplineFromLayers(layers: string[]): Discipline {
   let kc = 0;
   let kt = 0;

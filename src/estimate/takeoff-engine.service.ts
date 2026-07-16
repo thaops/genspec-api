@@ -1008,6 +1008,44 @@ export function wallVsFloorFinding(rows: TakeoffEngineRow[]): ValidationFinding 
   };
 }
 
+/**
+ * Điểm tin cậy + finding khi bóc ra 0 DÒNG.
+ *
+ * BUG ĐÃ XÁC NHẬN TRÊN PRODUCTION: thang điểm cũ
+ *   `missingCode>0 ? 55 : softCode>0 ? 70 : missingPrice>0 ? 75 : 90`
+ * KHÔNG có mệnh đề nào kiểm `rows.length === 0` → bản DIEN bóc **0 dòng** rơi thẳng
+ * xuống nhánh cuối = **90 điểm / "reasonable"**, trong khi bản KT bóc 13 dòng thật
+ * = 70. Tức CÀNG BÓC ĐƯỢC ÍT CÀNG ĐÁNG TIN — QS nhìn 90 tưởng sạch lỗi, thực ra
+ * chẳng có gì. Rỗng KHÔNG BAO GIỜ là "đáng tin"; nó là "chưa làm được việc".
+ *
+ * Trả null khi có dòng → caller dùng thang điểm thường.
+ */
+export function emptyResultVerdict(
+  rowCount: number,
+  ctx: { objectCount: number; discipline?: string; disciplineSupported: boolean },
+): { score: number; finding: ValidationFinding } | null {
+  if (rowCount > 0) return null;
+  const disc = ctx.discipline || 'chưa gắn';
+  // Phân biệt 2 ca RẤT khác nhau — gộp chung sẽ chỉ sai chỗ cho QS:
+  const detail = !ctx.disciplineSupported
+    ? `Bộ môn "${disc}" chưa có nhóm công tác nào trong engine (DISCIPLINE_ROWKEYS rỗng) — bản vẽ có ` +
+      `${ctx.objectCount} đối tượng nhưng engine CHƯA biết bóc gì cho bộ môn này. Đây KHÔNG phải bản vẽ ` +
+      `sạch lỗi, mà là tính năng chưa có. Khối lượng bộ môn này phải bóc thủ công.`
+    : `Engine không nhận ra cấu kiện nào đo được trong ${ctx.objectCount} đối tượng của bản vẽ — có thể ` +
+      `layer đặt tên không chuẩn, hoặc bản vẽ chỉ có nét/ghi chú. Khắc phục: gán layer rule cho đúng ` +
+      `layer cấu kiện, hoặc khoanh vùng rồi bóc lại.`;
+  return {
+    score: 30,
+    finding: {
+      id: 'takeoff-engine-empty',
+      severity: 'warn',
+      area: 'missing',
+      title: `Không bóc được dòng nào — KHÔNG dùng được (bộ môn: ${disc})`,
+      detail,
+    },
+  };
+}
+
 export function assumptionFootnote(a: TakeoffAssumptions): string {
   return `Thông số áp dụng (người dùng xác nhận khi bóc): cao tầng ${a.floorHeight}m · dày tường ${a.wallThickness}m · sâu dầm ${a.beamDepth}m · bề rộng dầm ${ASSUMED_BEAM_WIDTH}m`;
 }
@@ -1487,10 +1525,19 @@ export class TakeoffEngineService {
         detail: `Dùng ${hs.used}/${hs.count} hatch (bỏ ${hs.dropped} ngoài ngưỡng), tổng diện tích ${hs.area} m² — đo bằng shoelace từ hình học, không ước lượng.`,
       });
     }
+    // RỖNG xét TRƯỚC mọi thang điểm: 0 dòng = 0 lỗi = điểm cao nhất là phi lý
+    // (đã xảy ra thật: DIEN bóc 0 dòng được 90đ "reasonable", KT bóc 13 dòng được 70đ).
+    const empty = emptyResultVerdict(rows.length, {
+      objectCount: objects.length,
+      discipline,
+      disciplineSupported: allowedKeys == null || allowedKeys.size > 0,
+    });
+    if (empty) findings.push(empty.finding);
     // đủ mã DB + đủ giá → 90; có mã web/mã phổ thông → 70; đủ mã DB thiếu giá → 75; thiếu mã hẳn → 55
     const softCode = webCode.length + fallbackRows.length;
     const score =
-      missingCode.length > 0 ? 55 : softCode > 0 ? 70 : missingPrice.length > 0 ? 75 : 90;
+      empty ? empty.score
+      : missingCode.length > 0 ? 55 : softCode > 0 ? 70 : missingPrice.length > 0 ? 75 : 90;
     const validation: ValidationReport = {
       status: score === 90 ? 'reasonable' : 'warning',
       score,

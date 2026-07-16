@@ -16,6 +16,7 @@ import { DrawingObjectOverrideService } from '../drawing/services/drawing-object
 import { DrawingIndexerService } from '../drawing/services/drawing-indexer.service';
 import { inferUnitFactor } from '../drawing/services/drawing-unit';
 import { expandInsertEntities } from '../drawing/services/dwg-insert-expand';
+import { disciplineUpgradeFromLayers } from '../drawing/discipline';
 import { DrawingGraphService } from '../drawing/services/drawing-graph.service';
 import { DrawingParserFactory } from '../drawing/parsers/drawing-parser.factory';
 import { DxfParserService } from '../drawing/parsers/dxf-parser.service';
@@ -206,12 +207,18 @@ export class DrawingJobProcessor extends WorkerHost {
       await this.graph.build(drawingId);
       await this.plog(drawingId, `[graph] built`);
 
-      // 7. Done
+      // 7. Done — filename mơ hồ (KHAC) thì suy bộ môn từ tên layer. Dùng CHUNG
+      // helper với luồng in-process; production chạy ĐÚNG đường worker này nên
+      // thiếu nó là bản kiến trúc "F550" mãi KHAC → engine đẻ ra công tác kết cấu.
       await this.setStatus(drawingId, 'ready');
-      await this.drawingModel.updateOne(
-        { _id: drawingId },
-        { pageCount: result.pages.length, parseStatus: 'ready' },
-      );
+      const doneFields: Record<string, unknown> = { pageCount: result.pages.length, parseStatus: 'ready' };
+      const cur = await this.drawingModel.findById(drawingId).select('discipline').lean();
+      const upgraded = disciplineUpgradeFromLayers(cur?.discipline, result.layers.map((l) => l.name));
+      if (upgraded) {
+        doneFields.discipline = upgraded;
+        await this.plog(drawingId, `[discipline] filename mơ hồ → suy từ layer: ${upgraded}`);
+      }
+      await this.drawingModel.updateOne({ _id: drawingId }, doneFields);
       await this.progress(job, 'ready', 'Bản vẽ sẵn sàng', 100);
       this.logger.log(`Drawing ${drawingId} ready — ${detected.length} objects`);
     } catch (err: any) {
