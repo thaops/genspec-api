@@ -35,8 +35,11 @@ export interface ParsedPriceItem {
   refCode?: string;
   name: string;
   unit: string;
+  /** Giá TẠI NGUỒN — chưa VAT, chưa vận chuyển (xem PriceItem.price). */
   price: number;
   kind: ComponentKind;
+  /** Điểm khảo sát (mỏ/bãi/NCC) suy từ dòng tiêu đề nhóm phía trên. */
+  sourcePoint?: string;
 }
 
 export interface HeaderDetection {
@@ -257,13 +260,24 @@ export function parsePriceRows(rows: CellRow[]): PriceParseResult {
 
   const c = header.columns;
   const items: ParsedPriceItem[] = [];
+  /**
+   * Công bố giá tách bảng theo MỎ/BÃI: dòng tiêu đề nhóm ("Bãi Cầu Trung Hà, xã Vật Lại")
+   * không có đơn giá, nằm TRÊN các dòng vật liệu của nó. Trước đây rơi vào nhánh "không
+   * có đơn giá → bỏ qua" ⇒ MẤT thông tin mỏ — mà thiếu mỏ thì giá vô dụng: cùng "Cát
+   * vàng" có 600.000↔800.000đ/m³ tuỳ bãi (đo thật), chọn bãi nào phụ thuộc cự ly tới
+   * công trình. Ở đây: dòng không giá + không đơn vị → nhớ làm `sourcePoint` cho các
+   * dòng tiếp theo.
+   */
+  let sourcePoint = '';
   for (let r = header.headerRowIndex + 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || row.every((v) => !String(v ?? '').trim())) continue;
     const name = cell(row, c.name);
-    const price = parseNumber(cell(row, c.price));
+    const price = cellNum(row, c.price);
     if (!name) continue;
     if (price == null) {
+      // Không giá + không đơn vị → tiêu đề nhóm (mỏ/bãi), KHÔNG phải lỗi.
+      if (!cell(row, c.unit)) { sourcePoint = name; continue; }
       errors.push(`Dòng ${r + 1}: "${name}" không có đơn giá — bỏ qua`);
       continue;
     }
@@ -275,6 +289,7 @@ export function parsePriceRows(rows: CellRow[]): PriceParseResult {
       unit: cell(row, c.unit),
       price,
       kind: (kindRaw && kindFromText(kindRaw)) || inferKindFromName(name),
+      sourcePoint: sourcePoint || undefined,
     });
   }
   return { header, items, errors };

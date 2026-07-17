@@ -90,7 +90,20 @@ export class CatalogImportService {
 
   async importPrices(
     buffer: Buffer,
-    meta: { province: string; effectiveDate: string; sourceDoc?: string },
+    meta: {
+      province: string;
+      effectiveDate: string;
+      sourceDoc?: string;
+      /**
+       * false = giá TẠI NGUỒN, chưa gồm vận chuyển/bốc xếp. Công bố Sở XD ghi rõ:
+       * "Giá các loại vật liệu rời (cát, đá) là giá khảo sát tại các điểm cụ thể…
+       * chưa bao gồm chi phí vận chuyển hoặc bốc xếp" ⇒ mặc định false cho an toàn
+       * (thà báo thiếu còn hơn để Cost Summary hụt cước mà không lộ ra).
+       */
+      includesTransport?: boolean;
+      /** high = công bố Sở Xây dựng; medium = báo giá đại lý/nhà máy. */
+      sourceConfidence?: 'high' | 'medium';
+    },
     dryRun: boolean,
     overwrite = false,
   ): Promise<ImportSummary | ImportPreview<ParsedPriceItem>> {
@@ -140,7 +153,14 @@ export class CatalogImportService {
     const existing = await this.priceItems.countDocuments({ priceSetId });
     await this.priceItems.deleteMany({ priceSetId });
 
-    const docs = parsed.items.map((p) => ({ ...p, priceSetId }));
+    // VAT KHÔNG lưu vào giá — đã là rule sẵn (`markups.vatPct`), áp lúc compute.
+    // Vận chuyển cũng vậy: tầng tính riêng, chỉ gắn CỜ để UI báo đỏ.
+    const docs = parsed.items.map((p) => ({
+      ...p,
+      priceSetId,
+      includesTransport: meta.includesTransport ?? false,
+      sourceConfidence: meta.sourceConfidence ?? 'high',
+    }));
     if (docs.length) await this.priceItems.insertMany(docs);
 
     this.logger.log(`import-prices ${province} ${meta.effectiveDate}: ${docs.length} items (replaced ${existing})`);

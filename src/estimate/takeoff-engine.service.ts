@@ -248,6 +248,51 @@ export interface PriceContextLite {
 }
 
 /**
+ * 1 dòng bảng GIÁ VẬT LIỆU (sheet 04) — giá TẠI NGUỒN kèm truy vết.
+ * `sourcePoint` + `includesTransport` là thứ khiến giá dùng lại được: cùng "Cát vàng"
+ * có 600.000↔800.000đ/m³ tuỳ bãi, và giá mỏ CHƯA gồm cước vận chuyển. Thiếu 2 field
+ * này thì con số vô nghĩa (không biết mỏ nào, bao nhiêu km).
+ */
+/** Layout sheet 04 — cột "Nguồn (mỏ/NCC)" và "Ghi chú" là bắt buộc, không phải trang trí. */
+export const RESOURCE_PRICE_HEADERS = ['STT', 'Mã', 'Tên vật liệu / nhân công / máy', 'Đơn vị', 'Đơn giá', 'Nguồn (mỏ/NCC)', 'Ghi chú'] as const;
+
+/**
+ * Dựng bảng GIÁ VẬT LIỆU cho sheet 04. Mỗi dòng PHẢI mang mỏ + trạng thái vận chuyển:
+ * giá mỏ dùng thẳng vào dự toán là THIẾU cước → Cost Summary hụt mà không lộ ra.
+ * KHÔNG gộp/không trung bình các mỏ — cùng vật liệu nhiều mỏ thì giữ nhiều dòng, QS chốt
+ * theo cự ly (chính công bố Sở XD yêu cầu vậy). PURE.
+ */
+export function buildResourcePriceRows(prices: ResourcePriceRow[]): string[][] {
+  return prices.map((p, i) => [
+    String(i + 1),
+    p.refCode ?? '',
+    p.name,
+    p.unit ?? '',
+    String(Math.round(p.price)),
+    p.sourcePoint ?? '',
+    [
+      p.includesTransport ? 'đã gồm vận chuyển' : '⚠ CHƯA gồm vận chuyển/bốc xếp',
+      'chưa VAT',
+      p.sourceConfidence === 'medium' ? 'nguồn: báo giá đại lý — cần kiểm chứng' : '',
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  ]);
+}
+
+export interface ResourcePriceRow {
+  refCode?: string;
+  name: string;
+  unit: string;
+  /** Giá tại nguồn — chưa VAT (rule `markups.vatPct`), chưa vận chuyển. */
+  price: number;
+  kind: string;
+  sourcePoint?: string;
+  includesTransport?: boolean;
+  sourceConfidence?: 'high' | 'medium';
+}
+
+/**
  * Đơn giá 1 công tác = Σ (norm × giá price_item khớp) trên TOÀN BỘ components.
  * Bất kỳ component nào không khớp giá → null (không ước lượng phần thiếu).
  */
@@ -481,6 +526,36 @@ export function engineRowKeyFromId(id: string): TakeoffRowKey | null {
   const m = /^tk_engine_[0-9a-fA-F]{24}_(.+)$/.exec(id);
   const key = m?.[1];
   return key && key in ROWKEY_GEOM_GROUP ? (key as TakeoffRowKey) : null;
+}
+
+/**
+ * Rút MÁC (bê tông/vữa) từ tên công tác. Hai nguồn viết khác nhau nhưng cùng nghĩa:
+ * định mức ghi `"M250"`, đơn giá tỉnh ghi `"Mác 200"` / `"mác 75"`. PURE.
+ */
+export function extractMac(name: string): number | null {
+  const s = (name ?? '').toLowerCase();
+  const m = /\bm[áa]c\s*(\d{2,3})\b/.exec(s) ?? /\bm(\d{2,3})\b/.exec(s);
+  const n = m ? Number(m[1]) : NaN;
+  return isFinite(n) ? n : null;
+}
+
+/**
+ * Phát hiện MÂU THUẪN QUY CÁCH giữa định mức và đơn giá tỉnh cho CÙNG một mã.
+ *
+ * CA THẬT (đo trên production sau khi nạp 191 mã TT12): định mức nói `AF.12213` = **M250**
+ * (xi măng 308,525 kg — khớp chuẩn ngành), đơn giá Hà Nội nói `AF.12213` = **Mác 200**.
+ * Lệch đúng một bậc trên cả họ AF.122. Không có văn bản gốc BXD thì KHÔNG phân xử được ai
+ * đúng — nên engine KHÔNG chọn bên nào, mà PHÁT HIỆN rồi báo, và không tự tính tiền từ
+ * hao phí lệch. Nối bừa = "Phân tích đơn giá sai cấp phối" kèm dấu TT12/2021 trông rất thật.
+ *
+ * `null` = không đối chiếu được (thiếu mác ở một bên) → coi như KHÔNG xung đột (không bịa
+ * mâu thuẫn), nhưng cũng không dùng làm bằng chứng khớp.
+ */
+export function macConflict(normName: string, priceName: string): { normMac: number; priceMac: number } | null {
+  const a = extractMac(normName);
+  const b = extractMac(priceName);
+  if (a == null || b == null || a === b) return null;
+  return { normMac: a, priceMac: b };
 }
 
 const isEngineTakeoffId = (id: string) => /^tk_engine_[0-9a-fA-F]{24}_/.test(id);
@@ -1742,6 +1817,28 @@ export class TakeoffEngineService {
     // mã + giá có nguồn, KHÔNG điền tự động mù.
     let rows = applyPricingToRows(bareRows, normCandidates, priceCtx);
 
+    // ── PHÂN TÍCH ĐƠN GIÁ (Unit Rate Analysis) ──────────────────────────────────────
+    // Dòng ĐÃ CÓ MÃ → tra hao phí VL/NC/Máy trong `norm_items` theo MÃ CHÍNH XÁC (không
+    // đoán theo tên). Trước khi dùng: đối chiếu MÁC giữa định mức và đơn giá tỉnh — hai
+    // nguồn đang lệch 1 bậc trên họ AF.122 (xem macConflict). Lệch → KHÔNG sinh phân tích,
+    // chỉ báo; thà thiếu còn hơn ra cấp phối sai kèm dấu TT12/2021.
+    const codedRows = rows.filter((r) => r.code);
+    const normByCode = await this.normComponentsByCode(codedRows.map((r) => r.code));
+    /** Mã bị chặn vì định mức ↔ đơn giá tỉnh lệch mác. */
+    const macConflicts: string[] = [];
+    const analyses: { code: string; name: string; unit: string; components: NormComponent[] }[] = [];
+    for (const r of codedRows) {
+      const norm = normByCode.get(r.code);
+      if (!norm?.components?.length) continue;
+      const priceName = (await this.unitPrices.byCode(r.code, province).catch(() => null))?.name;
+      const conflict = priceName ? macConflict(norm.name, priceName) : null;
+      if (conflict) {
+        macConflicts.push(`${r.code}: định mức M${conflict.normMac} ≠ đơn giá Mác ${conflict.priceMac}`);
+        continue;
+      }
+      analyses.push({ code: r.code, name: norm.name, unit: norm.unit, components: norm.components as NormComponent[] });
+    }
+
     // Tra ĐƠN GIÁ từ web cho các dòng CHƯA có giá tỉnh chính thống (grounded search,
     // chống bịa 3 rào, gắn cờ "cần kiểm chứng" + link nguồn). Chỉ khi Edit bật.
     let webPricedCount = 0;
@@ -1793,6 +1890,23 @@ export class TakeoffEngineService {
     // (dòng mọi bản). Tách hàm pure để test khoá hành vi — xem takeoff-merge.spec.
     const { staleIds, mergedRows } = planEngineTakeoffMerge(state.takeoff ?? [], input.drawingId, rows);
     const cleanupActions: Action[] = staleIds.map((id) => ({ type: 'delete_takeoff', id }));
+
+    // PHÂN TÍCH ĐƠN GIÁ vào state → `analyses` (model đã có sẵn) → sheet 03 + compute()
+    // tính Cost Summary. `ref` phải là refCode tài nguyên để nối được bảng giá VL/NC/Máy.
+    const analysisActions: Action[] = analyses.map((a) => ({
+      type: 'upsert_analysis',
+      id: `an_engine_${a.code}`,
+      code: a.code,
+      name: a.name,
+      unit: a.unit,
+      components: a.components.map((c) => ({
+        kind: (c.kind ?? 'material') as any,
+        ref: c.refCode ?? c.name,
+        name: c.name,
+        unit: c.unit,
+        norm: c.norm,
+      })),
+    })) as Action[];
 
     const takeoffActions: Action[] = rows.map((r) => ({
       type: 'upsert_takeoff',
@@ -1861,6 +1975,7 @@ export class TakeoffEngineService {
     const actions: Action[] = [
       ...cleanupActions,
       ...takeoffActions,
+      ...analysisActions,
       ...mirrorActions,
     ];
 
@@ -2003,6 +2118,36 @@ export class TakeoffEngineService {
           `${openingRows.map((r) => `${r.name}: ${r.quantity} cái`).join(' · ')}. Engine KHÔNG suy m² từ mặt bằng: ` +
           `bbox cửa trên mặt bằng là bề rộng × cung quét cánh (hoặc × bề dày tường), không phải diện tích cánh; ` +
           `m² = rộng × cao mà CHIỀU CAO không có trong mặt bằng. Điền m² từ bảng thống kê cửa của bản vẽ.`,
+      });
+    }
+    // PHÂN TÍCH ĐƠN GIÁ: báo cái sinh được…
+    if (analyses.length > 0) {
+      findings.push({
+        id: 'takeoff-engine-unit-rate-analysis',
+        severity: 'info',
+        area: 'unitPrice',
+        title: `Đã lập phân tích đơn giá cho ${analyses.length} công tác (hao phí VL/NC/Máy)`,
+        detail:
+          `Hao phí lấy theo MÃ CHÍNH XÁC từ định mức TT12/2021 (không đoán theo tên):\n` +
+          analyses
+            .map((a) => {
+              const by = (k: string) => a.components.filter((c) => (c.kind ?? 'material') === k).length;
+              return `· ${a.code} ${a.name.slice(0, 48)} — ${by('material')} vật liệu, ${by('labor')} nhân công, ${by('machine')} máy`;
+            })
+            .join('\n'),
+      });
+    }
+    // …và cái CHẶN vì hai nguồn mâu thuẫn (không tự chọn bên nào).
+    if (macConflicts.length > 0) {
+      findings.push({
+        id: 'takeoff-engine-mac-conflict',
+        severity: 'warn',
+        area: 'unitPrice',
+        title: `⚠ ${macConflicts.length} mã: định mức và đơn giá tỉnh ghi MÁC khác nhau — chưa lập phân tích đơn giá`,
+        detail:
+          `Cùng một mã nhưng hai nguồn ghi mác lệch nhau, engine KHÔNG tự chọn bên nào (chọn sai = ra sai ` +
+          `cấp phối mà vẫn đóng dấu "TT12/2021"):\n${macConflicts.map((s) => `· ${s}`).join('\n')}\n` +
+          `Cần QS đối chiếu văn bản gốc rồi chốt. Khối lượng và đơn giá trọn gói của các dòng này VẪN dùng được.`,
       });
     }
     // Minh bạch phạm vi: liệt kê nhóm công tác còn thiếu so với checklist QS.

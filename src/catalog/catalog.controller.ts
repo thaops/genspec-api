@@ -67,12 +67,26 @@ export class CatalogController {
   @UseInterceptors(FileInterceptor('file'))
   importPrices(
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { province: string; effectiveDate: string; sourceDoc?: string; overwrite?: string | boolean },
+    @Body()
+    body: {
+      province: string;
+      effectiveDate: string;
+      sourceDoc?: string;
+      overwrite?: string | boolean;
+      // "true" = giá đã gồm vận chuyển tới chân công trình. Mặc định FALSE (giá tại mỏ).
+      includesTransport?: string | boolean;
+      sourceConfidence?: 'high' | 'medium';
+    },
     @Query('dryRun') dryRun?: string,
     @Query('overwrite') overwrite?: string,
   ) {
     if (!file?.buffer) throw new BadRequestException('Thiếu file Excel (field "file")');
     const doOverwrite = overwrite === 'true' || body.overwrite === true || body.overwrite === 'true';
-    return this.importer.importPrices(file.buffer, body, dryRun === 'true', doOverwrite);
+    return this.importer.importPrices(
+      file.buffer,
+      { ...body, includesTransport: body.includesTransport === true || body.includesTransport === 'true' },
+      dryRun === 'true',
+      doOverwrite,
+    );
   }
 }
