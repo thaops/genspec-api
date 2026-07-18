@@ -42,6 +42,36 @@ describe('discipline gate (V1)', () => {
     expect(DISCIPLINE_GATED_TYPES.has(o.objectType)).toBe(false); // không nằm trong tập bị gate
   });
 
+  // V2 — loại hình chiếu mặt đứng/mặt cắt khỏi đo.
+  const wallOn = (layer: string) =>
+    ({ stableId: 'w', layer, rawType: 'LWPOLYLINE', boundingBox: { x: 0, y: 0, w: 5000, h: 220 }, geometry: [[0, 0], [5000, 0], [5000, 220], [0, 220], [0, 0]] }) as any;
+
+  it('KT: tường mặt đứng / mặt cắt → symbol (không đếm khối lượng)', () => {
+    expect(det.detect([wallOn('Tường bao mặt đứng')], [], undefined, 'KT')[0].objectType).toBe('symbol');
+    expect(det.detect([wallOn('5- Cắt tường')], [], undefined, 'KT')[0].objectType).toBe('symbol');
+  });
+
+  it('KT: tường mặt bằng (layer "Tuong") vẫn là wall', () => {
+    expect(det.detect([wallOn('Tuong')], [], undefined, 'KT')[0].objectType).toBe('wall');
+  });
+
+  it('KC: mặt cắt KHÔNG bị loại (là cơ sở đo tiết diện) — cột mặt cắt giữ nguyên', () => {
+    // "Cắt cột" trên bản KC phải giữ (không thành symbol vì section rule chỉ áp cho KT).
+    const colSection = { stableId: 'c', layer: 'Cắt cột', rawType: 'LWPOLYLINE', boundingBox: { x: 0, y: 0, w: 300, h: 300 }, geometry: [[0, 0], [300, 0], [300, 300], [0, 300], [0, 0]] } as any;
+    const o = det.detect([colSection], [], undefined, 'KC')[0];
+    expect(o.objectType).not.toBe('symbol');
+  });
+
+  it('mặt đứng bị loại cho MỌI bộ môn (kể cả KC)', () => {
+    expect(det.detect([wallOn('Mặt đứng nhà')], [], undefined, 'KC')[0].objectType).toBe('symbol');
+  });
+
+  it('"cát" (sand) KHÔNG bị nhầm là mặt cắt', () => {
+    // Layer chỉ chứa "CAT" đơn (cát) — không phải "cắt <cấu kiện>".
+    const o = det.detect([wallOn('Hatch cát nền')], [], undefined, 'KT')[0];
+    expect(o.detection.reason).not.toContain('mặt cắt');
+  });
+
   it('consistency: mọi type allowed đều nằm trong tập gated (không có type "allowed" mà quên gate)', () => {
     for (const set of Object.values(DISCIPLINE_ALLOWED_TYPES)) {
       for (const t of set) {

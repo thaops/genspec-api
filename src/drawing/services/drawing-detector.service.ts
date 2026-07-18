@@ -162,6 +162,24 @@ const ANNOTATION_LAYER_RE =
   /KIHIEU|KYHIEU|GHICHU|CHUTHICH|CHIDAN|THUYETMINH|KICHTHUOC|COTATION|TIEUDE|BORDER|KHUNGBO|KHUNGTEN|TITLE|LEGEND|CHITIET|CHU-?THICH/;
 
 /**
+ * LỚP HÌNH CHIẾU KHÔNG PHẢI MẶT BẰNG (V2) — mặt đứng / mặt cắt / chi tiết cắt cấu kiện.
+ *
+ * Root cause đo thật (bản KT F550): 713 "tường" nhưng chỉ ~18 là tường MẶT BẰNG (layer
+ * "Tuong"); 197 nằm layer "Tường bao mặt đứng" (ELEVATION), 367 layer "Cắt tường" (SECTION).
+ * Engine đo TẤT CẢ như tường mặt bằng → diện tích trát phồng ~50×. Mặt đứng/mặt cắt là HÌNH
+ * CHIẾU của cùng vật thể, KHÔNG phải khối lượng cộng thêm → loại khỏi đo (→ 'symbol').
+ *
+ * Quy ước CAD Việt Nam CHUNG (không gắn 1 bản): "mặt đứng", "mặt cắt", "cắt <cấu kiện>".
+ * "CAT" đứng một mình KHÔNG match (tránh nhầm "cát" = sand) — chỉ "CAT" + tên cấu kiện.
+ * "chi tiết" đã do ANNOTATION_LAYER_RE lo.
+ */
+// MẶT ĐỨNG (elevation): hình chiếu đứng — KHÔNG BAO GIỜ là khối lượng, loại cho MỌI bộ môn.
+const ELEVATION_LAYER_RE = /MAT\s*DUNG|ELEVATION/;
+// MẶT CẮT / CẮT cấu-kiện (section): với KT là hình chi tiết (loại); với KC là CƠ SỞ ĐO tiết
+// diện cột/dầm (GIỮ). Nên section chỉ loại khi bản là KT. "CAT" đơn KHÔNG match (nhầm "cát").
+const SECTION_LAYER_RE = /MAT\s*CAT|SECTION|\bCAT[\s_-]*(TUONG|COT|DAM|SAN|MONG|MAI|VACH)/;
+
+/**
  * Tier 1c — layer đặt tên bằng CỤM TỪ tiếng Việt có dấu cách: "ỐNG CẤP", "CẤP THOÁT NƯỚC".
  * `LAYER_TYPE_MAP` (exact/`-`/token) không khớp được vì key là 1 từ (`CAP-NUOC`, `ONGNUOC`).
  *
@@ -403,7 +421,7 @@ export class DrawingDetectorService {
     unitFactor?: number,
     discipline?: string,
   ): DetectionResult {
-    return this.gateDiscipline(this.classifyRaw(obj, stats, overrides, unitFactor), discipline);
+    return this.gateDiscipline(this.classifyRaw(obj, stats, overrides, unitFactor, discipline), discipline);
   }
 
   /**
@@ -429,6 +447,7 @@ export class DrawingDetectorService {
     stats?: { medianArea: number; medianLength: number },
     overrides?: Map<string, LayerOverride>,
     unitFactor?: number,
+    discipline?: string,
   ): DetectionResult {
     // 0. Per-project layer override (Tier 2) — user truth beats every heuristic.
     if (overrides?.size) {
@@ -458,6 +477,17 @@ export class DrawingDetectorService {
     // khống. Chú thích luôn thắng: thà thiếu còn hơn sai.
     if (ANNOTATION_LAYER_RE.test(layerUpper)) {
       return this.single('symbol', 0.9, 'layer_map', `Layer "${obj.layer}" là chú thích/ký hiệu → không tính cấu kiện`, false);
+    }
+
+    // 0d. Layer MẶT ĐỨNG (hình chiếu đứng) → loại cho MỌI bộ môn. Chạy TRƯỚC LAYER_TYPE_MAP:
+    // "Tường bao mặt đứng" chứa token "TUONG" nên nếu không chặn sẽ bị đếm thành tường (phồng).
+    if (ELEVATION_LAYER_RE.test(layerUpper)) {
+      return this.single('symbol', 0.9, 'layer_map', `Layer "${obj.layer}" là mặt đứng → hình chiếu, không tính khối lượng`, false);
+    }
+    // 0e. Layer MẶT CẮT chỉ loại với bản KT (hình chi tiết). Bản KC thì mặt cắt LÀ cơ sở đo
+    // tiết diện cột/dầm → GIỮ. "Cắt tường" trên bản kiến trúc = 367 entity phồng ở F550.
+    if (discipline === 'KT' && SECTION_LAYER_RE.test(layerUpper)) {
+      return this.single('symbol', 0.9, 'layer_map', `Layer "${obj.layer}" là mặt cắt/chi tiết trên bản kiến trúc → không tính khối lượng mặt bằng`, false);
     }
 
     // 1. Layer name — exact, prefix, or suffix match (case-insensitive)
