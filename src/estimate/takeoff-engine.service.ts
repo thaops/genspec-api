@@ -42,6 +42,8 @@ export interface EngineDrawingObject {
   boundingBox: { x?: number; y?: number; w: number; h: number };
   /** Tier 1/2.5: classification unresolved (multi-candidate) — must not be counted. */
   ambiguous?: boolean;
+  /** Loại entity CAD gốc (LINE/LWPOLYLINE/HATCH…) — cần để tách nét đơn khỏi mặt cắt kín. */
+  rawType?: string;
 }
 
 /**
@@ -225,6 +227,8 @@ export interface TakeoffEngineRow {
   webSourced?: boolean;
   /** true = ĐƠN GIÁ tra từ web (không phải công bố giá tỉnh) — cần kiểm chứng. */
   pricedFromWeb?: boolean;
+  /** true = ĐƠN GIÁ do LLM ƯỚC LƯỢNG (Tier 5, không nguồn) — số phao cuối, PHẢI kiểm chứng. */
+  estimated?: boolean;
   /**
    * Bản vẽ nguồn của dòng (truy vết). Dòng MỚI của bản đang bóc để trống (caller dùng
    * `input.drawingId`); dòng GỘP từ bản khác thì suy từ id takeoff.
@@ -353,6 +357,51 @@ export function unitPriceScale(candUnit?: string, rowUnit?: string): number | nu
     if (isFinite(n) && n > 0) return 1 / n;
   }
   return null;
+}
+
+/** Nhãn nguồn cho giá Tier 5 (LLM ước lượng) — cố định để guard/FE nhận diện không nhầm. */
+export const ESTIMATED_PRICE_SOURCE = 'ƯỚC LƯỢNG — chưa kiểm chứng';
+/** Trần điểm tin cậy khi dự toán có ≥1 dòng giá ước lượng (Tier 5). */
+export const ESTIMATED_PRICE_SCORE_CAP = 45;
+
+/** 1 giá ước lượng Tier 5 cho một rowKey (số do LLM đưa, đã parse). */
+export interface EstimatedPrice {
+  key: TakeoffRowKey;
+  unitPrice: number;
+  /** Cơ sở ước lượng LLM nêu (vd "mặt bằng giá thị trường 2026") — ghi vào diễn giải. */
+  basis?: string;
+}
+
+/**
+ * TIER 5 — phao cuối "LUÔN CÓ GIÁ": điền đơn giá ƯỚC LƯỢNG cho dòng VẪN null sau Tier 1-4
+ * (DB tỉnh → tỉnh khác → định mức×giá → web grounded). Số này KHÔNG có nguồn kiểm chứng —
+ * đây là ngoại lệ vision cho phép theo yêu cầu người dùng ("giá luôn có, không null"), nên
+ * bắt buộc:
+ *   · source = ESTIMATED_PRICE_SOURCE (nhãn cố định, không giả官 nguồn chính thống),
+ *   · cờ `estimated: true` để FE/guard tô khác + validation hạ trần điểm,
+ *   · chỉ áp cho dòng thật sự chưa có giá và có số ước lượng hợp lệ (>0).
+ *
+ * PURE — số ước lượng do caller (LLM) cấp; hàm này chỉ LẮP RÁP + ĐÁNH DẤU, test được. */
+export function applyEstimatedFallback(
+  rows: TakeoffEngineRow[],
+  estimates: Map<TakeoffRowKey, EstimatedPrice>,
+): { rows: TakeoffEngineRow[]; estimatedCount: number } {
+  let estimatedCount = 0;
+  const out = rows.map((r) => {
+    if (r.unitPrice != null) return r; // đã có giá thật (Tier 1-4) → không đụng
+    const e = estimates.get(r.key);
+    if (!e || !(e.unitPrice > 0)) return r; // không có số hợp lệ → vẫn để trống, KHÔNG bịa 0
+    estimatedCount++;
+    return {
+      ...r,
+      unitPrice: Math.round(e.unitPrice),
+      totalPrice: Math.round(e.unitPrice * r.quantity),
+      source: ESTIMATED_PRICE_SOURCE,
+      estimated: true,
+      note: `${r.note} · Đơn giá ƯỚC LƯỢNG${e.basis ? ` (${e.basis})` : ''} — chưa đối chiếu công bố giá, cần kiểm chứng.`,
+    };
+  });
+  return { rows: out, estimatedCount };
 }
 
 export function applyPricingToRows(
@@ -1041,6 +1090,94 @@ export function describeClusters(clusters: ObjectCluster[], factor: number, max 
     .join('\n');
 }
 
+/**
+ * Vùng bóc của một cụm, nới thêm biên an toàn.
+ *
+ * bbox của cụm ôm khít tâm-bbox các đối tượng ĐO ĐƯỢC (`objectClusters` chỉ nhìn
+ * MEASURED_TYPES). Dùng khít sẽ rụng mất hatch sàn / lỗ mở / đường ống nằm sát mép —
+ * chúng không tham gia clustering nhưng vẫn thuộc mặt bằng đó. Nới 1m mỗi phía (quy về
+ * đơn vị vẽ) đủ ôm trọn mà chưa chạm cụm kế bên (khoảng cách giữa 2 cụm ≥ eps = 25m). PURE.
+ */
+export function clusterRegion(
+  c: ObjectCluster,
+  factor: number,
+  padMeters = 1,
+): { x: number; y: number; w: number; h: number } {
+  const pad = padMeters / (factor || 1);
+  return { x: c.x - pad, y: c.y - pad, w: c.w + pad * 2, h: c.h + pad * 2 };
+}
+
+/** Lọc đối tượng theo TÂM bbox nằm trong vùng — cùng luật với `region` của `run()`. PURE. */
+export function objectsInRegion<T extends { boundingBox?: { x?: number; y?: number; w?: number; h?: number } }>(
+  objects: T[],
+  r: { x: number; y: number; w: number; h: number },
+): T[] {
+  return objects.filter((o) => {
+    const b = (o as any).boundingBox ?? {};
+    const cx = Number(b.x ?? 0) + Number(b.w ?? 0) / 2;
+    const cy = Number(b.y ?? 0) + Number(b.h ?? 0) / 2;
+    return isFinite(cx) && isFinite(cy) && cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h;
+  });
+}
+
+/** Một cụm đã bóc thử — đủ để QS nhìn số mà chọn, chưa ghi gì vào Workbook. */
+export interface ClusterPreview {
+  /** 1-based, khớp số thứ tự trong `describeClusters`. */
+  id: number;
+  /** Truyền thẳng lại vào `POST /takeoff-engine` dưới khoá `region` để bóc đúng cụm này. */
+  region: { x: number; y: number; w: number; h: number };
+  count: number;
+  byType: Record<string, number>;
+  widthM: number;
+  heightM: number;
+  /** Mô tả thành phần đo được — KHÔNG kết luận "đây là mặt bằng tầng 1". */
+  hint: string;
+  /** Khối lượng nếu bóc riêng cụm này (hình học thuần, chưa tra mã/giá). */
+  lines: { name: string; unit: string; quantity: number }[];
+}
+
+/**
+ * Bóc THỬ từng cụm để QS so số rồi chọn, thay vì nhận một con số tổng đã cộng dồn mọi
+ * cụm (đo trên production: 4 bản THUC HANH 2 → tường 28.594 m² / 6.290 m³ cho một trạm
+ * xá ~315 m² sàn, vì model space có 6 cụm mặt bằng/mặt đứng/chi tiết cạnh nhau).
+ *
+ * Chỉ chạy hình học (`computeTakeoffRows` + `computeMepRows` đều PURE) — KHÔNG tra mã,
+ * KHÔNG tra giá, KHÔNG gọi web: preview là để chọn cụm, không phải để ghi vào Workbook,
+ * và nhân số cụm lên sẽ đốt sạch quota grounding. PURE.
+ */
+export function clusterPreviews(
+  objects: EngineDrawingObject[],
+  clusters: ObjectCluster[],
+  factor: number,
+  assumptions: TakeoffAssumptions,
+  allowedKeys?: Set<TakeoffRowKey> | null,
+  max = 8,
+): ClusterPreview[] {
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  return clusters.slice(0, max).map((c, i) => {
+    const region = clusterRegion(c, factor);
+    const inside = objectsInRegion(objects as any[], region) as EngineDrawingObject[];
+    const lines = [
+      ...computeTakeoffRows(inside, factor, assumptions, {}, allowedKeys),
+      ...computeMepRows(inside as any[], factor, allowedKeys),
+    ].map((r) => ({ name: r.name, unit: r.unit, quantity: r.quantity }));
+    const hint = Object.entries(c.byType)
+      .sort((a, b) => b[1] - a[1])
+      .map(([t, n]) => `${n} ${TYPE_LABELS_VI[t] ?? t}`)
+      .join(', ');
+    return {
+      id: i + 1,
+      region,
+      count: c.count,
+      byType: c.byType,
+      widthM: r1(c.w * factor),
+      heightM: r1(c.h * factor),
+      hint,
+      lines,
+    };
+  });
+}
+
 /** Wrapper giữ nguyên chữ ký cũ (chỉ cần số cụm + span). */
 export function countObjectClusters(
   objects: EngineDrawingObject[],
@@ -1064,6 +1201,88 @@ export const MIN_SECTION_M = 0.08;
  * (cửa vẽ dạng khối chữ nhật cắt ngang tường, không vẽ cung quét). Ngưỡng đó xoá cửa thật.
  * Cột/dầm khác hẳn: chúng là MẶT CẮT nên cạnh nhỏ = tiết diện thật ⇒ ngưỡng có nghĩa.
  */
+/**
+ * Cấu kiện KC vẽ bằng NÉT ĐƠN (rawType LINE) trên layer đã KHẲNG ĐỊNH type — netDAM/netMONG.
+ *
+ * detector để `ambiguous` cho những nét này vì LINE không có mặt cắt kín để lấy tiết diện;
+ * NHƯNG tên layer là bằng chứng đủ mạnh: tier 1b chỉ gán beam/footing cho một LINE khi
+ * layer chứa token DAM/BEAM/MONG… (hình học LINE đơn không tự suy ra type KC). Ta TIN type
+ * đó và đo dầm giống hệt cách đo tường: tổng chiều dài nét × tiết diện GIẢ ĐỊNH.
+ *
+ * - beam: mỗi nét coi = 1 TIM dầm (giả định công khai trong ghi chú — nếu bản vẽ dùng nét
+ *   đôi/mép thì số ra gấp đôi, QS thấy và sửa) → L×D×W (BT), L×(2D+W) (ván khuôn).
+ * - footing/pile: một nét đơn KHÔNG cho biết diện tích đáy móng / tiết diện cọc ⇒ KHÔNG đo,
+ *   chỉ đếm để liệt kê. Thà thiếu còn hơn bịa (đúng bài học "12 móng thật hoá ra toàn LINE").
+ *
+ * Chỉ nhận rawType==='LINE': mặt cắt kín (LWPOLYLINE/HATCH) đã được `computeTakeoffRows` đo;
+ * beam suy từ HÌNH HỌC (LWPOLYLINE aspect cao trên layer KHÔNG khẳng định) cũng không lọt
+ * vào đây, tránh đo trùng. PURE.
+ */
+export function kcLinearRows(
+  objects: EngineDrawingObject[],
+  factor: number,
+  assumptions: TakeoffAssumptions,
+  allowedKeys?: Set<TakeoffRowKey> | null,
+): { rows: TakeoffEngineRow[]; measured: Set<EngineDrawingObject>; unmeasuredLinear: Record<string, number> } {
+  const isLine = (o: EngineDrawingObject) => (o.rawType ?? '').toUpperCase() === 'LINE';
+  const allow = (k: TakeoffRowKey) => !allowedKeys || allowedKeys.has(k);
+  const rows: TakeoffEngineRow[] = [];
+  const measured = new Set<EngineDrawingObject>();
+  const unmeasuredLinear: Record<string, number> = {};
+
+  // CHỈ lấy nét đơn AMBIGUOUS — dầm nét đơn non-ambiguous (tiết diện đủ lớn) đã được
+  // computeTakeoffRows đo rồi; lấy lại ở đây = đếm trùng (đo thật: 17 dầm "Thay Dam"
+  // countable + 12 dầm "netDAM" ambiguous → nếu không lọc sẽ cộng cả 29).
+  const beams = objects.filter((o) => o.type === 'beam' && isLine(o) && o.ambiguous === true);
+  if (beams.length > 0) {
+    const totalLen = beams.reduce((s, o) => s + measure(o, factor).length, 0);
+    const D = assumptions.beamDepth;
+    const W = ASSUMED_BEAM_WIDTH;
+    const mk = (key: TakeoffRowKey, unit: string, q: number, note: string) => {
+      const quantity = round3(q);
+      if (!allow(key) || quantity <= 0) return;
+      rows.push({ key, group: 'beam', boqGroup: BOQ_GROUP[key], code: '', name: DEFAULT_NAMES[key], unit, quantity, note, source: '—' });
+    };
+    const lead = `${beams.length} nét dầm trên layer khẳng định (netDAM…), tổng dài ${f3(totalLen)}m`;
+    mk('beam_concrete', 'm3', totalLen * D * W,
+      `${lead} × ${f3(D)}×${f3(W)}m = ${f3(round3(totalLen * D * W))} m³ (giả định mỗi nét = 1 tim dầm)`);
+    mk('beam_formwork', 'm2', totalLen * (D * 2 + W),
+      `${lead} × (${f3(D)}×2 + ${f3(W)})m = ${f3(round3(totalLen * (D * 2 + W)))} m² (giả định mỗi nét = 1 tim dầm)`);
+    if (rows.length) for (const b of beams) measured.add(b);
+  }
+
+  // Móng/cọc vẽ nét đơn AMBIGUOUS: đếm để liệt kê "cần bổ sung tiết diện", KHÔNG đo.
+  // (non-ambiguous có mặt cắt kín thì computeTakeoffRows đã đo.)
+  for (const o of objects) {
+    if (!isLine(o) || o.ambiguous !== true) continue;
+    if (o.type === 'footing' || o.type === 'pile') {
+      unmeasuredLinear[o.type] = (unmeasuredLinear[o.type] ?? 0) + 1;
+    }
+  }
+  return { rows, measured, unmeasuredLinear };
+}
+
+/**
+ * Gộp các dòng CÙNG rowKey thành một — cộng khối lượng, nối diễn giải. Cần vì cùng một
+ * công tác (vd `beam_concrete`) có thể đến từ 2 nguồn đo khác nhau: mặt cắt kín
+ * (computeTakeoffRows) và nét đơn theo layer (kcLinearRows). Không gộp thì hai dòng cùng
+ * rowKey → cùng id action `tk_engine_<drawingId>_<rowKey>` → dòng sau đè dòng trước, MẤT
+ * khối lượng. rowKey là đơn vị 1 dòng BOQ nên gộp theo key là đúng ngữ nghĩa. PURE.
+ */
+export function mergeRowsByKey(rows: TakeoffEngineRow[]): TakeoffEngineRow[] {
+  const byKey = new Map<string, TakeoffEngineRow>();
+  for (const r of rows) {
+    const prev = byKey.get(r.key);
+    if (!prev) {
+      byKey.set(r.key, { ...r });
+      continue;
+    }
+    prev.quantity = round3(prev.quantity + r.quantity);
+    prev.note = `${prev.note}; + ${r.note}`;
+  }
+  return [...byKey.values()];
+}
+
 /** true nếu object là cấu kiện KC có tiết diện đủ lớn để đo (không phải ký hiệu). */
 export function isRealSection(obj: EngineDrawingObject, factor: number): boolean {
   if (!SECTION_TYPES.has(obj.type)) return true;
@@ -1711,6 +1930,74 @@ export class TakeoffEngineService {
     }
     input = { ...input, unitsPerDrawingUnit: factor };
 
+    // ===== CHỌN CỤM (chặn trước khi cộng dồn) =====
+    //
+    // File DWG dân dụng đặt nhiều bản vẽ con trong 1 model space. "Bóc toàn bộ" cộng hết
+    // các cụm lại → số phồng. Trước đây engine chỉ CẢNH BÁO rồi vẫn xuất số tổng ra
+    // Workbook; QS apply nhầm là hỏng bảng. Nay: nhiều cụm mà chưa chọn vùng ⇒ KHÔNG sinh
+    // action nào, trả preview từng cụm kèm `region` để chọn rồi bóc lại.
+    //
+    // Chặn ở ĐÂY (ngay sau khi chốt factor, trước norm/web/price lookup) vì preview không
+    // cần mã cũng không cần giá — chạy tiếp sẽ đốt quota grounding cho một kết quả sắp bị
+    // vứt đi.
+    const preClusters = input.region
+      ? { clusters: [] as ObjectCluster[], spanM: 0 }
+      : objectClusters(objects as unknown as EngineDrawingObject[], factor);
+    if (!input.region && preClusters.clusters.length >= 2) {
+      const previews = clusterPreviews(
+        objects as unknown as EngineDrawingObject[],
+        preClusters.clusters,
+        factor,
+        input.assumptions,
+        allowedKeys,
+      );
+      return {
+        needsClusterPick: true,
+        clusters: previews,
+        clusterCount: preClusters.clusters.length,
+        spanM: Math.round(preClusters.spanM),
+        // Không action nào: số tổng của nhiều cụm KHÔNG được phép chạm Workbook.
+        actions: [] as Action[],
+        message: [
+          `Bản vẽ này có ${preClusters.clusters.length} cụm trong model space (trải ~${Math.round(preClusters.spanM)}m) — thường là mặt bằng các tầng, mặt đứng và chi tiết đặt cạnh nhau.`,
+          `Bóc gộp tất cả sẽ cộng dồn thành số vô nghĩa, nên CHƯA ghi gì vào Workbook. Chọn cụm cần bóc rồi bóc lại:`,
+          '',
+          describeClusters(preClusters.clusters, factor),
+          '',
+          `Khối lượng nếu bóc riêng từng cụm (hình học thuần, chưa tra mã/giá):`,
+          ...previews.map((p) =>
+            `· Cụm ${p.id} (~${p.widthM}×${p.heightM}m): ` +
+            (p.lines.length
+              ? p.lines.map((l) => `${l.name} ${l.quantity} ${l.unit}`).join(' · ')
+              : 'không đo được dòng nào'),
+          ),
+        ].join('\n'),
+        thinking: [
+          `Đọc ${objects.length} đối tượng, gom được ${preClusters.clusters.length} cụm rời nhau (eps 25m).`,
+          `Bóc thử riêng từng cụm để so sánh — chưa tra mã, chưa tra giá, chưa sinh action.`,
+        ],
+        sources: [],
+        trace: [],
+        preview: { counts: [], costBefore: 0, costAfter: 0, costDelta: 0, diffs: [] },
+        validation: {
+          status: 'warning' as const,
+          score: 50,
+          findings: [
+            {
+              id: 'takeoff-engine-cluster-pick',
+              severity: 'warn' as const,
+              area: 'missing' as const,
+              title: `Cần chọn cụm bản vẽ (${preClusters.clusters.length} cụm)`,
+              detail:
+                `Model space chứa ${preClusters.clusters.length} cụm rời nhau. Engine không đoán cụm nào là mặt bằng cần bóc — ` +
+                `chọn 1 cụm (hoặc kéo vùng thủ công) rồi bóc lại. Chưa có dòng nào được ghi.`,
+            },
+          ],
+          consistency: [],
+        },
+      };
+    }
+
     // Bắt đầu RỖNG: engine KHÔNG tự chọn mã. Mã chỉ đến từ (a) web lookup đã qua
     // `verifyCodeInBook`, hoặc (b) QS chốt từ gợi ý `NORM_FAMILIES`. Hao phí định mức
     // tra sau, theo MÃ CHÍNH XÁC (xem normComponentsByCode).
@@ -1794,10 +2081,14 @@ export class TakeoffEngineService {
 
     // Hình học (KT/KC) + MEP (đếm thiết bị / đo tuyến). MEP đi đường riêng vì cách đo
     // khác hẳn: không suy từ bbox/hatch mà đếm block + đo polyline (mep-takeoff.ts).
-    const bareRows = [
+    // Cấu kiện KC vẽ bằng nét đơn (netDAM/netMONG) — computeTakeoffRows bỏ qua vì ambiguous.
+    // Tin theo TÊN LAYER: đo dầm nét đơn, đếm móng/cọc nét đơn để liệt kê (xem kcLinearRows).
+    const kcLinear = kcLinearRows(objects as any, input.unitsPerDrawingUnit, input.assumptions, allowedKeys);
+    const bareRows = mergeRowsByKey([
       ...computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys),
       ...computeMepRows(objects as any, input.unitsPerDrawingUnit, allowedKeys),
-    ];
+      ...kcLinear.rows,
+    ]);
 
     // Giá THẬT từ price_set tỉnh mới nhất khớp projectInfo.location — không có thì cột giá trống.
     const priceCtxRaw = await this.catalog
@@ -1873,16 +2164,69 @@ export class TakeoffEngineService {
       }
     }
 
-    // Phát hiện DWG chứa nhiều bản vẽ con (nhiều mặt bằng/mặt đứng/chi tiết cạnh
-    // nhau trong 1 model space). Chỉ cảnh báo khi KHÔNG bóc theo vùng — vì lúc đó
-    // "bóc toàn bộ" cộng dồn tất cả cụm → khối lượng phồng.
-    const clusterList = input.region
-      ? { clusters: [] as ObjectCluster[], spanM: 0 }
-      : objectClusters(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit);
+    // ===== TIER 2 — mượn giá CÙNG MÃ từ tỉnh khác =====
+    // Dòng ĐÃ có mã hợp lệ nhưng tỉnh dự án chưa nạp giá → tra mã đó ở BẤT KỲ tỉnh nào trong
+    // unit_prices. Giá vẫn có nguồn thật (sourceDoc), chỉ khác vùng → đánh dấu "giá tỉnh X,
+    // KHÔNG phải tỉnh dự án — cần đối chiếu". Không nhân hệ số bịa (DB không có bảng CPI).
+    let borrowedProvinceCount = 0;
+    {
+      const need = rows.filter((r) => r.code && r.unitPrice == null);
+      if (need.length > 0) {
+        const borrowed = await Promise.all(
+          need.map(async (r) => {
+            const hit = await this.unitPrices.byCode(r.code, undefined).catch(() => null);
+            // Bỏ nếu chính là tỉnh dự án (đã thử ở Tier 1) hoặc lệch đơn vị không quy đổi được.
+            if (!hit || (province && hit.province === province)) return null;
+            const scale = unitPriceScale(hit.unit, r.unit);
+            if (scale == null || !(hit.unitPrice > 0)) return null;
+            return { key: r.key, unitPrice: Math.round(hit.unitPrice * scale), prov: hit.province, doc: hit.sourceDoc };
+          }),
+        );
+        const byKey = new Map(borrowed.filter(Boolean).map((b) => [b!.key, b!]));
+        rows = rows.map((r) => {
+          const b = r.unitPrice == null ? byKey.get(r.key) : undefined;
+          if (!b) return r;
+          borrowedProvinceCount++;
+          return {
+            ...r,
+            unitPrice: b.unitPrice,
+            totalPrice: Math.round(b.unitPrice * r.quantity),
+            source: `${b.doc} — giá tỉnh ${b.prov} (KHÔNG phải tỉnh dự án), cần đối chiếu`,
+          };
+        });
+      }
+    }
+
+    // ===== TIER 5 — ước lượng LLM (phao cuối "luôn có giá") =====
+    // Áp cho MỌI dòng vẫn null sau Tier 1-4 (kể cả dòng CHƯA có mã — khác web lookup vốn
+    // chỉ tra dòng đã có mã). Cờ PRICE_ESTIMATE_FALLBACK (mặc định bật) + editPermission.
+    // Số ước lượng KHÔNG nguồn → applyEstimatedFallback dán nhãn ƯỚC LƯỢNG + hạ trần điểm.
+    let estimatedCount = 0;
+    const PRICE_ESTIMATE_ON = process.env.PRICE_ESTIMATE_FALLBACK !== 'off';
+    if (PRICE_ESTIMATE_ON && input.editPermission && this.priceWeb.estimateEnabled) {
+      const need = rows.filter((r) => r.unitPrice == null);
+      if (need.length > 0) {
+        const est = await this.priceWeb.estimatePricesBatch(
+          need.map((r) => ({ key: r.key, workName: r.name, unit: r.unit })),
+          state.projectInfo?.location,
+        );
+        const estMap = new Map<TakeoffRowKey, EstimatedPrice>();
+        for (const r of need) {
+          const e = est.get(r.key);
+          if (e) estMap.set(r.key, { key: r.key, unitPrice: e.unitPrice, basis: e.basis });
+        }
+        const applied = applyEstimatedFallback(rows, estMap);
+        rows = applied.rows;
+        estimatedCount = applied.estimatedCount;
+      }
+    }
+
+    // Tới được đây thì chắc chắn KHÔNG còn ca nhiều cụm chưa chọn — nhánh đó đã return
+    // sớm ở trên (needsClusterPick). Còn lại: bóc theo vùng, hoặc bản vẽ chỉ có 1 cụm.
+    // `openingVsFloorFinding` vẫn cần số cụm để không báo động giả.
     const clusterInfo = input.region
       ? { clusters: 1, spanM: 0 }
-      : { clusters: clusterList.clusters.length, spanM: clusterList.spanM };
-    const multiDrawing = clusterInfo.clusters >= 2;
+      : { clusters: preClusters.clusters.length, spanM: preClusters.spanM };
 
     // Id deterministic theo bản vẽ + dòng → bóc lại N lần vẫn chỉ 1 bộ (reducer upsert theo id).
     const engineTakeoffId = (key: string) => `tk_engine_${input.drawingId}_${key}`;
@@ -1991,20 +2335,17 @@ export class TakeoffEngineService {
     const pricedCount = rows.length - missingPrice.length;
     // Cấu kiện KC đã nhận ra nhưng chưa đo được + nhãn bộ môn — dùng ở CẢ message lẫn
     // findings, nên tính 1 lần ở đây (trước message).
-    const unmeasured = unmeasuredSections(objects as unknown as EngineDrawingObject[], input.unitsPerDrawingUnit);
+    // Dầm nét đơn đã đo được (kcLinearRows) → KHÔNG còn là "chưa đo được".
+    const unmeasured = unmeasuredSections(
+      (objects as unknown as EngineDrawingObject[]).filter((o) => !kcLinear.measured.has(o)),
+      input.unitsPerDrawingUnit,
+    );
     const discLabel =
       discipline === 'KC' ? 'bản kết cấu' :
       discipline === 'DIEN' || discipline === 'NUOC' ? 'bản MEP' :
       discipline === 'KT' ? 'bản kiến trúc' : 'bản vẽ này';
     const message = [
       `Đã bóc khối lượng ${rows.length} dòng từ ${groups.length} nhóm cấu kiện (${groups.join(', ')}) — ${objects.length} đối tượng hình học${rejected.size ? `, đã loại ${rejected.size} đối tượng bị từ chối` : ''}${regionKept != null ? `. Bóc TRONG VÙNG CHỌN: chỉ tính ${regionKept}/${regionTotal} đối tượng nằm trong vùng` : ''}.`,
-      // Cảnh báo phạm vi lên NGAY sau dòng đầu — đây là điểm QS mất tin nhất (khối
-      // lượng là TỔNG nhiều cụm). Phải thấy trước bảng, không chôn giữa bài.
-      ...(multiDrawing
-        ? [
-            `⚠ PHẠM VI: model space có ~${clusterInfo.clusters} cụm bản vẽ (trải ~${Math.round(clusterInfo.spanM)}m) — thường là nhiều mặt bằng/mặt đứng/chi tiết đặt cạnh nhau. Số trên là TỔNG tất cả các cụm. Để bóc riêng 1 mặt bằng, dùng "Bóc trong vùng" (kéo chọn vùng quanh mặt bằng) rồi bóc lại.`,
-          ]
-        : []),
       `Giả định: cao tầng ${a.floorHeight}m, dày tường ${a.wallThickness}m, cao dầm ${a.beamDepth}m, bề rộng dầm ${ASSUMED_BEAM_WIDTH}m, tỷ lệ ${input.unitsPerDrawingUnit} m/đơn vị vẽ. (Sửa giả định ở nút ⚙ cạnh "Bóc toàn bộ" rồi bóc lại.)`,
       `Khối lượng do máy tính từ hình học bản vẽ — không phải AI ước lượng.`,
       ...(webCode.length > 0
@@ -2169,22 +2510,6 @@ export class TakeoffEngineService {
         detail: `${webPricedCount} công tác được điền đơn giá từ tra cứu web (grounded search)${state.projectInfo?.location ? ` tại ${state.projectInfo.location}` : ''} — có link nguồn ở cột Nguồn. Giá web mang tính tham khảo, CẦN KIỂM CHỨNG/đối chiếu công bố giá tỉnh trước khi dùng chính thức.`,
       });
     }
-    if (multiDrawing) {
-      // severity 'error' (không phải 'warn') — QS xác nhận con số TỔNG đa cụm KHÔNG
-      // nộp được, phải bóc lại theo vùng. Để UI hiện đỏ/nổi bật như bước bắt buộc.
-      findings.push({
-        id: 'takeoff-engine-multi-drawing',
-        severity: 'error',
-        area: 'quantity',
-        title: `⚠ Cần bóc theo vùng: bản vẽ có ~${clusterInfo.clusters} cụm — số hiện tại là TỔNG, chưa dùng để nộp được`,
-        detail:
-          `Model space có ~${clusterInfo.clusters} cụm đối tượng cách xa nhau (trải ~${Math.round(clusterInfo.spanM)}m) — ` +
-          `thường là nhiều mặt bằng/mặt đứng/chi tiết đặt cạnh nhau trong cùng file. "Bóc toàn bộ" đã cộng dồn TẤT CẢ ` +
-          `nên khối lượng bị phồng. Các cụm đo được (engine KHÔNG tự chọn — cụm nào là mặt bằng cần bóc do QS quyết):\n` +
-          describeClusters(clusterList.clusters, input.unitsPerDrawingUnit) +
-          `\nBƯỚC TIẾP THEO: bấm "Bóc trong vùng" và kéo chọn quanh cụm cần bóc, hoặc bảo agent "bóc cụm 1".`,
-      });
-    }
     if (factorOverridden) {
       findings.push({
         id: 'takeoff-engine-factor-override',
@@ -2270,11 +2595,26 @@ export class TakeoffEngineService {
       disciplineSupported: allowedKeys == null || allowedKeys.size > 0,
     });
     if (empty) findings.push(empty.finding);
+    // Tier 5: dự toán có giá ƯỚC LƯỢNG → cảnh báo rõ + CAP điểm để số không nguồn không trôi.
+    if (estimatedCount > 0) {
+      findings.push({
+        id: 'takeoff-engine-estimated-price',
+        severity: 'warn',
+        area: 'unitPrice',
+        title: `${estimatedCount} đơn giá là ƯỚC LƯỢNG (chưa kiểm chứng)`,
+        detail:
+          `${estimatedCount}/${rows.length} công tác không tra được công bố giá tỉnh/định mức/web nên đơn giá do AI ` +
+          `ƯỚC LƯỢNG theo mặt bằng thị trường — cột Nguồn ghi "${ESTIMATED_PRICE_SOURCE}". Số CHỈ để tham khảo, ` +
+          `PHẢI đối chiếu công bố giá Sở Xây dựng tỉnh trước khi dùng chính thức.`,
+      });
+    }
     // đủ mã DB + đủ giá → 90; có mã web/mã phổ thông → 70; đủ mã DB thiếu giá → 75; thiếu mã hẳn → 55
     const softCode = webCode.length;
-    const score =
+    const baseScore =
       empty ? empty.score
       : missingCode.length > 0 ? 55 : softCode > 0 ? 70 : missingPrice.length > 0 ? 75 : 90;
+    // Giá ước lượng KHÔNG nguồn hạ trần điểm — không được trông "đáng tin" hơn giá thật thiếu.
+    const score = estimatedCount > 0 ? Math.min(baseScore, ESTIMATED_PRICE_SCORE_CAP) : baseScore;
     const validation: ValidationReport = {
       status: score === 90 ? 'reasonable' : 'warning',
       score,
@@ -2325,8 +2665,8 @@ export class TakeoffEngineService {
           : []),
         `Đo hình học (polyline/shoelace/bbox) × ${input.unitsPerDrawingUnit} m/đơn vị.`,
         `Áp công thức cố định (tường/cột/dầm/cửa) với giả định người dùng.`,
-        ...(multiDrawing
-          ? [`Phát hiện ~${clusterInfo.clusters} cụm bản vẽ trong model space (trải ~${Math.round(clusterInfo.spanM)}m) → cảnh báo khối lượng là TỔNG, nên bóc theo vùng.`]
+        ...(regionKept != null
+          ? [`Bóc theo vùng đã chọn: ${regionKept}/${regionTotal} đối tượng nằm trong vùng — các cụm khác trong model space không tính.`]
           : []),
         ...(hs.count > 0
           ? [`Hatch: ${hs.used}/${hs.count} mảng đủ tin cậy → diện tích sàn/nền ${hs.area} m² (bỏ ${hs.dropped} ngoài ngưỡng).`]

@@ -183,6 +183,62 @@ describe('compute – BOQ aggregation', () => {
     );
   });
 
+  // Ca thật (prod 17/07): 4 bản vẽ THUC HANH 2 (NHA) → 16 dòng takeoff, 15 dòng `code: ''`
+  // vì engine cố ý không tự chốt mã. Gom theo code dồn cả 15 vào một rổ → "Xây tường 81047.81 m3"
+  // (= tổng m³ + m² + m + cái + bộ). Ba test dưới khoá đúng chỗ đó.
+  it('does not merge un-coded takeoff rows of different units into one row', () => {
+    const state: EstimateState = {
+      ...baseState(),
+      takeoff: [
+        { id: 't1', code: '', name: 'Xây tường', unit: 'm3', quantity: 6290.869 },
+        { id: 't2', code: '', name: 'Xây/trát tường', unit: 'm2', quantity: 28594.86 },
+        { id: 't3', code: '', name: 'Len/chân tường', unit: 'm', quantity: 8665.109 },
+        { id: 't4', code: '', name: 'Cửa đi', unit: 'cái', quantity: 93 },
+        { id: 't5', code: '', name: 'Đèn', unit: 'bộ', quantity: 136 },
+      ],
+    };
+
+    const { boq } = compute(state);
+    expect(boq).toHaveLength(5);
+    expect(boq.map((r) => r.quantity).sort((a, b) => a - b)).toEqual(
+      [93, 136, 6290.87, 8665.11, 28594.86],
+    );
+    // Con số bịa của bug cũ: tổng mọi đơn vị cộng lại.
+    expect(boq.some((r) => r.quantity === 43779.94)).toBe(false);
+    for (const r of boq) expect(r.unit).toBeTruthy();
+  });
+
+  it('still merges un-coded rows that share name and unit (same work, 2 drawings)', () => {
+    const state: EstimateState = {
+      ...baseState(),
+      takeoff: [
+        { id: 't1', code: '', name: 'Xây tường', unit: 'm3', quantity: 10 },
+        { id: 't2', code: '', name: 'Xây tường', unit: 'm3', quantity: 5 },
+      ],
+    };
+
+    const { boq } = compute(state);
+    expect(boq).toHaveLength(1);
+    expect(boq[0].quantity).toBe(15);
+    expect(boq[0].name).toBe('Xây tường');
+  });
+
+  it('never sums two different units even under the same code', () => {
+    const state: EstimateState = {
+      ...baseState(),
+      takeoff: [
+        { id: 't1', code: 'AF.222', name: 'Bê tông dầm', unit: 'm3', quantity: 12 },
+        { id: 't2', code: 'AF.222', name: 'Ván khuôn dầm', unit: 'm2', quantity: 40 },
+      ],
+    };
+
+    const { boq } = compute(state);
+    expect(boq).toHaveLength(2);
+    expect(boq.find((r) => r.unit === 'm3')!.quantity).toBe(12);
+    expect(boq.find((r) => r.unit === 'm2')!.quantity).toBe(40);
+    expect(boq.some((r) => r.quantity === 52)).toBe(false);
+  });
+
   it('returns empty boq for no takeoff', () => {
     const { boq, costSummary } = compute(baseState());
     expect(boq).toHaveLength(0);

@@ -59,14 +59,26 @@ export function compute(state: EstimateState): Computed {
   const analysisByCode = new Map<string, UnitPriceAnalysis>();
   for (const a of state.analyses) analysisByCode.set(a.code.toLowerCase(), a);
 
-  // BOQ: aggregate takeoff quantity by code
-  const qtyByCode = new Map<string, { name: string; unit: string; quantity: number }>();
+  // BOQ: aggregate takeoff quantity.
+  //
+  // Khoá gom KHÔNG được là `code` đơn thuần: engine để `code = ''` cho mọi dòng chưa chốt
+  // mã định mức (bình thường — mỗi công tác có nhiều biến thể, QS mới chốt được), nên gom
+  // theo code sẽ dồn TẤT CẢ dòng chưa có mã vào một rổ và cộng thẳng m³ + m² + m + cái vào
+  // nhau, rồi lấy tên dòng đầu tiên. Đã dựng lại trên production: 16 dòng của 4 bản vẽ ra
+  // một dòng "Xây tường 81047.81 m3".
+  //
+  // Luật: dòng chưa có mã gom theo tên; `unit` LUÔN nằm trong khoá nên hai đơn vị khác nhau
+  // không bao giờ cộng được vào nhau, kể cả khi trùng mã.
+  const qtyByCode = new Map<string, { code: string; name: string; unit: string; quantity: number }>();
   for (const t of state.takeoff) {
-    const key = t.code.toLowerCase();
-    const prev = qtyByCode.get(key) ?? { name: t.name, unit: t.unit, quantity: 0 };
+    const code = (t.code ?? '').trim();
+    const unit = (t.unit ?? '').trim();
+    const ident = code ? `code:${code.toLowerCase()}` : `name:${(t.name ?? '').trim().toLowerCase()}`;
+    const key = `${ident}|unit:${unit.toLowerCase()}`;
+    const prev = qtyByCode.get(key) ?? { code, name: t.name, unit, quantity: 0 };
     prev.quantity += num(t.quantity);
     if (!prev.name) prev.name = t.name;
-    if (!prev.unit) prev.unit = t.unit;
+    if (!prev.unit) prev.unit = unit;
     qtyByCode.set(key, prev);
   }
 
@@ -76,13 +88,15 @@ export function compute(state: EstimateState): Computed {
   let directMachine = 0;
   const matAgg = new Map<string, MaterialSummaryRow>();
 
-  for (const [key, info] of qtyByCode) {
-    const analysis = analysisByCode.get(key);
+  for (const info of qtyByCode.values()) {
+    // Dòng chưa có mã không tra được phân tích đơn giá — `analysisByCode` khoá theo mã thật,
+    // không phải khoá gom.
+    const analysis = info.code ? analysisByCode.get(info.code.toLowerCase()) : undefined;
     const up = analysis ? analysisUnitPrice(state, analysis) : { material: 0, labor: 0, machine: 0, unitPrice: 0 };
     const qty = info.quantity;
     const total = Math.round(up.unitPrice * qty);
     boq.push({
-      code: analysis?.code ?? key,
+      code: analysis?.code ?? info.code,
       name: info.name,
       unit: info.unit,
       quantity: round2(qty),

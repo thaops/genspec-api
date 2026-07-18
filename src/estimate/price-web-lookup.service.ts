@@ -153,6 +153,26 @@ const EXTRACT_SCHEMA = {
 // 2/công tác) → tránh 429 quota, điền được nhiều dòng.
 // Map bằng ID (số thứ tự) — LLM hay trả tên mô tả khác input ("bả sơn tường" →
 // "Thi công sơn bả nội thất") nên khớp theo tên bị rớt. ID thì bất biến.
+/** Schema Tier 5 ước lượng (không grounding) — id + giá + cơ sở ngắn. */
+const ESTIMATE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    items: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          id: { type: 'NUMBER' },
+          unitPriceVnd: { type: 'NUMBER' },
+          basis: { type: 'STRING' },
+        },
+        required: ['id', 'unitPriceVnd'],
+      },
+    },
+  },
+  required: ['items'],
+};
+
 const BATCH_EXTRACT_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -298,6 +318,59 @@ export class PriceWebLookupService {
       );
     } catch (err) {
       this.logger.warn(`[WebPriceBatch] failed: ${(err as Error).message}`);
+    }
+    return out;
+  }
+
+  /** Tier 5 bật khi có AI backend và KHÔNG tắt qua env PRICE_ESTIMATE_FALLBACK=off. */
+  get estimateEnabled(): boolean {
+    return this.config.get<string>('PRICE_ESTIMATE_FALLBACK') !== 'off' && this.ai.available;
+  }
+
+  /**
+   * TIER 5 — ƯỚC LƯỢNG đơn giá bằng LLM (KHÔNG grounding) cho các công tác mà Tier 1-4 để
+   * trống. Đây là "phao cuối" để bảng dự toán KHÔNG còn ô giá null theo yêu cầu người dùng.
+   *
+   * ⚠ Số này KHÔNG có nguồn kiểm chứng — caller (applyEstimatedFallback) BẮT BUỘC dán nhãn
+   * ƯỚC LƯỢNG + hạ trần điểm. Ở đây chỉ giữ 1 rào số học: giá phải trong [PRICE_MIN, PRICE_MAX]
+   * (chặn 0/âm/rác). Trả Map key → {unitPrice, basis}. Lỗi/tắt cờ → Map rỗng (không throw).
+   */
+  async estimatePricesBatch(
+    queries: WebPriceQuery[],
+    province?: string,
+  ): Promise<Map<string, { unitPrice: number; basis: string }>> {
+    const out = new Map<string, { unitPrice: number; basis: string }>();
+    if (!this.estimateEnabled || queries.length === 0) return out;
+    const loc = province ? `tại ${province}` : 'tại Việt Nam';
+    const numbered = queries
+      .map((q, i) => `${i + 1}) ${normalizeWorkName(q.workName)} (${q.unit})`)
+      .join('\n');
+    try {
+      const raw = await Promise.race([
+        this.ai.generateJson(
+          [
+            {
+              text:
+                `Bạn là kỹ sư dự toán. ƯỚC LƯỢNG đơn giá thi công (nhân công + vật liệu) theo mặt bằng giá ` +
+                `thị trường xây dựng dân dụng ${loc} năm ${currentYear()}, VNĐ, cho từng công tác đánh số:\n${numbered}\n\n` +
+                `Trả items = mảng {id (SỐ THỨ TỰ), unitPriceVnd (số nguyên VNĐ/đơn vị đã nêu), basis (1 câu ngắn nêu cơ sở ước lượng)}. ` +
+                `Đây là ƯỚC LƯỢNG tham khảo — cho số HỢP LÝ theo kinh nghiệm, KHÔNG cần nguồn. Bỏ qua công tác không ước lượng nổi.`,
+            },
+          ],
+          ESTIMATE_SCHEMA,
+        ),
+        new Promise<string>((r) => setTimeout(() => r('{"items":[]}'), LOOKUP_TIMEOUT_MS)),
+      ]);
+      const parsed = JSON.parse(raw) as { items?: { id?: number; unitPriceVnd?: number; basis?: string }[] };
+      for (const it of parsed.items ?? []) {
+        const q = queries[Number(it.id) - 1];
+        if (!q || out.has(q.key)) continue;
+        if (!priceInRange(it.unitPriceVnd)) continue; // rào số học duy nhất — chặn rác
+        out.set(q.key, { unitPrice: Math.round(it.unitPriceVnd as number), basis: String(it.basis ?? '').slice(0, 120) });
+      }
+      this.logger.log(`[PriceEstimate] ${queries.length} works → estimated=${out.size}`);
+    } catch (err) {
+      this.logger.warn(`[PriceEstimate] failed: ${(err as Error).message}`);
     }
     return out;
   }

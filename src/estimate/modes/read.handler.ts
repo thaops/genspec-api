@@ -6,6 +6,7 @@ import { searchWorkbook } from '../tools/tool-registry';
 import { Workbook } from '../estimate.types';
 import { RECENCY_RULE, SENIOR_QS_PRINCIPLES } from './qs-principles';
 import { QS_KNOWLEDGE, provinceRule } from '../knowledge/qs-knowledge';
+import { guardUnsourcedPriceInProse } from '../price-prose-guard';
 
 const SEARCH_INTENT = /(tìm|tìm kiếm|ở đâu|nằm ở|xuất hiện|có bao nhiêu|đang ở)/i;
 const WEB_INTENT = /(thông tư|nghị định|quyết định|quy định|pháp lý|định mức|đơn giá|bảng giá|thị trường|mới nhất|hiện hành|tìm trên mạng|tra cứu|cập nhật|thép|xi măng|bê tông|cát|đá|gạch|sơn|nhôm|kính|giá vật liệu|giá nhân công|cao thế|đắt|rẻ|hợp lý|đúng không|đúng chưa|chính xác|so sánh|tiêu chuẩn|tcvn|nghiệm thu)/i;
@@ -36,6 +37,8 @@ export class ReadModeHandler {
 
     let webContext = '';
     let webSearchFailed = false;
+    // Nguồn grounded thật (nếu có) — để (a) chống bịa giá trong prose, (b) trả về proposal.
+    let webSources: { title?: string; uri?: string }[] = [];
     if (WEB_INTENT.test(message)) {
       yield { event: 'step', data: { text: 'Tra cứu thông tin pháp lý / giá thị trường…' } };
       try {
@@ -64,6 +67,7 @@ export class ReadModeHandler {
             '3. Nếu thấy URL nguồn → trích dẫn cuối câu trả lời dưới dạng "Nguồn: [tên] (url)".',
             '4. Nếu kết quả tra cứu không đủ để trả lời → nói thẳng "Tôi không tìm thấy thông tin xác thực, cậu nên kiểm tra trực tiếp tại cổng thông tin Bộ Xây dựng."',
           ].filter(Boolean).join('\n');
+          webSources = result.sources ?? [];
           if (result.sources.length > 0) {
             yield { event: 'step', data: { text: `Tìm thấy ${result.sources.length} nguồn tham khảo` } };
           }
@@ -119,15 +123,40 @@ export class ReadModeHandler {
           : '\n\n⚠ Lưu ý: đang ở chế độ ĐỌC — chưa có thay đổi nào được ghi vào bảng tính. Bật công tắc "Edit" trên thanh Agent để AI tạo đề xuất chỉnh sửa.');
     }
 
+    // Chống bịa giá trong VĂN XUÔI: câu trả lời nêu số tiền nhưng KHÔNG có nguồn grounded
+    // → dán cảnh báo + hạ điểm. Không để proposal chấm 100 cho giá tự chế (bug thật đã đo).
+    const proseGuard = guardUnsourcedPriceInProse(reply, webSources.length);
+    if (proseGuard.flagged) {
+      yield { event: 'step', data: { text: 'Chống bịa giá: câu trả lời có số tiền nhưng không có nguồn — đã dán cảnh báo, hạ độ tin cậy' } };
+    }
+    const validation = proseGuard.flagged
+      ? {
+          status: 'warning' as const,
+          score: proseGuard.scoreCap ?? 40,
+          findings: [
+            {
+              id: 'chat-unsourced-price',
+              severity: 'warn' as const,
+              area: 'unitPrice' as const,
+              title: 'Câu trả lời có giá chưa kiểm chứng',
+              detail:
+                'Câu trả lời nêu số tiền nhưng không tra được nguồn công bố giá/định mức chính thức. ' +
+                'Số chỉ mang tính tham khảo — đối chiếu công bố giá Sở Xây dựng tỉnh trước khi dùng.',
+            },
+          ],
+          consistency: [],
+        }
+      : { status: 'reasonable' as const, score: 100, findings: [], consistency: [] };
+
     yield {
       event: 'proposal',
       data: {
         thinking: ['Đọc và trả lời câu hỏi về Workbook'],
-        message: reply,
+        message: proseGuard.message,
         actions: [],
-        sources: [],
+        sources: webSources,
         preview: { counts: [], costBefore: 0, costAfter: 0, costDelta: 0, diffs: [] },
-        validation: { status: 'reasonable', score: 100, findings: [], consistency: [] },
+        validation,
         trace: [],
       },
     };
