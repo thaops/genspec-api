@@ -21,7 +21,36 @@ export type DetectionRule =
   | 'geometry'        // shape heuristic (layer-independent, multi-candidate)
   | 'topology'        // spatial-relation refinement (Tier 2.5)
   | 'entity_type'     // DXF entity type fallback
+  | 'discipline_gate' // type ngoài bộ môn của bản vẽ → hạ về symbol (V1)
   | 'none';           // unclassified
+
+/**
+ * GATE BỘ MÔN (V1) — mỗi bản vẽ chỉ được sinh cấu kiện THUỘC bộ môn của nó.
+ *
+ * Root cause đã đo: detector phân loại theo hình học/layer HOÀN TOÀN MÙ bộ môn, nên bản
+ * NƯỚC ra 408 "cột" + 248 "tường" (circle=đèn/thiết bị → column; 2 nét song song → wall).
+ * Gate ở tầng detector (không phải lọc BOQ ở cuối): type ngoài bộ môn → hạ về 'symbol'
+ * ngay khi phân loại, nên KHÔNG lọt vào object statistics / finding / cluster / BOQ.
+ *
+ * Chỉ gate các type ĐO ĐƯỢC (cấu kiện KT/KC + thiết bị MEP). Type trung tính (axis,
+ * dimension, text, symbol, hatch, unknown, polyline…) luôn cho qua — chúng không bị đếm
+ * thành cấu kiện. `KHAC`/undefined = KHÔNG giới hạn (bản chưa gắn bộ môn).
+ */
+export const DISCIPLINE_ALLOWED_TYPES: Record<string, Set<string>> = {
+  KT: new Set(['wall', 'slab', 'roof', 'stair', 'door', 'window', 'opening', 'room']),
+  KC: new Set(['column', 'beam', 'footing', 'pile', 'slab', 'rebar', 'wall']),
+  DIEN: new Set(['light', 'socket', 'switch', 'electric_panel', 'cable_tray', 'conduit', 'wire', 'smoke_detector']),
+  NUOC: new Set(['pipe', 'valve', 'sanitary', 'floor_drain', 'duct', 'diffuser', 'hvac_unit']),
+};
+
+/** Type ĐO ĐƯỢC (bị gate theo bộ môn). Ngoài tập này = trung tính, luôn cho qua. */
+export const DISCIPLINE_GATED_TYPES = new Set<string>([
+  // cấu kiện KT/KC
+  'wall', 'slab', 'roof', 'stair', 'door', 'window', 'room', 'column', 'beam', 'footing', 'pile', 'rebar',
+  // thiết bị/ tuyến MEP
+  'light', 'socket', 'switch', 'electric_panel', 'cable_tray', 'conduit', 'wire', 'smoke_detector',
+  'pipe', 'valve', 'sanitary', 'floor_drain', 'duct', 'diffuser', 'hvac_unit',
+]);
 
 /** Per-project layer→type override (Tier 2). Undefined discriminator = match any. */
 export interface LayerOverride {
@@ -223,12 +252,16 @@ const ENTITY_TYPE_MAP: Record<string, string> = {
 
 @Injectable()
 export class DrawingDetectorService {
-  /** @param unitFactor m/đơn vị vẽ (unitsPerDrawingUnit) — có thì bật kiểm tra tiết diện thật. */
-  detect(objects: NormalizedObject[], overrides: LayerOverride[] = [], unitFactor?: number): DetectedObject[] {
+  /**
+   * @param unitFactor m/đơn vị vẽ (unitsPerDrawingUnit) — có thì bật kiểm tra tiết diện thật.
+   * @param discipline bộ môn của bản vẽ (KT/KC/DIEN/NUOC) — gate type ngoài bộ môn (V1).
+   *        undefined / 'KHAC' = không giới hạn.
+   */
+  detect(objects: NormalizedObject[], overrides: LayerOverride[] = [], unitFactor?: number, discipline?: string): DetectedObject[] {
     const stats = this.computeStats(objects);
     const overrideMap = this.buildOverrideMap(overrides);
     const detected = objects.map((obj) => {
-      const detection = this.classify(obj, stats, overrideMap, unitFactor);
+      const detection = this.classify(obj, stats, overrideMap, unitFactor, discipline);
       const floor = this.inferFloor(obj);
       return {
         ...obj,
@@ -241,6 +274,19 @@ export class DrawingDetectorService {
     });
     // Tier 2.5 — resolve ambiguous objects from spatial context (in-place).
     this.refineByTopology(detected);
+    // Topology có thể GẮN lại type (beam/opening) → gate bộ môn LẦN NỮA để không lọt
+    // cấu kiện ngoài bộ môn qua đường topology.
+    if (discipline && DISCIPLINE_ALLOWED_TYPES[discipline]) {
+      for (const o of detected) {
+        const gated = this.gateDiscipline(o.detection, discipline);
+        if (gated.objectType !== o.detection.objectType) {
+          o.detection = gated;
+          o.objectType = gated.objectType;
+          o.confidence = gated.confidence;
+          o.candidates = gated.candidates;
+        }
+      }
+    }
     return detected;
   }
 
@@ -351,6 +397,34 @@ export class DrawingDetectorService {
   }
 
   private classify(
+    obj: NormalizedObject,
+    stats?: { medianArea: number; medianLength: number },
+    overrides?: Map<string, LayerOverride>,
+    unitFactor?: number,
+    discipline?: string,
+  ): DetectionResult {
+    return this.gateDiscipline(this.classifyRaw(obj, stats, overrides, unitFactor), discipline);
+  }
+
+  /**
+   * Hạ type ĐO ĐƯỢC nằm NGOÀI bộ môn về 'symbol' (V1). Chạy SAU mọi tier — kể cả layer
+   * match mạnh — vì trên bản MEP một layer trùng token "COT" vẫn là nhiễu, không phải cột
+   * cần đo. Type trung tính + override của user (rule 'layer_override') được giữ nguyên.
+   */
+  private gateDiscipline(r: DetectionResult, discipline?: string): DetectionResult {
+    const allowed = discipline ? DISCIPLINE_ALLOWED_TYPES[discipline] : undefined;
+    if (!allowed) return r; // KHAC / undefined / bộ môn lạ → không giới hạn
+    if (r.matchedRule === 'layer_override') return r; // user chốt tay → luôn thắng
+    if (!DISCIPLINE_GATED_TYPES.has(r.objectType)) return r; // trung tính → cho qua
+    if (allowed.has(r.objectType)) return r; // đúng bộ môn → giữ
+    return this.single(
+      'symbol', 0.6, 'discipline_gate',
+      `Gợi ý ${r.objectType} nhưng bản vẽ bộ môn ${discipline} → không tính (ngoài bộ môn)`,
+      false,
+    );
+  }
+
+  private classifyRaw(
     obj: NormalizedObject,
     stats?: { medianArea: number; medianLength: number },
     overrides?: Map<string, LayerOverride>,

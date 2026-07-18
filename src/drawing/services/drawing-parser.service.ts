@@ -151,7 +151,11 @@ export class DrawingParserService {
       const t2 = Date.now();
       const unitFactor = inferUnitFactor(result);
       await this.log(drawingId, `[units] unitFactor=${unitFactor ?? 'không suy ra được (bản vẽ thiếu $INSUNITS) → bỏ qua guard tiết diện ở detector'}`);
-      const detected = this.detector.detect(rawObjects, [], unitFactor);
+      // Bộ môn TRƯỚC detect để gate type ngoài bộ môn (V1) — suy từ layer nếu filename mơ hồ.
+      const cur0 = await this.drawingModel.findById(drawingId).select('discipline').lean();
+      const disciplineForDetect =
+        disciplineUpgradeFromLayers(cur0?.discipline, result.layers.map((l) => l.name)) ?? cur0?.discipline;
+      const detected = this.detector.detect(rawObjects, [], unitFactor, disciplineForDetect);
       await this.log(drawingId, `[detect] ${detected.length} detected objects in ${Date.now() - t2}ms`);
 
       // 4. Persist

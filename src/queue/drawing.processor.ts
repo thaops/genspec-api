@@ -173,7 +173,14 @@ export class DrawingJobProcessor extends WorkerHost {
       await this.drawingModel.updateOne({ _id: drawingId }, { unitFactor });
       await this.plog(drawingId, `[units] unitFactor=${unitFactor ?? 'không suy ra được (thiếu $INSUNITS) → bỏ qua guard tiết diện ở detector'}`);
       await this.plog(drawingId, `[detecting] ${raw.length} objects…`);
-      const detected  = this.detector.detect(raw, overrides, unitFactor);
+      // Bộ môn phải biết TRƯỚC detect để gate type ngoài bộ môn (V1). Filename mơ hồ (KHAC)
+      // → suy từ layer NGAY tại đây (dùng chung helper với bước 7). Thiếu nó thì bản KT/MEP
+      // detect ở trạng thái KHAC = không gate = lại ra cột/tường giả.
+      const cur0 = await this.drawingModel.findById(drawingId).select('discipline').lean();
+      const disciplineForDetect =
+        disciplineUpgradeFromLayers(cur0?.discipline, result.layers.map((l) => l.name)) ?? cur0?.discipline;
+      await this.plog(drawingId, `[discipline] detect với bộ môn=${disciplineForDetect ?? 'KHAC'}`);
+      const detected  = this.detector.detect(raw, overrides, unitFactor, disciplineForDetect);
       const userOverrides = await this.objectOverrides.map(drawingId);
 
       await this.objectModel.deleteMany({ drawingId });

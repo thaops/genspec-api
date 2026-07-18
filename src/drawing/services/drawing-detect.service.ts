@@ -45,7 +45,7 @@ export class DrawingDetectService {
     // Tỉ lệ đã suy lúc parse (thiếu $INSUNITS → undefined) — re-detect phải dùng đúng
     // tỉ lệ đó để guard tiết diện KC cho kết quả giống lần parse đầu.
     const drawing = await this.drawingModel.findById(drawingId).lean();
-    const detected = this.detector.detect(normalized, layerOverrides, drawing?.unitFactor);
+    const detected = this.detector.detect(normalized, layerOverrides, drawing?.unitFactor, drawing?.discipline);
     const userOverrides = await this.overrides.map(drawingId);
 
     await this.objectModel.deleteMany({ drawingId });
