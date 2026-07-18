@@ -2090,6 +2090,9 @@ export class TakeoffEngineService {
         input.assumptions,
         allowedKeys,
       );
+      // V6: KHÔNG lọc theo "lines rỗng" — cụm cột tròn/cấu kiện chờ xác nhận có preview lines
+      // rỗng nhưng VẪN có ý nghĩa (QS confirm để đo). Sau V1/V2 các cụm rỗng thật (do cấu kiện
+      // giả) đã hết, nên lọc thêm dễ ẩn nhầm hơn là lợi.
       return {
         needsClusterPick: true,
         clusters: previews,
