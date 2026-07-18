@@ -72,6 +72,25 @@ describe('discipline gate (V1)', () => {
     expect(o.detection.reason).not.toContain('mặt cắt');
   });
 
+  // Block-level MEP device (INSERT + tên block rõ nghĩa).
+  const block = (name: string, layer = 'H') =>
+    ({ stableId: 'b', layer, rawType: 'INSERT', boundingBox: { x: 0, y: 0, w: 200, h: 200 }, geometry: [], properties: { blockName: name } }) as any;
+
+  it('bản NƯỚC: block "VAN" → valve, "WC"/"Lavabo" → sanitary, "Hố ga" → floor_drain', () => {
+    expect(det.detect([block('VAN')], [], undefined, 'NUOC')[0].objectType).toBe('valve');
+    expect(det.detect([block('Lavabo')], [], undefined, 'NUOC')[0].objectType).toBe('sanitary');
+    expect(det.detect([block('Hố ga')], [], undefined, 'NUOC')[0].objectType).toBe('floor_drain');
+  });
+
+  it('block tên RÁC không bị đoán (OO/GFDGFD → không thành thiết bị)', () => {
+    const o = det.detect([block('GFDGFD')], [], undefined, 'NUOC')[0];
+    expect(["valve", "sanitary", "floor_drain", "socket", "switch", "electric_panel"]).not.toContain(o.objectType);
+  });
+
+  it('block "VAN" trên bản KC → gate loại (van không thuộc kết cấu)', () => {
+    expect(det.detect([block('VAN')], [], undefined, 'KC')[0].objectType).toBe('symbol');
+  });
+
   it('consistency: mọi type allowed đều nằm trong tập gated (không có type "allowed" mà quên gate)', () => {
     for (const set of Object.values(DISCIPLINE_ALLOWED_TYPES)) {
       for (const t of set) {

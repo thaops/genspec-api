@@ -185,6 +185,23 @@ const ELEVATION_LAYER_RE = /MAT\s*DUNG|ELEVATION/;
 const SECTION_LAYER_RE = /MAT\s*CAT|SECTION|\bCAT[\s_-]*(TUONG|COT|DAM|SAN|MONG|MAI|VACH)/;
 
 /**
+ * THIẾT BỊ MEP vẽ bằng BLOCK (INSERT) — 1 block = 1 thiết bị (insert-expand đã gộp). Nhận
+ * theo TÊN BLOCK khi tên RÕ NGHĨA. Đo thật (bản NUOC): 53 block "VAN", 7 "TB WC Phễu Thu".
+ *
+ * ⚠ CHỈ tên KHÔNG MẬP MỜ — ~70% block trên bản này có tên rác (OO, GFDGFD, c2…), tuyệt đối
+ * KHÔNG đoán. Discipline gate bảo vệ thêm (valve/sanitary chỉ NUOC; panel/socket chỉ DIEN).
+ * "TÊ/TEA" (tê nối ống) KHÔNG map: chưa có type fitting, đếm thành van = sai.
+ */
+const BLOCK_DEVICE_RULES: { re: RegExp; type: string }[] = [
+  { re: /^VAN\b|\bVALVE\b|VAN\s*(1|2)?\s*CHIEU|VAN\s*KHOA/, type: 'valve' },
+  { re: /LAVABO|LAVBO|CHAU\s*RUA|BON\s*CAU|XI\s*BET|BON\s*TIEU|TIEU\s*NAM|BON\s*TAM|\bWC\b|CHAU\s*XI/, type: 'sanitary' },
+  { re: /HO\s*GA|HOGA|GO\s*GA|PHEU\s*THU|THOAT\s*SAN|GA\s*THU/, type: 'floor_drain' },
+  { re: /\bMCB\b|\bMCCB\b|\bATS\b|TU\s*DIEN|\bMDB\b/, type: 'electric_panel' },
+  { re: /O\s*CAM|OCAM|\bSOCKET\b/, type: 'socket' },
+  { re: /CONG\s*TAC|CONGTAC|\bSWITCH\b/, type: 'switch' },
+];
+
+/**
  * Tier 1c — layer đặt tên bằng CỤM TỪ tiếng Việt có dấu cách: "ỐNG CẤP", "CẤP THOÁT NƯỚC".
  * `LAYER_TYPE_MAP` (exact/`-`/token) không khớp được vì key là 1 từ (`CAP-NUOC`, `ONGNUOC`).
  *
@@ -554,6 +571,17 @@ export class DrawingDetectorService {
         );
       }
       return this.single(kcType, 0.9, 'layer_map', `Layer "${obj.layer}" có token kết cấu → ${kcType}`, false);
+    }
+
+    // 1d. THIẾT BỊ MEP theo TÊN BLOCK (INSERT) — 1 block = 1 thiết bị. Chỉ tên rõ nghĩa
+    // (VAN/WC/HOGA/MCB…); tên rác bỏ qua. Discipline gate ở lớp ngoài chặn nhầm bộ môn.
+    const blockName = obj.properties?.blockName;
+    if (obj.rawType === 'INSERT' && typeof blockName === 'string' && blockName.trim()) {
+      const bn = normalizeLayerName(blockName);
+      const rule = BLOCK_DEVICE_RULES.find((r) => r.re.test(bn));
+      if (rule) {
+        return this.single(rule.type, 0.85, 'label_pattern', `Block "${blockName}" → ${rule.type}`, false);
+      }
     }
 
     // 2. Label text pattern
