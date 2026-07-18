@@ -1068,7 +1068,11 @@ export function objectClusters(
     // Cột tròn ambiguous cũng thuộc mặt bằng KC — không đưa vào cụm thì region KHÔNG bao,
     // confirmRoundColumns bóc theo vùng sẽ mất sạch cột (cùng lỗi như dầm nét đơn).
     const countable = isCountableObject(o) && (MEASURED_TYPES as readonly string[]).includes(o.type);
-    if (!countable && !isKcLinear && !isRoundColumnSection(o)) continue;
+    // Object MEP (pipe/light/socket…) cũng phải vào clustering — nếu không, bản ĐIỆN/NƯỚC
+    // KHÔNG tách được cụm (sau V1 hết cấu kiện giả) → gộp cả sơ đồ trục đứng/chi tiết vào tổng
+    // (đo thật prod: NƯỚC ống 7342m gộp mọi view). Cùng lý do như cấu kiện KC.
+    const isMep = isCountableObject(o) && (MEP_COUNT_TYPES.has(o.type) || MEP_LENGTH_TYPES.has(o.type));
+    if (!countable && !isKcLinear && !isRoundColumnSection(o) && !isMep) continue;
     const b = o.boundingBox;
     const cx = (b.x ?? 0) + (b.w ?? 0) / 2;
     const cy = (b.y ?? 0) + (b.h ?? 0) / 2;

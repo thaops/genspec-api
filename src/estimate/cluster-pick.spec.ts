@@ -156,6 +156,20 @@ describe('clusterPreviews', () => {
     expect(objectsInRegion(objs, p.region)).toHaveLength(10); // region phủ hết
   });
 
+  it('object MEP (pipe) vào clustering → bản nước tách được cụm (sơ đồ trục đứng vs mặt bằng)', () => {
+    const pipe = (id: string, x: number, y: number) =>
+      ({ _id: id, stableId: id, type: 'pipe', rawType: 'LWPOLYLINE', ambiguous: false,
+         boundingBox: { x, y, w: 5000, h: 100 }, geometry: [[x, y], [x + 5000, y]] }) as any;
+    // 2 nhóm ống cách nhau 300m (mặt bằng vs sơ đồ) — mỗi nhóm ≥8 để không gộp thành 1.
+    const objs = [
+      ...Array.from({ length: 8 }, (_, i) => pipe(`p${i}`, 0, i * 2000)),
+      ...Array.from({ length: 8 }, (_, i) => pipe(`q${i}`, 300_000, i * 2000)),
+    ];
+    const { clusters } = objectClusters(objs, MM);
+    expect(clusters.length).toBe(2); // trước đây pipe không vào cluster → 0/1 cụm → không tách
+    expect(clusters[0].byType.pipe).toBe(8);
+  });
+
   it('cắt ở `max` cụm — không trả về hàng trăm cụm rác', () => {
     const many = Array.from({ length: 20 }, (_, i) => ({
       x: i * 1e6, y: 0, w: 1000, h: 1000, count: 20 - i, byType: { wall: 1 },
