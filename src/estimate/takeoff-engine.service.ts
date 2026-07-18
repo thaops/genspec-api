@@ -2476,6 +2476,9 @@ export class TakeoffEngineService {
           // 3 sheet BOQ này DO ENGINE tạo (BOQ_SHEETS) → được phép dựng lại layout.
           // Mọi sheet khác (Workbook công ty) mặc định KHÔNG — xem rowsToUpdateCells.
           engineOwnedSheet: true,
+          // Tô nền ô Đơn giá/Nguồn cho dòng giá ước lượng (amber) / đại diện họ mã (sky) —
+          // QS nhìn thấy ngay số chưa chắc, khớp chip nguồn giá bên FE.
+          priceFlags: sheetRows.map((r) => (r.estimated ? 'estimated' : r.familyRep ? 'familyRep' : undefined)),
           ...(isLast ? { footnote: assumptionFootnote(a) } : {}),
         },
       );

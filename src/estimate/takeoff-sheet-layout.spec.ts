@@ -151,3 +151,33 @@ describe('BOQ_SHEET_NAMES — contract với FE (sửa BE phải sửa FE)', () 
     ]);
   });
 });
+
+describe('cell-coloring giá ước lượng/đại diện (V-web)', () => {
+  const bgOf = (fmt: any, cell: string): string | undefined => {
+    const c = (fmt.cells as { cell: string; s: Record<string, any> }[]).find((x) => x.cell === cell);
+    return c?.s?.bg?.rgb;
+  };
+  it('dòng estimated → nền amber ở Đơn giá(G) + Nguồn(I); familyRep → sky', () => {
+    const sheet = emptySheet('1. Kết cấu & bao che');
+    const r = rowsToUpdateCells(ROWS, stateWith(sheet), '1. Kết cấu & bao che', {
+      title: '1. KẾT CẤU & BAO CHE', engineOwnedSheet: true,
+      priceFlags: ['estimated', 'familyRep'],
+    });
+    const fmt = r!.formatAction as any;
+    // data bắt đầu dòng 3 (A1 title, A2 header). Dòng 1 dữ liệu = row 3, dòng 2 = row 4.
+    expect(bgOf(fmt, 'G3')).toBe('#fdf0d5'); // estimated amber
+    expect(bgOf(fmt, 'I3')).toBe('#fdf0d5');
+    expect(bgOf(fmt, 'G4')).toBe('#e3f0fb'); // familyRep sky
+    // Cột KHÁC (tên C) không bị tô nền cảnh báo.
+    expect(bgOf(fmt, 'C3')).not.toBe('#fdf0d5');
+  });
+  it('không có priceFlags → không tô nền cảnh báo (giữ hành vi cũ)', () => {
+    const sheet = emptySheet('1. Kết cấu & bao che');
+    const r = rowsToUpdateCells(ROWS, stateWith(sheet), '1. Kết cấu & bao che', {
+      title: '1. KẾT CẤU & BAO CHE', engineOwnedSheet: true,
+    });
+    const fmt = r!.formatAction as any;
+    expect(bgOf(fmt, 'G3')).not.toBe('#fdf0d5');
+    expect(bgOf(fmt, 'G3')).not.toBe('#e3f0fb');
+  });
+});

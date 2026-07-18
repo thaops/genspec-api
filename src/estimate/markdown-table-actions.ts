@@ -282,6 +282,12 @@ export function buildTakeoffFormatAction(
   theme?: SheetTheme,
   /** Dòng TIÊU ĐỀ SHEET — style thanh tiêu đề trải hết 10 cột. */
   titleRow?: number | null,
+  /**
+   * Nguồn giá TỪNG dòng dữ liệu (index = offset từ dataStartRow): 'estimated' (Tier 5 ước
+   * lượng) / 'familyRep' (Tier 3.5 đại diện họ mã) → tô nền ô Đơn giá + Nguồn để QS nhìn
+   * thấy NGAY số nào chưa chắc, không phải đọc cột Nguồn. Chỉ dùng cho sheet engine tạo.
+   */
+  priceFlags?: (('estimated' | 'familyRep') | undefined)[],
 ): Action {
   const columnWidths: Record<string, number> = {};
   TAKEOFF_COL_WIDTHS_PX.forEach((w, i) => (columnWidths[String(i)] = w));
@@ -312,11 +318,20 @@ export function buildTakeoffFormatAction(
   if (headerRow != null) {
     COL_LETTERS.forEach((letter) => cells.push({ cell: `${letter}${headerRow}`, s: headerStyle }));
   }
+  // Nền cảnh báo cho ô giá chưa chắc — nhạt để không chói trên nền sáng của sheet.
+  const PRICE_FLAG_BG: Record<'estimated' | 'familyRep', string> = {
+    estimated: '#fdf0d5', // amber nhạt — LLM ước lượng, cần kiểm chứng
+    familyRep: '#e3f0fb', // sky nhạt — giá đại diện họ mã, cần chọn biến thể
+  };
+  const PRICE_COL_INDEXES = [6, 8]; // G=Đơn giá, I=Nguồn giá
   for (let r = dataStartRow; r <= dataEndRow; r++) {
     const zebra = (r - dataStartRow) % 2 === 1;
+    const flag = priceFlags?.[r - dataStartRow];
     COL_LETTERS.forEach((letter, i) => {
       const s: Record<string, any> = { bd: CELL_BORDER, vt: 2 };
       if (zebra) s.bg = { rgb: ZEBRA_BG };
+      // Ô Đơn giá + Nguồn của dòng giá chưa chắc → nền cảnh báo (đè zebra).
+      if (flag && PRICE_COL_INDEXES.includes(i)) s.bg = { rgb: PRICE_FLAG_BG[flag] };
       if (NUMERIC_COL_INDEXES.includes(i)) s.ht = 3; // số căn phải
       if (NUMBER_FORMATS[i]) s.n = { pattern: NUMBER_FORMATS[i] }; // ô giữ SỐ, hiển thị có phân cách
       if (WRAP_COL_INDEXES.includes(i)) s.tb = 3; // wrap text — chữ dài không bị cắt
@@ -405,6 +420,8 @@ export function rowsToUpdateCells(
      * quyền, không đoán theo tên sheet.
      */
     engineOwnedSheet?: boolean;
+    /** Nguồn giá từng dòng (thứ tự khớp `rows`) → tô nền ô Đơn giá/Nguồn cảnh báo. */
+    priceFlags?: (('estimated' | 'familyRep') | undefined)[];
   },
 ): TableRescueResult | null {
   if (rows.length === 0) return null;
@@ -508,7 +525,7 @@ export function rowsToUpdateCells(
   }
 
   const formatAction = buildTakeoffFormatAction(
-    sheet.id, headerRow, dataStartRow, endRow, footnoteRow, opts?.theme, titleRow,
+    sheet.id, headerRow, dataStartRow, endRow, footnoteRow, opts?.theme, titleRow, opts?.priceFlags,
   );
   return { actions, sheetName: sheet.name, startRow, endRow, formatAction, footnoteRow };
 }
