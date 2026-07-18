@@ -1292,6 +1292,80 @@ export function mergeRowsByKey(rows: TakeoffEngineRow[]): TakeoffEngineRow[] {
   return [...byKey.values()];
 }
 
+/**
+ * CỘT TRÒN ambiguous trên bản KC — cột vẽ bằng CIRCLE/ARC (mặt cắt tròn) mà detector để
+ * ambiguous (vòng tròn lớn: cột? cọc? móng? ký hiệu? — 0.35/0.30/0.20/0.15, không tự chốt).
+ *
+ * KHÔNG tự đo (đoán type = bịa) — chỉ đo khi QS XÁC NHẬN qua cờ `confirmed`. Khi đó:
+ *   · ĐẾM theo TÂM, không theo cung: 1 cột tròn thường vẽ 2-3 cung ARC đồng tâm (đo thật:
+ *     76 cung → 62 tâm). Đếm cung = phồng số cột. Gom cung cùng tâm (lưới nhỏ) → 1 cột,
+ *     bán kính = cung LỚN NHẤT tại tâm đó.
+ *   · Diện tích = πr² (KHÔNG phải bbox w×h = d² — thừa 4/π ≈ 27%). Chu vi = πd.
+ *   · column_concrete = Σ πr² × H; column_formwork = Σ πd × H.
+ *
+ * Số là hình học THẬT; chỉ TYPE do QS khẳng định → note ghi rõ "QS xác nhận". PURE.
+ */
+/** Cột tròn ambiguous (CIRCLE/ARC, bbox ~vuông) — đối tượng roundColumnRows sẽ đo khi QS xác nhận. */
+export function isRoundColumnSection(o: EngineDrawingObject): boolean {
+  if (o.type !== 'column' || !o.ambiguous) return false;
+  const rt = (o.rawType ?? '').toUpperCase();
+  if (rt !== 'CIRCLE' && rt !== 'ARC') return false;
+  const { w, h } = o.boundingBox;
+  if (!(w > 0) || !(h > 0)) return false;
+  const ratio = w / h;
+  return ratio >= 0.7 && ratio <= 1.43; // bbox ~vuông = tiết diện tròn
+}
+
+export function roundColumnGroups(
+  objects: EngineDrawingObject[],
+  factor: number,
+): { count: number; totalArea: number; totalPerimeter: number } {
+  // Gom cung theo tâm (lưới ~ nửa cạnh cột nhỏ nhất; 200 đơn vị vẽ đủ tách 2 cột kề, gộp
+  // cung đồng tâm). Giữ bán kính LỚN NHẤT mỗi tâm.
+  const cellVU = 200;
+  const byCenter = new Map<string, number>(); // tâm → r (đơn vị vẽ) lớn nhất
+  for (const o of objects) {
+    if (!isRoundColumnSection(o)) continue;
+    const b = o.boundingBox;
+    const cx = Math.round(((b.x ?? 0) + b.w / 2) / cellVU);
+    const cy = Math.round(((b.y ?? 0) + b.h / 2) / cellVU);
+    const r = Math.min(b.w, b.h) / 2;
+    const k = `${cx},${cy}`;
+    byCenter.set(k, Math.max(byCenter.get(k) ?? 0, r));
+  }
+  let totalArea = 0;
+  let totalPerimeter = 0;
+  for (const r of byCenter.values()) {
+    const rm = r * factor;
+    totalArea += Math.PI * rm * rm;
+    totalPerimeter += 2 * Math.PI * rm;
+  }
+  return { count: byCenter.size, totalArea: round3(totalArea), totalPerimeter: round3(totalPerimeter) };
+}
+
+/** Sinh dòng BT + ván khuôn cột tròn — CHỈ khi QS xác nhận. PURE. */
+export function roundColumnRows(
+  objects: EngineDrawingObject[],
+  factor: number,
+  assumptions: TakeoffAssumptions,
+  allowedKeys?: Set<TakeoffRowKey> | null,
+): { rows: TakeoffEngineRow[]; count: number } {
+  const g = roundColumnGroups(objects, factor);
+  if (g.count === 0) return { rows: [], count: 0 };
+  const H = assumptions.floorHeight;
+  const allow = (k: TakeoffRowKey) => !allowedKeys || allowedKeys.has(k);
+  const rows: TakeoffEngineRow[] = [];
+  const mk = (key: TakeoffRowKey, unit: string, q: number, note: string) => {
+    const quantity = round3(q);
+    if (!allow(key) || quantity <= 0) return;
+    rows.push({ key, group: 'column', boqGroup: BOQ_GROUP[key], code: '', name: DEFAULT_NAMES[key], unit, quantity, note, source: '—' });
+  };
+  const lead = `${g.count} cột tròn (QS xác nhận — gộp cung đồng tâm), Σπr²=${f3(g.totalArea)}m²`;
+  mk('column_concrete', 'm3', g.totalArea * H, `${lead} × ${f3(H)}m cao = ${f3(round3(g.totalArea * H))} m³`);
+  mk('column_formwork', 'm2', g.totalPerimeter * H, `${g.count} cột tròn, Σ chu vi ${f3(g.totalPerimeter)}m × ${f3(H)}m = ${f3(round3(g.totalPerimeter * H))} m²`);
+  return { rows, count: g.count };
+}
+
 /** true nếu object là cấu kiện KC có tiết diện đủ lớn để đo (không phải ký hiệu). */
 export function isRealSection(obj: EngineDrawingObject, factor: number): boolean {
   if (!SECTION_TYPES.has(obj.type)) return true;
@@ -1750,6 +1824,8 @@ export interface TakeoffEngineInput {
   region?: { x: number; y: number; w: number; h: number };
   /** Edit bật → dòng vẫn thiếu mã sau web lookup được gán mã phổ thông mặc định. */
   editPermission?: boolean;
+  /** QS xác nhận vòng tròn ambiguous trên bản KC LÀ cột tròn → đo πr²×H (xem roundColumnRows). */
+  confirmRoundColumns?: boolean;
 }
 
 @Injectable()
@@ -2093,10 +2169,16 @@ export class TakeoffEngineService {
     // Cấu kiện KC vẽ bằng nét đơn (netDAM/netMONG) — computeTakeoffRows bỏ qua vì ambiguous.
     // Tin theo TÊN LAYER: đo dầm nét đơn, đếm móng/cọc nét đơn để liệt kê (xem kcLinearRows).
     const kcLinear = kcLinearRows(objects as any, input.unitsPerDrawingUnit, input.assumptions, allowedKeys);
+    // Cột tròn ambiguous: CHỈ đo khi QS xác nhận (confirmRoundColumns) — nếu không, để panel
+    // "chưa đo được" liệt kê. Không tự đoán type.
+    const roundCol = input.confirmRoundColumns
+      ? roundColumnRows(objects as any, input.unitsPerDrawingUnit, input.assumptions, allowedKeys)
+      : { rows: [] as TakeoffEngineRow[], count: 0 };
     const bareRows = mergeRowsByKey([
       ...computeTakeoffRows(objects, input.unitsPerDrawingUnit, input.assumptions, normCandidates, allowedKeys),
       ...computeMepRows(objects as any, input.unitsPerDrawingUnit, allowedKeys),
       ...kcLinear.rows,
+      ...roundCol.rows,
     ]);
 
     // Giá THẬT từ price_set tỉnh mới nhất khớp projectInfo.location — không có thì cột giá trống.
@@ -2345,11 +2427,16 @@ export class TakeoffEngineService {
     const pricedCount = rows.length - missingPrice.length;
     // Cấu kiện KC đã nhận ra nhưng chưa đo được + nhãn bộ môn — dùng ở CẢ message lẫn
     // findings, nên tính 1 lần ở đây (trước message).
-    // Dầm nét đơn đã đo được (kcLinearRows) → KHÔNG còn là "chưa đo được".
+    // Dầm nét đơn đã đo (kcLinearRows) → hết "chưa đo được". Cột tròn: chỉ hết khi QS ĐÃ
+    // xác nhận (confirmRoundColumns) — lúc đó roundColumnRows đã đo, không liệt kê nữa.
     const unmeasured = unmeasuredSections(
-      (objects as unknown as EngineDrawingObject[]).filter((o) => !kcLinear.measured.has(o)),
+      (objects as unknown as EngineDrawingObject[]).filter(
+        (o) => !kcLinear.measured.has(o) && !(input.confirmRoundColumns && isRoundColumnSection(o)),
+      ),
       input.unitsPerDrawingUnit,
     );
+    // Cột tròn ambiguous CHƯA xác nhận → gợi ý QS bật confirmRoundColumns để đo (đếm theo tâm).
+    const roundColPending = input.confirmRoundColumns ? { count: 0 } : roundColumnGroups(objects as any, input.unitsPerDrawingUnit);
     const discLabel =
       discipline === 'KC' ? 'bản kết cấu' :
       discipline === 'DIEN' || discipline === 'NUOC' ? 'bản MEP' :
@@ -2454,6 +2541,19 @@ export class TakeoffEngineService {
           `mặt cắt kín để lấy tiết diện) hoặc là VÒNG TRÒN/KÝ HIỆU chưa rõ (cột? cọc? ký hiệu?) — engine ` +
           `không đoán để tránh tạo số khống. Để bóc: khoanh vùng đúng cấu kiện rồi bóc lại, hoặc mở bản ` +
           `mặt cắt/chi tiết có tiết diện. (Đây KHÔNG phải "chưa nhận diện" — đã tìm thấy, chỉ chưa đủ hình học để đo.)`,
+      });
+    }
+    // Cột tròn: đo được nếu QS xác nhận đó LÀ cột (đếm theo tâm, πr²×H). Gợi ý bật cờ.
+    if (roundColPending.count > 0) {
+      findings.push({
+        id: 'takeoff-engine-round-columns',
+        severity: 'warn',
+        area: 'missing',
+        title: `${roundColPending.count} cột tròn — xác nhận để đo`,
+        detail:
+          `Phát hiện ${roundColPending.count} vòng tròn (gộp cung đồng tâm) trên bản KC nghi là CỘT TRÒN, ` +
+          `nhưng type còn nhập nhằng (cột/cọc/móng/ký hiệu) nên engine KHÔNG tự đo. Nếu đúng là cột, bóc lại ` +
+          `với xác nhận "cột tròn" → engine đo πr²×H (đường kính đo từ bản vẽ, chiều cao theo giả định).`,
       });
     }
     // Cửa/cửa sổ đếm theo CÁI — nói rõ 1 LẦN ở đây vì sao không có m² (thay vì nhét cả

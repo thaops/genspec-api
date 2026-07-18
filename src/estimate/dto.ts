@@ -112,6 +112,11 @@ export class TakeoffEngineDto {
   @IsBoolean()
   editPermission?: boolean;
 
+  /** QS xác nhận vòng tròn ambiguous là cột tròn → engine đo πr²×H. */
+  @IsOptional()
+  @IsBoolean()
+  confirmRoundColumns?: boolean;
+
   /** Bộ môn bản vẽ (KT/KC/DIEN/NUOC/KHAC) — FE tuỳ chọn gửi kèm; BE tự đọc từ drawing doc là chuẩn. */
   @IsOptional()
   @IsString()
