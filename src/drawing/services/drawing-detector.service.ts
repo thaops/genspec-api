@@ -140,8 +140,13 @@ const LAYER_TYPE_MAP: Record<string, string> = {
   BAOCHAY: 'smoke_detector', 'DAU-BAO-CHAY': 'smoke_detector', SMOKE: 'smoke_detector', 'SMOKE-DETECTOR': 'smoke_detector',
 
   // ===== MEP — Nước (Plumbing) =====
-  ONGNUOC: 'pipe', 'ONG-NUOC': 'pipe', PIPE: 'pipe', 'P-PIPE': 'pipe', 'CAP-NUOC': 'pipe', 'THOAT-NUOC': 'pipe',
+  // "THOAT" (thoát nước) đứng riêng an toàn nhờ discipline gate: 'pipe' chỉ hợp lệ trên bản
+  // NUOC; bản KT có "thoát hiểm" → gate loại. Đo thật: layer "n-thoát" (175 obj) trước rơi axis.
+  ONGNUOC: 'pipe', 'ONG-NUOC': 'pipe', PIPE: 'pipe', 'P-PIPE': 'pipe', 'CAP-NUOC': 'pipe', 'THOAT-NUOC': 'pipe', THOAT: 'pipe',
   VAN: 'valve', VALVE: 'valve', 'P-VALVE': 'valve',
+  // ⚠ KHÔNG map "FIXTURE"/"AR-FIXTURE" → sanitary: thiết bị vệ sinh vẽ bằng NHIỀU nét (LINE/ARC),
+  // đếm mỗi nét = 1 thiết bị → over-count (đo thật: 556 "thiết bị" từ 305 LINE+239 ARC). Sanitary
+  // phải đếm theo BLOCK/INSERT — cần fixture detection tầng block (roadmap V5), không phải alias.
   'TB-VS': 'sanitary', 'THIET-BI-VS': 'sanitary', SANITARY: 'sanitary', LAVABO: 'sanitary', 'BON-CAU': 'sanitary', 'THIET-BI-VE-SINH': 'sanitary',
   HOGA: 'floor_drain', 'HO-GA': 'floor_drain', 'THOAT-SAN': 'floor_drain', 'FLOOR-DRAIN': 'floor_drain', DRAIN: 'floor_drain',
 

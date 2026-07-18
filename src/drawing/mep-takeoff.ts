@@ -63,6 +63,14 @@ function polylineLength(geom: number[][] | undefined, factor: number): number {
  * Bóc MEP: gom theo (type) — COUNT cho thiết bị, LENGTH cho tuyến. `byFloor=true`
  * tách theo tầng. Bỏ object ambiguous (chưa settle class). PURE.
  */
+/**
+ * Chiều dài THẬT tối đa của MỘT đoạn tuyến MEP trong một công trình dân dụng. Một object
+ * ống/dây dài hơn ngưỡng này gần như chắc chắn là NÉT KHUNG / leader / đường dựng bị nhận
+ * nhầm thành tuyến (đo thật bản NUOC: 2 "ống" span 431m & 839m → 6981m khống). Bỏ để không
+ * phồng tổng — giống guard tiết diện của cấu kiện KC. 200m đủ rộng cho tuyến trục dài thật.
+ */
+export const MAX_MEP_SEGMENT_M = 200;
+
 export function mepTakeoff(objects: MepObject[], factor: number, byFloor = false): MepRow[] {
   const counts = new Map<string, number>();
   const lengths = new Map<string, number>();
@@ -74,7 +82,8 @@ export function mepTakeoff(objects: MepObject[], factor: number, byFloor = false
       counts.set(keyOf(o.type, o.floor), (counts.get(keyOf(o.type, o.floor)) ?? 0) + 1);
     } else if (MEP_LENGTH_TYPES.has(o.type)) {
       const L = polylineLength(o.geometry, factor);
-      if (L > 0) lengths.set(keyOf(o.type, o.floor), (lengths.get(keyOf(o.type, o.floor)) ?? 0) + L);
+      // Bỏ đoạn dài phi lý (nét khung/leader nhận nhầm) — không cộng vào tổng tuyến.
+      if (L > 0 && L <= MAX_MEP_SEGMENT_M) lengths.set(keyOf(o.type, o.floor), (lengths.get(keyOf(o.type, o.floor)) ?? 0) + L);
     }
   }
 
