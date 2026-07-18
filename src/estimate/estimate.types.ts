@@ -113,6 +113,8 @@ export interface TakeoffItem {
    */
   unitPrice?: number;
   source?: string;
+  /** true = đơn giá do LLM ƯỚC LƯỢNG (Tier 5, không nguồn) — FE tô khác, PHẢI kiểm chứng. */
+  estimated?: boolean;
 }
 
 // Sheet 09 — hệ số chi phí
@@ -200,6 +202,7 @@ export type Action =
       quantity?: number;
       unitPrice?: number;
       source?: string;
+      estimated?: boolean;
     }
   | { type: 'delete_takeoff'; id: string }
   | {

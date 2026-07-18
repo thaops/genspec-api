@@ -1006,8 +1006,15 @@ export function objectClusters(
   const pts: { cx: number; cy: number; type: string; b: EngineDrawingObject['boundingBox'] }[] = [];
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const o of objects) {
-    if (!isCountableObject(o)) continue;
-    if (!(MEASURED_TYPES as readonly string[]).includes(o.type)) continue;
+    // Cấu kiện KC vẽ nét đơn (beam/footing LINE) là AMBIGUOUS nên trượt isCountableObject —
+    // nhưng kcLinearRows ĐO chúng, và chúng thuộc về mặt bằng KC. Không đưa vào clustering
+    // thì `region` của cụm KHÔNG bao chúng → bóc theo cụm mất sạch dầm nét đơn (đo thật trên
+    // prod: cụm "15 dầm" nhưng bóc ra 0 dầm). Nhận cả hai: đối tượng đo được thường, và nét
+    // đơn KC.
+    const isKcLinear =
+      (o.rawType ?? '').toUpperCase() === 'LINE' && (o.type === 'beam' || o.type === 'footing');
+    const countable = isCountableObject(o) && (MEASURED_TYPES as readonly string[]).includes(o.type);
+    if (!countable && !isKcLinear) continue;
     const b = o.boundingBox;
     const cx = (b.x ?? 0) + (b.w ?? 0) / 2;
     const cy = (b.y ?? 0) + (b.h ?? 0) / 2;
@@ -1157,10 +1164,12 @@ export function clusterPreviews(
   return clusters.slice(0, max).map((c, i) => {
     const region = clusterRegion(c, factor);
     const inside = objectsInRegion(objects as any[], region) as EngineDrawingObject[];
-    const lines = [
+    const lines = mergeRowsByKey([
       ...computeTakeoffRows(inside, factor, assumptions, {}, allowedKeys),
       ...computeMepRows(inside as any[], factor, allowedKeys),
-    ].map((r) => ({ name: r.name, unit: r.unit, quantity: r.quantity }));
+      // Dầm nét đơn KC — nếu không đưa vào preview, hint "15 dầm" mà lines trống → QS bối rối.
+      ...kcLinearRows(inside, factor, assumptions, allowedKeys).rows,
+    ]).map((r) => ({ name: r.name, unit: r.unit, quantity: r.quantity }));
     const hint = Object.entries(c.byType)
       .sort((a, b) => b[1] - a[1])
       .map(([t, n]) => `${n} ${TYPE_LABELS_VI[t] ?? t}`)
@@ -2264,6 +2273,7 @@ export class TakeoffEngineService {
       // Lưu giá vào state → bóc gộp render lại được giá của bản này ở lần bóc bản khác.
       unitPrice: r.unitPrice,
       source: r.source,
+      ...(r.estimated ? { estimated: true } : {}),
     }));
     const a = input.assumptions;
 

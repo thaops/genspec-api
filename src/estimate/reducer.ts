@@ -201,6 +201,8 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
               // action; action không có field này (edit thủ công) thì giữ giá cũ.
               unitPrice: 'unitPrice' in a ? a.unitPrice : ex?.unitPrice,
               source: 'source' in a ? a.source : ex?.source,
+              // Cờ giá ước lượng (Tier 5): đi cùng unitPrice — action set giá thì set luôn cờ.
+              estimated: 'unitPrice' in a ? a.estimated : ex?.estimated,
             };
           },
         ),

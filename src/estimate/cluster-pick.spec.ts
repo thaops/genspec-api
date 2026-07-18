@@ -122,6 +122,27 @@ describe('clusterPreviews', () => {
     expect(p.heightM).toBeCloseTo(20.2, 1); // 20000mm + bề dày tường
   });
 
+  it('cụm BAO dầm nét đơn ambiguous → region phủ + preview hiện dầm (bug prod đã sửa)', () => {
+    // Dầm netDAM: type beam, rawType LINE, AMBIGUOUS → trượt isCountableObject. Trước đây bị
+    // loại khỏi clustering → region không phủ → bóc theo cụm mất sạch dầm.
+    const netDam = (id: string, y: number, lenMm: number) =>
+      ({ _id: id, stableId: id, type: 'beam', rawType: 'LINE', ambiguous: true,
+         boundingBox: { x: 0, y, w: 1, h: lenMm }, geometry: [[0, y], [0, y + lenMm]] }) as any;
+    const objs = [
+      ...Array.from({ length: 10 }, (_, i) => netDam(`b${i}`, i * 1000, 2000)),
+    ];
+
+    const { clusters } = objectClusters(objs, MM);
+    expect(clusters.length).toBe(1);
+    expect(clusters[0].byType.beam).toBe(10); // dầm nét đơn ĐÃ vào cụm
+
+    const [p] = clusterPreviews(objs, clusters, MM, A);
+    // region bao trọn → đưa lại objectsInRegion đủ 10 dầm
+    expect(objectsInRegion(objs, p.region)).toHaveLength(10);
+    // preview lines PHẢI có dầm (trước đây trống → hint "10 dầm" mà lines rỗng)
+    expect(p.lines.some((l) => l.name.includes('Bê tông dầm'))).toBe(true);
+  });
+
   it('cắt ở `max` cụm — không trả về hàng trăm cụm rác', () => {
     const many = Array.from({ length: 20 }, (_, i) => ({
       x: i * 1e6, y: 0, w: 1000, h: 1000, count: 20 - i, byType: { wall: 1 },
