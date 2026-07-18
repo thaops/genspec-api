@@ -1013,8 +1013,10 @@ export function objectClusters(
     // đơn KC.
     const isKcLinear =
       (o.rawType ?? '').toUpperCase() === 'LINE' && (o.type === 'beam' || o.type === 'footing');
+    // Cột tròn ambiguous cũng thuộc mặt bằng KC — không đưa vào cụm thì region KHÔNG bao,
+    // confirmRoundColumns bóc theo vùng sẽ mất sạch cột (cùng lỗi như dầm nét đơn).
     const countable = isCountableObject(o) && (MEASURED_TYPES as readonly string[]).includes(o.type);
-    if (!countable && !isKcLinear) continue;
+    if (!countable && !isKcLinear && !isRoundColumnSection(o)) continue;
     const b = o.boundingBox;
     const cx = (b.x ?? 0) + (b.w ?? 0) / 2;
     const cy = (b.y ?? 0) + (b.h ?? 0) / 2;

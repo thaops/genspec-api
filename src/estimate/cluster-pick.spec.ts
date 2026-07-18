@@ -143,6 +143,19 @@ describe('clusterPreviews', () => {
     expect(p.lines.some((l) => l.name.includes('Bê tông dầm'))).toBe(true);
   });
 
+  it('cụm BAO cột tròn ambiguous → region phủ để confirmRoundColumns bóc được', () => {
+    const roundCol = (id: string, x: number, y: number) =>
+      ({ _id: id, stableId: id, type: 'column', rawType: 'CIRCLE', ambiguous: true,
+         boundingBox: { x, y, w: 300, h: 300 } }) as any;
+    const objs = Array.from({ length: 10 }, (_, i) => roundCol(`c${i}`, i * 1000, 0));
+
+    const { clusters } = objectClusters(objs, MM);
+    expect(clusters.length).toBe(1);
+    expect(clusters[0].byType.column).toBe(10); // cột tròn ĐÃ vào cụm
+    const [p] = clusterPreviews(objs, clusters, MM, A);
+    expect(objectsInRegion(objs, p.region)).toHaveLength(10); // region phủ hết
+  });
+
   it('cắt ở `max` cụm — không trả về hàng trăm cụm rác', () => {
     const many = Array.from({ length: 20 }, (_, i) => ({
       x: i * 1e6, y: 0, w: 1000, h: 1000, count: 20 - i, byType: { wall: 1 },
