@@ -229,6 +229,8 @@ export interface TakeoffEngineRow {
   pricedFromWeb?: boolean;
   /** true = ĐƠN GIÁ do LLM ƯỚC LƯỢNG (Tier 5, không nguồn) — số phao cuối, PHẢI kiểm chứng. */
   estimated?: boolean;
+  /** true = giá ĐẠI DIỆN họ mã (Tier 3.5): giá THẬT từ đơn giá tỉnh nhưng chưa chốt biến thể. */
+  familyRep?: boolean;
   /**
    * Bản vẽ nguồn của dòng (truy vết). Dòng MỚI của bản đang bóc để trống (caller dùng
    * `input.drawingId`); dòng GỘP từ bản khác thì suy từ id takeoff.
@@ -402,6 +404,56 @@ export function applyEstimatedFallback(
     };
   });
   return { rows: out, estimatedCount };
+}
+
+/** 1 ứng viên đơn giá tỉnh cho 1 rowKey (dùng cho Tier 3.5). */
+export interface FamilyPriceOption {
+  code: string;
+  name: string;
+  unit: string;
+  unitPrice: number;
+  sourceDoc: string;
+}
+
+/**
+ * TIER 3.5 — GIÁ ĐẠI DIỆN HỌ MÃ (deterministic, dùng đơn giá tỉnh THẬT).
+ *
+ * Vấn đề đo trên prod: 4305 đơn giá Hà Nội nằm im vì rows không có `code`, mà đường DUY NHẤT
+ * gán code (web-lookup grounded) rất chập chờn (Gemini fail → 0 giá thật, rơi hết Tier 5 dù
+ * location đúng). Trong khi `NORM_FAMILIES` + `unit_prices.search` ĐÃ cho ra ĐÚNG HỌ mã +
+ * giá thật, chỉ chưa chốt được BIẾN THỂ (mác bê tông/vữa).
+ *
+ * Tier 3.5 áp giá ĐẠI DIỆN của họ (median theo unitPrice — giảm sai lệch biến thể so với
+ * min/max) cho dòng còn trống, TRƯỚC khi rơi Tier 5 LLM. Đây là giá THẬT có nguồn (sourceDoc),
+ * chỉ cần QS chốt biến thể → đánh dấu `familyRep` + nguồn ghi rõ "cần chọn biến thể". Khác Tier
+ * 5: có nguồn thật, sai số chỉ ở mức biến thể (mác), không phải đoán khơi khơi. PURE.
+ */
+export function applyFamilyRepresentative(
+  rows: TakeoffEngineRow[],
+  options: Map<TakeoffRowKey, FamilyPriceOption[]>,
+): { rows: TakeoffEngineRow[]; familyRepCount: number } {
+  let familyRepCount = 0;
+  const out = rows.map((r) => {
+    if (r.unitPrice != null) return r; // đã có giá (Tier 1-4)
+    const opts = (options.get(r.key) ?? []).filter((o) => o.unitPrice > 0 && unitPriceScale(o.unit, r.unit) != null);
+    if (opts.length === 0) return r;
+    // Đại diện = MEDIAN theo unitPrice đã quy đổi về đơn vị dòng.
+    const scaled = opts
+      .map((o) => ({ o, price: Math.round(o.unitPrice * (unitPriceScale(o.unit, r.unit) as number)) }))
+      .sort((a, b) => a.price - b.price);
+    const rep = scaled[Math.floor(scaled.length / 2)];
+    familyRepCount++;
+    return {
+      ...r,
+      code: rep.o.code,
+      unitPrice: rep.price,
+      totalPrice: Math.round(rep.price * r.quantity),
+      source: `${rep.o.sourceDoc} — giá đại diện họ mã (${opts.length} biến thể), CẦN CHỌN biến thể`,
+      familyRep: true,
+      note: `${r.note} · Đơn giá đại diện họ mã ${rep.o.code} (median ${opts.length} biến thể) — chốt biến thể để chính xác.`,
+    };
+  });
+  return { rows: out, familyRepCount };
 }
 
 export function applyPricingToRows(
@@ -2290,6 +2342,18 @@ export class TakeoffEngineService {
       }
     }
 
+    // ===== TIER 3.5 — giá ĐẠI DIỆN họ mã từ đơn giá tỉnh (giá THẬT, trước LLM) =====
+    // `suggestions` đã tra sẵn đơn giá tỉnh theo NORM_FAMILIES (đúng họ, có nguồn). Thay vì chỉ
+    // gợi ý rồi bỏ mặc rơi Tier 5, áp giá đại diện (median) → dùng được 4305 giá thật ngay cả
+    // khi web-lookup fail. Đánh dấu familyRep "cần chọn biến thể".
+    const familyOptions = new Map<TakeoffRowKey, FamilyPriceOption[]>();
+    for (const [key, list] of suggestions) {
+      familyOptions.set(key, list.map((s) => ({ code: s.code, name: s.name, unit: s.unit, unitPrice: s.unitPrice, sourceDoc: s.sourceDoc })));
+    }
+    const familyRes = applyFamilyRepresentative(rows, familyOptions);
+    rows = familyRes.rows;
+    const familyRepCount = familyRes.familyRepCount;
+
     // ===== TIER 5 — ước lượng LLM (phao cuối "luôn có giá") =====
     // Áp cho MỌI dòng vẫn null sau Tier 1-4 (kể cả dòng CHƯA có mã — khác web lookup vốn
     // chỉ tra dòng đã có mã). Cờ PRICE_ESTIMATE_FALLBACK (mặc định bật) + editPermission.
@@ -2358,6 +2422,7 @@ export class TakeoffEngineService {
       unitPrice: r.unitPrice,
       source: r.source,
       ...(r.estimated ? { estimated: true } : {}),
+      ...(r.familyRep ? { familyRep: true } : {}),
     }));
     const a = input.assumptions;
 
@@ -2718,6 +2783,18 @@ export class TakeoffEngineService {
           `${estimatedCount}/${rows.length} công tác không tra được công bố giá tỉnh/định mức/web nên đơn giá do AI ` +
           `ƯỚC LƯỢNG theo mặt bằng thị trường — cột Nguồn ghi "${ESTIMATED_PRICE_SOURCE}". Số CHỈ để tham khảo, ` +
           `PHẢI đối chiếu công bố giá Sở Xây dựng tỉnh trước khi dùng chính thức.`,
+      });
+    }
+    // Tier 3.5: giá đại diện họ mã (THẬT, chưa chốt biến thể) → gợi ý chọn biến thể.
+    if (familyRepCount > 0) {
+      findings.push({
+        id: 'takeoff-engine-family-price',
+        severity: 'warn',
+        area: 'unitPrice',
+        title: `${familyRepCount} đơn giá đại diện họ mã — cần chọn biến thể`,
+        detail:
+          `${familyRepCount}/${rows.length} công tác đã áp đơn giá THẬT từ công bố giá tỉnh nhưng lấy giá ĐẠI DIỆN ` +
+          `(median) của họ mã vì chưa chốt biến thể (mác bê tông/vữa, tiết diện). Chọn đúng mã ở mục gợi ý để giá chính xác.`,
       });
     }
     // đủ mã DB + đủ giá → 90; có mã web/mã phổ thông → 70; đủ mã DB thiếu giá → 75; thiếu mã hẳn → 55

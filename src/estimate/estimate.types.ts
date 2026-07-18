@@ -115,6 +115,8 @@ export interface TakeoffItem {
   source?: string;
   /** true = đơn giá do LLM ƯỚC LƯỢNG (Tier 5, không nguồn) — FE tô khác, PHẢI kiểm chứng. */
   estimated?: boolean;
+  /** true = giá đại diện họ mã (Tier 3.5): giá THẬT tỉnh nhưng chưa chốt biến thể. */
+  familyRep?: boolean;
 }
 
 // Sheet 09 — hệ số chi phí
@@ -203,6 +205,7 @@ export type Action =
       unitPrice?: number;
       source?: string;
       estimated?: boolean;
+      familyRep?: boolean;
     }
   | { type: 'delete_takeoff'; id: string }
   | {
