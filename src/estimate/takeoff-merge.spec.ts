@@ -1,4 +1,4 @@
-import { engineRowKeyFromId, planEngineTakeoffMerge, TakeoffEngineRow } from './takeoff-engine.service';
+import { engineRowKeyFromId, planEngineTakeoffMerge, regionIdOf, TakeoffEngineRow } from './takeoff-engine.service';
 import { applyActions } from './reducer';
 import { EstimateState, Action, TakeoffItem } from './estimate.types';
 
@@ -123,5 +123,47 @@ describe('planEngineTakeoffMerge — chỗ fix (staleIds + mergedRows)', () => {
     const existing = [item(KC, 'door', 'Cửa', 3)];
     const { mergedRows } = planEngineTakeoffMerge(existing, KHAC, [erow('wall_volume', 'Tường', 1)]);
     expect(mergedRows.map((r) => r.key)).toEqual(['wall_volume', 'door']);
+  });
+});
+
+describe('planEngineTakeoffMerge — VÙNG (chống bóc đè cùng bản)', () => {
+  const rA = 'aaaa1111', rB = 'bbbb2222';
+  /** dòng đã ghi cho (bản, vùng). */
+  const ritem = (region: string, key: string, qty: number): TakeoffItem =>
+    ({ id: `tk_engine_${KC}_${region}_${key}`, group: 'G', code: '', name: key, unit: 'm2', quantity: qty, note: '' }) as TakeoffItem;
+
+  it('regionIdOf: cùng bbox → cùng mã; khác bbox → khác mã; không region → 00000000', () => {
+    const r1 = regionIdOf({ x: 10, y: 20, w: 30, h: 40 });
+    expect(regionIdOf({ x: 10, y: 20, w: 30, h: 40 })).toBe(r1); // tất định
+    expect(regionIdOf({ x: 11, y: 20, w: 30, h: 40 })).not.toBe(r1);
+    expect(regionIdOf(undefined)).toBe('00000000');
+    expect(r1).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it('bóc vùng B khi đã có vùng A (cùng bản, cùng rowKey) → KHÔNG xoá vùng A', () => {
+    const existing = [ritem(rA, 'slab', 344)];
+    // rows của vùng B (regionId=rB)
+    const { staleIds, mergedRows } = planEngineTakeoffMerge(existing, KC, [erow('slab', 'Sàn', 100)], rB);
+    expect(staleIds).toEqual([]); // vùng A slab KHÔNG bị đè
+    // mergedRows gồm CẢ slab vùng A (344) lẫn slab vùng B (100) → 2 dòng
+    expect(mergedRows.filter((r) => r.key === 'slab').length).toBe(2);
+    expect(mergedRows.some((r) => r.quantity === 344)).toBe(true);
+    expect(mergedRows.some((r) => r.quantity === 100)).toBe(true);
+  });
+
+  it('bóc LẠI vùng A → thay ĐÚNG vùng A, giữ vùng B', () => {
+    const existing = [ritem(rA, 'slab', 344), ritem(rB, 'slab', 100)];
+    const { staleIds, mergedRows } = planEngineTakeoffMerge(existing, KC, [erow('slab', 'Sàn', 500)], rA);
+    expect(staleIds).toEqual([]); // slab vùng A upsert tại chỗ (cùng id)
+    // vùng B (100) GIỮ; vùng A giờ là 500 (từ rows mới)
+    expect(mergedRows.some((r) => r.quantity === 100)).toBe(true); // vùng B còn
+    expect(mergedRows.some((r) => r.quantity === 500)).toBe(true); // vùng A mới
+    expect(mergedRows.some((r) => r.quantity === 344)).toBe(false); // vùng A cũ đã thay
+  });
+
+  it('bóc TOÀN BẢN (không region) → dọn HẾT vùng (đo lại từ đầu)', () => {
+    const existing = [ritem(rA, 'slab', 344), ritem(rB, 'slab', 100)];
+    const { staleIds } = planEngineTakeoffMerge(existing, KC, [erow('slab', 'Sàn', 500)]); // whole
+    expect(staleIds.sort()).toEqual([`tk_engine_${KC}_${rA}_slab`, `tk_engine_${KC}_${rB}_slab`].sort());
   });
 });

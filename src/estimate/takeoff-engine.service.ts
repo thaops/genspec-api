@@ -236,6 +236,10 @@ export interface TakeoffEngineRow {
    * `input.drawingId`); dòng GỘP từ bản khác thì suy từ id takeoff.
    */
   drawingId?: string;
+  /** Mã vùng (8hex) dòng thuộc về — phân biệt các vùng/cụm cùng bản (chống bóc đè). */
+  regionId?: string;
+  /** Nhãn vùng hiển thị cho QS ("Cụm 1", "Tầng 1"…) — cột "Khu vực" trong sheet. */
+  regionLabel?: string;
 }
 
 // ===== Pricing (pure — verify script gọi trực tiếp, không Mongo) =====
@@ -622,11 +626,39 @@ const ROWKEY_GEOM_GROUP: Record<TakeoffRowKey, string> = {
   door: 'door', window: 'window',
 };
 
-/** id engine = `tk_engine_<drawingId 24hex>_<rowKey>` → tách rowKey (null nếu không khớp). */
+/**
+ * MÃ VÙNG 8-hex tất định từ bbox vùng bóc — bóc LẠI cùng vùng → cùng mã → thay đúng vùng đó;
+ * vùng KHÁC → mã khác → cộng thêm (KHÔNG đè). Toàn bản (không region) = '00000000'. PURE.
+ *
+ * Root cause bug "bóc đè": id cũ `tk_engine_<bản>_<rowKey>` không có chiều vùng → 2 cụm cùng
+ * bản trùng id → cụm sau xoá cụm trước (đo thật prod: Sàn cụm 1 mất khi bóc cụm 3).
+ */
+export const WHOLE_DRAWING_REGION = '00000000';
+export function regionIdOf(region?: { x: number; y: number; w: number; h: number }): string {
+  if (!region) return WHOLE_DRAWING_REGION;
+  const s = `${Math.round(region.x)}|${Math.round(region.y)}|${Math.round(region.w)}|${Math.round(region.h)}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * id engine = `tk_engine_<drawingId 24hex>_[<region 8hex>_]<rowKey>` → tách rowKey.
+ * Đoạn region 8-hex là TUỲ CHỌN (id cũ không có) — rowKey không bao giờ khớp `[0-9a-f]{8}_`
+ * (vd "wall_volume" có 'w','l' không phải hex) nên phân biệt được. null nếu không khớp.
+ */
 export function engineRowKeyFromId(id: string): TakeoffRowKey | null {
-  const m = /^tk_engine_[0-9a-fA-F]{24}_(.+)$/.exec(id);
+  const m = /^tk_engine_[0-9a-fA-F]{24}_(?:[0-9a-f]{8}_)?(.+)$/.exec(id);
   const key = m?.[1];
   return key && key in ROWKEY_GEOM_GROUP ? (key as TakeoffRowKey) : null;
+}
+
+/** id engine → mã vùng (8hex) nếu có; null = id cũ / toàn bản. */
+export function engineRegionIdFromId(id: string): string | null {
+  return /^tk_engine_[0-9a-fA-F]{24}_([0-9a-f]{8})_/.exec(id)?.[1] ?? null;
 }
 
 /**
@@ -681,15 +713,27 @@ export function planEngineTakeoffMerge(
   existing: TakeoffItem[],
   drawingId: string,
   rows: TakeoffEngineRow[],
+  /** Mã vùng đang bóc. Có region → chỉ đụng dòng CÙNG (bản, vùng), vùng khác GIỮ (cộng dồn).
+   *  Toàn bản (WHOLE_DRAWING_REGION) → dọn TẤT CẢ vùng của bản (đo lại từ đầu). */
+  regionId: string = WHOLE_DRAWING_REGION,
 ): { staleIds: string[]; mergedRows: TakeoffEngineRow[] } {
-  const thisPrefix = `tk_engine_${drawingId}_`;
-  const newIds = new Set(rows.map((r) => `${thisPrefix}${r.key}`));
+  const drawingPrefix = `tk_engine_${drawingId}_`;
+  const wholeRedo = regionId === WHOLE_DRAWING_REGION;
+  // Prefix của ĐÚNG vùng đang bóc — toàn bản dùng id CŨ (không mã vùng, tương thích ngược).
+  const regionPrefix = wholeRedo ? drawingPrefix : `${drawingPrefix}${regionId}_`;
+  const newIds = new Set(rows.map((r) => `${regionPrefix}${r.key}`));
+  /** true nếu id thuộc CÙNG (bản, vùng) đang bóc. */
+  const sameScope = (id: string) => {
+    if (!id.startsWith(drawingPrefix)) return false;
+    if (wholeRedo) return true; // toàn bản → mọi vùng của bản này thuộc phạm vi đo lại
+    return engineRegionIdFromId(id) === regionId; // chỉ đúng vùng này
+  };
   const staleIds = existing
     .filter((t) => {
       if (newIds.has(t.id)) return false; // dòng sẽ được upsert thay tại chỗ
-      // Dòng cũ CỦA CHÍNH bản này (bóc lại, rowKey không còn) → dọn.
-      if (t.id.startsWith(thisPrefix)) return true;
-      // Dòng của bản KHÁC → GIỮ (nếu không, bóc gộp xoá sạch bản trước).
+      // Dòng cũ CÙNG (bản, vùng) đang bóc (rowKey không còn) → dọn. Vùng KHÁC của cùng bản → GIỮ.
+      if (sameScope(t.id)) return true;
+      // Dòng của bản KHÁC (hoặc vùng khác cùng bản) → GIỮ (không, bóc xoá sạch phần trước).
       if (isEngineTakeoffId(t.id)) return false;
       // Dòng LEGACY (engine/LLM bản cũ, id không theo scheme): nhận diện bằng token
       // `[nhóm:` — token này CHỈ còn để nhận legacy, KHÔNG ghi vào note mới nữa (nó
@@ -698,14 +742,18 @@ export function planEngineTakeoffMerge(
     })
     .map((t) => t.id);
   const deleted = new Set(staleIds);
+  // GIỮ + render lại: mọi dòng engine KHÔNG bị dọn và KHÔNG bị dòng mới thay — gồm dòng bản
+  // khác VÀ vùng khác của cùng bản (đây là chỗ chống "bóc đè": vùng khác cùng bản được bảo toàn).
   const otherRows: TakeoffEngineRow[] = existing
-    .filter((t) => isEngineTakeoffId(t.id) && !t.id.startsWith(thisPrefix) && !deleted.has(t.id))
+    .filter((t) => isEngineTakeoffId(t.id) && !deleted.has(t.id) && !newIds.has(t.id))
     .map((t): TakeoffEngineRow | null => {
       const key = engineRowKeyFromId(t.id);
       if (!key) return null;
       return {
         key,
         drawingId: engineDrawingIdFromId(t.id) ?? undefined,
+        regionId: engineRegionIdFromId(t.id) ?? undefined,
+        regionLabel: (t as any).regionLabel,
         group: ROWKEY_GEOM_GROUP[key],
         boqGroup: t.group ?? BOQ_GROUP[key],
         code: t.code ?? '',
@@ -1884,6 +1932,8 @@ export interface TakeoffEngineInput {
   editPermission?: boolean;
   /** QS xác nhận vòng tròn ambiguous trên bản KC LÀ cột tròn → đo πr²×H (xem roundColumnRows). */
   confirmRoundColumns?: boolean;
+  /** Nhãn vùng do FE đặt ("Cụm 1", "Tầng 1"…) — lưu vào dòng, hiện cột "Khu vực". */
+  regionLabel?: string;
 }
 
 @Injectable()
@@ -2392,11 +2442,20 @@ export class TakeoffEngineService {
       ? { clusters: 1, spanM: 0 }
       : { clusters: preClusters.clusters.length, spanM: preClusters.spanM };
 
-    // Id deterministic theo bản vẽ + dòng → bóc lại N lần vẫn chỉ 1 bộ (reducer upsert theo id).
-    const engineTakeoffId = (key: string) => `tk_engine_${input.drawingId}_${key}`;
-    // GỘP nhiều bản: quyết định xoá dòng nào (chỉ của bản này) + render-set toàn cục
-    // (dòng mọi bản). Tách hàm pure để test khoá hành vi — xem takeoff-merge.spec.
-    const { staleIds, mergedRows } = planEngineTakeoffMerge(state.takeoff ?? [], input.drawingId, rows);
+    // Id deterministic theo bản vẽ + VÙNG + dòng → bóc lại cùng vùng thay đúng vùng đó, vùng
+    // khác cộng thêm (chống bóc đè). Vùng suy từ region bbox; toàn bản = '00000000'.
+    const regionId = regionIdOf(input.region);
+    const regionLabel = input.regionLabel;
+    // Toàn bản (không region) → id CŨ `tk_engine_<bản>_<key>` (tương thích ngược, upsert tại
+    // chỗ trên estimate cũ). Bóc theo VÙNG → chèn mã vùng để các vùng không đè nhau.
+    const engineTakeoffId = (key: string) =>
+      regionId === WHOLE_DRAWING_REGION
+        ? `tk_engine_${input.drawingId}_${key}`
+        : `tk_engine_${input.drawingId}_${regionId}_${key}`;
+    // Gắn vùng vào từng dòng để render cột "Khu vực" + gộp giữ đúng vùng.
+    rows = rows.map((r) => ({ ...r, regionId, regionLabel }));
+    // GỘP nhiều bản/vùng: xoá dòng CÙNG (bản, vùng) đang bóc; giữ bản khác + vùng khác.
+    const { staleIds, mergedRows } = planEngineTakeoffMerge(state.takeoff ?? [], input.drawingId, rows, regionId);
     const cleanupActions: Action[] = staleIds.map((id) => ({ type: 'delete_takeoff', id }));
 
     // PHÂN TÍCH ĐƠN GIÁ vào state → `analyses` (model đã có sẵn) → sheet 03 + compute()
@@ -2430,6 +2489,7 @@ export class TakeoffEngineService {
       source: r.source,
       ...(r.estimated ? { estimated: true } : {}),
       ...(r.familyRep ? { familyRep: true } : {}),
+      ...(r.regionLabel ? { regionLabel: r.regionLabel } : {}),
     }));
     const a = input.assumptions;
 
@@ -2456,8 +2516,12 @@ export class TakeoffEngineService {
       const mirror = rowsToUpdateCells(
         sheetRows.map((r, i) => ({
           stt: String(i + 1),
-          // Dòng của bản này → drawingId hiện tại; dòng gộp từ bản khác → lấy từ id của nó.
-          drawing: drawingNameById.get(r.drawingId ?? input.drawingId) ?? '',
+          // Cột "Bản vẽ" = TRUY VẾT: tên bản + NHÃN VÙNG ("F550 · Cụm 1") để phân biệt các vùng/
+          // cụm cùng bản (mỗi vùng nhóm dòng riêng). Ghép ở đây thay vì thêm cột mới → KHÔNG
+          // đổi số cột layout (tránh phá probe header + sheet cũ — bài học vision).
+          drawing:
+            (drawingNameById.get(r.drawingId ?? input.drawingId) ?? '') +
+            (r.regionLabel ? ` · ${r.regionLabel}` : ''),
           code: r.code,
           name: r.name,
           objectGroup: OBJECT_GROUP_LABEL[r.group] ?? r.group,

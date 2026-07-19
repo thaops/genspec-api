@@ -117,6 +117,8 @@ export interface TakeoffItem {
   estimated?: boolean;
   /** true = giá đại diện họ mã (Tier 3.5): giá THẬT tỉnh nhưng chưa chốt biến thể. */
   familyRep?: boolean;
+  /** Nhãn vùng/cụm dòng thuộc về ("Cụm 1", "Tầng 1"…) — cột "Khu vực". */
+  regionLabel?: string;
 }
 
 // Sheet 09 — hệ số chi phí
@@ -206,6 +208,7 @@ export type Action =
       source?: string;
       estimated?: boolean;
       familyRep?: boolean;
+      regionLabel?: string;
     }
   | { type: 'delete_takeoff'; id: string }
   | {

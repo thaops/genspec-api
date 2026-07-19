@@ -204,6 +204,7 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
               // Cờ giá ước lượng (Tier 5) / đại diện họ mã (Tier 3.5): đi cùng unitPrice.
               estimated: 'unitPrice' in a ? a.estimated : ex?.estimated,
               familyRep: 'unitPrice' in a ? a.familyRep : ex?.familyRep,
+              regionLabel: 'regionLabel' in a ? a.regionLabel : ex?.regionLabel,
             };
           },
         ),
