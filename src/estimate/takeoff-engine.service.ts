@@ -2014,6 +2014,46 @@ export class TakeoffEngineService {
     return out;
   }
 
+  /**
+   * BÓC NHIỀU VÙNG của cùng bản trong 1 call — loop `run()` + APPLY tuần tự để mỗi vùng CỘNG
+   * DỒN (state cập nhật giữa các vùng; id theo vùng chống đè). Khác `run()`: endpoint này TỰ
+   * APPLY (giống FE "bóc tất cả" đã auto-apply từng cụm), giảm N round-trip xuống 1. Trả proposal
+   * CUỐI + số vùng đã bóc.
+   */
+  async runRegions(
+    userId: string,
+    estimateId: string,
+    input: {
+      drawingId: string;
+      unitsPerDrawingUnit: number;
+      assumptions: TakeoffAssumptions;
+      rejectedObjectIds?: string[];
+      regions: { region: { x: number; y: number; w: number; h: number }; regionLabel?: string; confirmRoundColumns?: boolean }[];
+    },
+  ) {
+    let last: Awaited<ReturnType<TakeoffEngineService['run']>> | null = null;
+    let applied = 0;
+    for (const r of input.regions) {
+      const proposal = await this.run(userId, estimateId, {
+        drawingId: input.drawingId,
+        unitsPerDrawingUnit: input.unitsPerDrawingUnit,
+        assumptions: input.assumptions,
+        rejectedObjectIds: input.rejectedObjectIds,
+        region: r.region,
+        regionLabel: r.regionLabel,
+        confirmRoundColumns: r.confirmRoundColumns,
+        editPermission: true,
+      });
+      const actions = (proposal as { actions?: Action[] }).actions;
+      if (!actions || (proposal as { needsClusterPick?: boolean }).needsClusterPick) continue;
+      // APPLY để vùng sau đọc được state đã cộng dồn (id theo vùng → không đè vùng trước).
+      await this.estimates.applyActions(userId, estimateId, actions, 'ai');
+      applied++;
+      last = proposal;
+    }
+    return { ...(last ?? {}), batchApplied: applied, batchTotal: input.regions.length };
+  }
+
   async run(userId: string, estimateId: string, input: TakeoffEngineInput) {
     const doc = await this.estimates.getOwned(userId, estimateId);
     const state: EstimateState = this.estimates.stateForPrompt(doc);

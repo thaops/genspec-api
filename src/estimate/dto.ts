@@ -121,6 +121,57 @@ export class TakeoffEngineDto {
   @IsOptional()
   @IsString()
   discipline?: string;
+
+  /** Nhãn vùng ("Cụm 1"…) → cột "Khu vực", phân biệt các vùng cùng bản. */
+  @IsOptional()
+  @IsString()
+  regionLabel?: string;
+}
+
+/** 1 vùng trong batch — region bbox + nhãn + xác nhận cột tròn riêng. */
+export class TakeoffRegionItemDto {
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => TakeoffRegionDto)
+  region: TakeoffRegionDto;
+
+  @IsOptional()
+  @IsString()
+  regionLabel?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  confirmRoundColumns?: boolean;
+}
+
+/** Bóc NHIỀU vùng của CÙNG bản trong 1 call — BE loop + apply tuần tự (cộng dồn theo vùng). */
+export class TakeoffEngineBatchDto {
+  @IsString()
+  @MinLength(1)
+  drawingId: string;
+
+  @IsNumber()
+  @IsPositive()
+  unitsPerDrawingUnit: number;
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => TakeoffAssumptionsDto)
+  assumptions: TakeoffAssumptionsDto;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TakeoffRegionItemDto)
+  regions: TakeoffRegionItemDto[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  rejectedObjectIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  discipline?: string;
 }
 
 export class CopilotDto {

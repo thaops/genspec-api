@@ -20,7 +20,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import { CurrentUser } from '../common/current-user.decorator';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import { CopilotService } from './copilot.service';
-import { ActionsDto, CopilotDto, CreateEstimateDto, RepriceDto, TakeoffEngineDto } from './dto';
+import { ActionsDto, CopilotDto, CreateEstimateDto, RepriceDto, TakeoffEngineDto, TakeoffEngineBatchDto } from './dto';
 import { EstimateService } from './estimate.service';
 import { RepriceService } from './reprice.service';
 import { TakeoffEngineService } from './takeoff-engine.service';
@@ -92,6 +92,16 @@ export class EstimateController {
   ) {
     // ⚡ là hành động chỉnh sửa (chỉ trả proposal, không tự apply) → bật fallback mã phổ thông mặc định trừ khi FE tắt.
     return this.takeoffEngine.run(userId, id, { ...dto, editPermission: dto.editPermission ?? true });
+  }
+
+  /** Bóc NHIỀU vùng cùng bản 1 call — BE loop + APPLY tuần tự (cộng dồn theo vùng). */
+  @Post('estimates/:id/takeoff-engine/batch')
+  takeoffEngineBatch(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Body() dto: TakeoffEngineBatchDto,
+  ) {
+    return this.takeoffEngine.runRegions(userId, id, dto);
   }
 
   /** Áp đơn giá tỉnh vào giá VL/NC/máy — trả proposal + coverage (KHÔNG tự apply). */
