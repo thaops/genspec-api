@@ -22,6 +22,7 @@ import { NormWebLookupService, WebNormCache, WebNormCacheSchema } from './norm-w
 import { PriceWebLookupService, WebPriceCache, WebPriceCacheSchema } from './price-web-lookup.service';
 import { RepriceService } from './reprice.service';
 import { TakeoffEngineService } from './takeoff-engine.service';
+import { WorkbookComposerService } from './workbook-composer.service';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { TakeoffEngineService } from './takeoff-engine.service';
     PriceWebLookupService,
     TakeoffEngineService,
     RepriceService,
+    WorkbookComposerService,
   ],
   exports: [EstimateService],
 })

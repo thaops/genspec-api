@@ -136,6 +136,32 @@ export interface Sheet {
   data: any;
 }
 
+/**
+ * Nguồn gốc một sheet trong workbook:
+ * - `user`    : sheet dữ liệu gốc của user — engine KHÔNG BAO GIỜ sửa/đè/xoá.
+ * - `genspec` : derived sheet do Semantic Layer (WorkbookComposer) sinh ra từ EstimateState.
+ *   Là pure view: regenerate mỗi lần đọc, KHÔNG lưu DB, FE khoá read-only + tách nhóm.
+ * Thiếu field này ⇒ coi như `user` (an toàn: không bao giờ tự động khoá/xoá sheet lạ).
+ */
+export type SheetOrigin = 'user' | 'genspec';
+
+/** Nhóm hiển thị các derived sheet ở FE explorer. */
+export const GENSPEC_SHEET_GROUP = 'GenSpec AI';
+
+/** Metadata gắn vào MỌI derived sheet — FE lọc theo `origin` để tách nhóm & chặn ghi đè. */
+export interface DerivedSheetMeta {
+  origin: 'genspec';
+  group: typeof GENSPEC_SHEET_GROUP;
+  composerKey: string; // 'dashboard' | 'boq-summary' | 'validation' | ...
+  generated: true;
+  readOnly: true;
+}
+
+/** true nếu sheet là derived (do GenSpec sinh) — dùng ở cả BE lẫn khi lọc payload save. */
+export function isDerivedSheet(s: Pick<Sheet, 'metadata'>): boolean {
+  return s.metadata?.origin === 'genspec';
+}
+
 export interface EntityMap {
   entityId: string;
   sheetId: string;

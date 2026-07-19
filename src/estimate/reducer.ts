@@ -213,7 +213,9 @@ function applyOne(state: EstimateState, a: Action): EstimateState {
       return { ...state, takeoff: state.takeoff.filter((t) => t.id !== a.id) };
 
     case 'set_sheets':
-      return { ...state, sheets: a.sheets };
+      // Derived sheet (Semantic Layer, origin=genspec) là pure view — KHÔNG BAO GIỜ lưu DB,
+      // dù FE lỡ gửi lại trong payload. Chỉ persist sheet gốc của user.
+      return { ...state, sheets: a.sheets.filter((s) => s.metadata?.origin !== 'genspec') };
 
     case 'update_cells': {
       // sheetId có thể stale (sheet bị tái tạo trước khi Apply) — resolve fallback

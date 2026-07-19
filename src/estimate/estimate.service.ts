@@ -13,6 +13,7 @@ import { validate } from './validation';
 import { generatePatch, applyRollback } from './patch-history';
 import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
 import { excelToUniverSheets } from './excel-to-univer';
+import { WorkbookComposerService } from './workbook-composer.service';
 import {
   ChatSession,
   ChatSessionMeta,
@@ -66,6 +67,7 @@ export class EstimateService {
   constructor(
     @InjectModel(Estimate.name) private readonly model: Model<EstimateDocument>,
     @InjectModel(Drawing.name) private readonly drawingModel: Model<DrawingDocument>,
+    private readonly composer: WorkbookComposerService,
   ) {}
 
   // ── Chat sessions ────────────────────────────────────────────────────────
@@ -216,7 +218,19 @@ export class EstimateService {
   }
 
   async getOne(userId: string, id: string) {
-    return toEstimateDto(await this.getOwned(userId, id));
+    const dto = toEstimateDto(await this.getOwned(userId, id));
+    // Semantic Layer: derived sheets (Dashboard/BOQ/Validation/…) sinh on-read, KHÔNG lưu DB.
+    // Chỉ ở getOne (nơi FE render workbook) — list/create không cần, tránh nặng.
+    const derived = await this.composer.deriveSheets(dto.id, {
+      name: dto.name,
+      projectInfo: dto.projectInfo,
+      takeoff: dto.takeoff,
+      costSummary: dto.costSummary,
+      validation: dto.validation,
+    });
+    // Sheet của user (loại mọi derived lỡ bị persist trước khi có guard FE) đứng trước, derived sau.
+    const userSheets = (dto.sheets ?? []).filter((s) => s.metadata?.origin !== 'genspec');
+    return { ...dto, sheets: [...userSheets, ...derived] };
   }
 
   async rename(userId: string, id: string, name: string) {
