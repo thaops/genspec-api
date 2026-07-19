@@ -239,6 +239,24 @@ describe('compute – BOQ aggregation', () => {
     expect(boq.some((r) => r.quantity === 52)).toBe(false);
   });
 
+  it('đơn giá trên dòng takeoff (Tier 1-5, không analysis) → vào Cost Summary (không còn 0)', () => {
+    const state: EstimateState = {
+      ...baseState(),
+      takeoff: [
+        { id: 't1', code: 'AE.22122', name: 'Xây tường', unit: 'm3', quantity: 10, unitPrice: 1_500_000 },
+        { id: 't2', code: '', name: 'Ống nước', unit: 'm', quantity: 100, unitPrice: 120_000 },
+      ] as any,
+      analyses: [], // KHÔNG có phân tích đơn giá
+    };
+    const { boq, costSummary } = compute(state);
+    const wall = boq.find((r) => r.name === 'Xây tường')!;
+    expect(wall.unitPrice).toBe(1_500_000);
+    expect(wall.total).toBe(15_000_000);
+    // directTotal = 10×1.5tr + 100×120k = 15tr + 12tr = 27tr (không còn 0)
+    expect(costSummary.directTotal).toBe(27_000_000);
+    expect(costSummary.total).toBeGreaterThan(27_000_000); // + markup
+  });
+
   it('returns empty boq for no takeoff', () => {
     const { boq, costSummary } = compute(baseState());
     expect(boq).toHaveLength(0);

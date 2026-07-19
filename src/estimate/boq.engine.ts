@@ -69,16 +69,19 @@ export function compute(state: EstimateState): Computed {
   //
   // Luật: dòng chưa có mã gom theo tên; `unit` LUÔN nằm trong khoá nên hai đơn vị khác nhau
   // không bao giờ cộng được vào nhau, kể cả khi trùng mã.
-  const qtyByCode = new Map<string, { code: string; name: string; unit: string; quantity: number }>();
+  const qtyByCode = new Map<string, { code: string; name: string; unit: string; quantity: number; unitPrice?: number }>();
   for (const t of state.takeoff) {
     const code = (t.code ?? '').trim();
     const unit = (t.unit ?? '').trim();
     const ident = code ? `code:${code.toLowerCase()}` : `name:${(t.name ?? '').trim().toLowerCase()}`;
     const key = `${ident}|unit:${unit.toLowerCase()}`;
-    const prev = qtyByCode.get(key) ?? { code, name: t.name, unit, quantity: 0 };
+    const prev = qtyByCode.get(key) ?? { code, name: t.name, unit, quantity: 0, unitPrice: undefined };
     prev.quantity += num(t.quantity);
     if (!prev.name) prev.name = t.name;
     if (!prev.unit) prev.unit = unit;
+    // Giữ đơn giá đã có trên dòng takeoff (Tier 1-5: đơn giá tỉnh trọn gói / đại diện họ mã /
+    // ước lượng). Đây là nguồn giá THỰC TẾ khi chưa có phân tích đơn giá chi tiết.
+    if (prev.unitPrice == null && t.unitPrice != null) prev.unitPrice = num(t.unitPrice);
     qtyByCode.set(key, prev);
   }
 
@@ -92,7 +95,14 @@ export function compute(state: EstimateState): Computed {
     // Dòng chưa có mã không tra được phân tích đơn giá — `analysisByCode` khoá theo mã thật,
     // không phải khoá gom.
     const analysis = info.code ? analysisByCode.get(info.code.toLowerCase()) : undefined;
-    const up = analysis ? analysisUnitPrice(state, analysis) : { material: 0, labor: 0, machine: 0, unitPrice: 0 };
+    // Ưu tiên PHÂN TÍCH ĐƠN GIÁ (có tách VL/NC/Máy). Không có analysis nhưng dòng ĐÃ có đơn giá
+    // (Tier 1-5) → dùng luôn đơn giá đó cho tổng, gộp tạm vào "vật liệu" (chưa tách được VL/NC/M
+    // khi giá trọn gói). Nhờ vậy Cost Summary phản ánh đúng giá đã áp, không còn = 0.
+    const up = analysis
+      ? analysisUnitPrice(state, analysis)
+      : info.unitPrice != null && info.unitPrice > 0
+        ? { material: Math.round(info.unitPrice), labor: 0, machine: 0, unitPrice: Math.round(info.unitPrice) }
+        : { material: 0, labor: 0, machine: 0, unitPrice: 0 };
     const qty = info.quantity;
     const total = Math.round(up.unitPrice * qty);
     boq.push({
