@@ -8,7 +8,7 @@ import {
   ComposeInput,
   drawingIdOfTakeoff,
 } from './composers';
-import { CostSummary, Sheet, TakeoffItem, ValidationReport } from '../estimate.types';
+import { CostSummary, DEFAULT_MARKUPS, Sheet, TakeoffItem, ValidationReport } from '../estimate.types';
 
 function cell(s: Sheet, r: number, c: number): any {
   return s.data.cellData?.[String(r)]?.[String(c)]?.v;
@@ -28,6 +28,18 @@ function valueForLabel(s: Sheet, label: string, labelCol: number, valueCol: numb
   }
   return undefined;
 }
+/** Công thức (`f`) ở `valueCol` của dòng mà `labelCol` == label. */
+function formulaForLabel(s: Sheet, label: string, labelCol: number, valueCol: number): any {
+  const cd = s.data.cellData ?? {};
+  for (const r of Object.keys(cd)) {
+    if (cd[r]?.[String(labelCol)]?.v === label) return cd[r]?.[String(valueCol)]?.f;
+  }
+  return undefined;
+}
+/** Công thức `f` của ô cụ thể. */
+function fAt(s: Sheet, r: number, c: number): any {
+  return s.data.cellData?.[String(r)]?.[String(c)]?.f;
+}
 
 const CS: CostSummary = {
   directMaterial: 100, directLabor: 0, directMachine: 0, directTotal: 100,
@@ -41,6 +53,7 @@ function baseInput(over: Partial<ComposeInput> = {}): ComposeInput {
     projectInfo: { location: 'Hà Nội' },
     takeoff: [],
     costSummary: CS,
+    markups: { ...DEFAULT_MARKUPS },
     validation: VAL,
     drawings: [],
     typeCounts: [],
@@ -80,14 +93,23 @@ describe('composeAll — contract', () => {
 });
 
 describe('composeDashboard', () => {
-  it('phản ánh costSummary.total (mutation: đổi total → ô đổi)', () => {
-    const s1 = composeDashboard(baseInput());
-    const s2 = composeDashboard(baseInput({ costSummary: { ...CS, total: 999 } }));
-    const tot1 = col(s1, 1).find((v) => String(v).includes('124'));
-    const tot2 = col(s2, 1).find((v) => String(v).includes('999'));
-    expect(tot1).toBeDefined();
-    expect(tot2).toBeDefined();
-    expect(tot1).not.toEqual(tot2);
+  it('cache costSummary.total (mutation: đổi total → ô đổi)', () => {
+    const inp = (total: number) => baseInput({ takeoff: [tk({ unitPrice: 100, quantity: 1, group: 'Thô' })], costSummary: { ...CS, total } });
+    expect(valueForLabel(composeDashboard(inp(124)), 'TỔNG CHI PHÍ (gồm hệ số)', 0, 1)).toBe(124);
+    expect(valueForLabel(composeDashboard(inp(999)), 'TỔNG CHI PHÍ (gồm hệ số)', 0, 1)).toBe(999);
+  });
+
+  it('TỔNG CHI PHÍ là CÔNG THỨC cross-sheet trỏ Cost Summary (không phải số tĩnh)', () => {
+    const s = composeDashboard(baseInput({ takeoff: [tk({ unitPrice: 100, quantity: 1, group: 'Thô' })] }));
+    const f = formulaForLabel(s, 'TỔNG CHI PHÍ (gồm hệ số)', 0, 1);
+    expect(f).toContain("'06. Tổng hợp chi phí'!C");
+  });
+
+  it('chi phí từng phần là SUMIF trên BOQ theo nhóm', () => {
+    const s = composeDashboard(baseInput({ takeoff: [tk({ unitPrice: 100, quantity: 2, group: 'PHẦN THÔ' })] }));
+    const f = formulaForLabel(s, '— PHẦN THÔ', 0, 1);
+    expect(f).toContain('SUMIF');
+    expect(f).toContain("'01. Tổng hợp BOQ (đầy đủ)'");
   });
 
   it('đếm đúng số dòng estimated (mutation-check)', () => {
@@ -111,10 +133,16 @@ describe('composeBoqSummary — KHÔNG bịa', () => {
     expect(cell(s, 1, 12)).toBe(''); // thành tiền trống, không bịa 0
   });
 
-  it('có giá → thành tiền = đơn giá × KL', () => {
+  it('có giá → thành tiền là CÔNG THỨC =F*J, cache = đơn giá × KL', () => {
     const s = composeBoqSummary(baseInput({ takeoff: [tk({ unitPrice: 200, quantity: 3, code: 'AE.1' })] }));
-    expect(cell(s, 1, 12)).toBe(600);
+    expect(cell(s, 1, 12)).toBe(600); // cache precompute
+    expect(fAt(s, 1, 12)).toBe('=F2*J2'); // công thức sống — sửa KL/đơn giá là tự cập nhật
     expect(cell(s, 1, 13)).toBe('OK');
+  });
+
+  it('thiếu giá → KHÔNG có công thức (ô trống, không tính bịa)', () => {
+    const s = composeBoqSummary(baseInput({ takeoff: [tk({ name: 'Ống', unit: 'm', quantity: 10 })] }));
+    expect(fAt(s, 1, 12)).toBeUndefined();
   });
 
   it('gắn đúng bản vẽ theo drawingId trong id', () => {
@@ -167,10 +195,44 @@ describe('composeDoorSchedule', () => {
 });
 
 describe('composeCostSummary', () => {
-  it('bậc A→F lấy đúng từ costSummary', () => {
+  it('bậc A→F cache đúng từ costSummary (số, không phải chuỗi)', () => {
     const s = composeCostSummary(baseInput({ takeoff: [tk({ unitPrice: 100, quantity: 1, group: 'Thô' })] }));
     const vals = col(s, 2);
-    expect(vals).toContain('124'); // F total
-    expect(vals).toContain('11'); // D vat
+    expect(vals).toContain(124); // F total (numeric)
+    expect(vals).toContain(11); // D vat
+  });
+
+  it('F tổng dự toán là CÔNG THỨC cộng bậc A→E (sống)', () => {
+    const s = composeCostSummary(baseInput({ takeoff: [tk({ unitPrice: 100, quantity: 1, group: 'Thô' })] }));
+    const f = formulaForLabel(s, 'F. TỔNG DỰ TOÁN', 0, 2);
+    expect(f).toMatch(/^=C\d+\+C\d+\+C\d+\+C\d+\+C\d+$/);
+  });
+
+  it('tổng nhóm là SUMIF trên BOQ (đổi giá BOQ là tổng chạy)', () => {
+    const s = composeCostSummary(baseInput({ takeoff: [tk({ unitPrice: 100, quantity: 1, group: 'Thô' })] }));
+    const f = formulaForLabel(s, 'Thô', 0, 2);
+    expect(f).toContain('SUMIF');
+    expect(f).toContain("'01. Tổng hợp BOQ (đầy đủ)'");
+  });
+});
+
+describe('cross-sheet address khớp (Dashboard ↔ Cost Summary, nhiều nhóm)', () => {
+  it('ô Dashboard TỔNG CHI PHÍ trỏ ĐÚNG dòng F của Cost Summary', () => {
+    const tks = [
+      tk({ id: 'a', unitPrice: 100, quantity: 1, group: 'G1' }),
+      tk({ id: 'b', unitPrice: 200, quantity: 1, group: 'G2' }),
+      tk({ id: 'c', unitPrice: 300, quantity: 1, group: 'G3' }),
+    ];
+    const inp = baseInput({ takeoff: tks });
+    const dash = composeDashboard(inp);
+    const cost = composeCostSummary(inp);
+    // Địa chỉ ô mà Dashboard trỏ tới: ...!C<row>
+    const f = formulaForLabel(dash, 'TỔNG CHI PHÍ (gồm hệ số)', 0, 1) as string;
+    const m = /!C(\d+)$/.exec(f);
+    expect(m).not.toBeNull();
+    const a1Row = Number(m![1]);
+    // Ô đó trong Cost Summary phải là "F. TỔNG DỰ TOÁN" (cellData index = a1Row-1).
+    const label = cost.data.cellData[String(a1Row - 1)]?.['0']?.v;
+    expect(label).toBe('F. TỔNG DỰ TOÁN');
   });
 });

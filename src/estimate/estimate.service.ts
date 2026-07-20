@@ -226,6 +226,7 @@ export class EstimateService {
       projectInfo: dto.projectInfo,
       takeoff: dto.takeoff,
       costSummary: dto.costSummary,
+      markups: dto.markups,
       validation: dto.validation,
     });
     // Sheet của user (loại mọi derived lỡ bị persist trước khi có guard FE) đứng trước, derived sau.

@@ -23,6 +23,7 @@ export type CellValue = string | number | null | undefined;
 export interface Cell {
   v: CellValue;
   s?: Record<string, any>;
+  f?: string; // công thức Univer (vd "=F2*J2") — Univer tự recalc, `v` là cache hiển thị
 }
 /** Một dòng = mảng ô (giá trị thô hoặc {v,s} khi cần style riêng). */
 export type Row = Array<CellValue | Cell>;

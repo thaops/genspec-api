@@ -11,7 +11,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CostSummary, ProjectInfo, Sheet, TakeoffItem, ValidationReport } from './estimate.types';
+import { CostSummary, Markups, ProjectInfo, Sheet, TakeoffItem, ValidationReport } from './estimate.types';
 import { Drawing, DrawingDocument } from '../drawing/schemas/drawing.schema';
 import { DrawingObject, DrawingObjectDocument } from '../drawing/schemas/drawing-object.schema';
 import { composeAll, ComposeInput, DrawingLite, EntityLite, EntityTypeCount } from './workbook-composer/composers';
@@ -24,6 +24,7 @@ export interface ComposeSource {
   projectInfo: ProjectInfo;
   takeoff: TakeoffItem[];
   costSummary: CostSummary;
+  markups: Markups;
   validation: ValidationReport;
 }
 

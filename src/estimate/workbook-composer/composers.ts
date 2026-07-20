@@ -5,15 +5,22 @@
  *  - Derived sheet = pure view. KHÔNG bịa số: mã trống để trống, giá thiếu ghi "cần QS".
  *  - Mỗi hàm nhận dữ liệu thô (không đụng DB) ⇒ test mutation-check được.
  *  - Thêm composer mới (Steel/Window/MEP…) = thêm hàm, KHÔNG sửa engine bóc tách.
+ *
+ * PHASE A — CÔNG THỨC SỐNG:
+ *  Ô suy ra (thành tiền, tổng nhóm, bậc A→F, KPI dashboard, thống kê cửa) phát ra CÔNG THỨC
+ *  Univer (`f`) + kèm `v` = giá trị precompute (cache hiển thị ngay). Univer có sẵn formula
+ *  engine ⇒ sửa ô nguồn → tự recalc cả workbook trong session, KHÔNG cần regenerate.
+ *  Ô cơ sở (khối lượng, đơn giá) giữ là GIÁ TRỊ. Không tự viết calc engine.
  */
 import {
   CostSummary,
+  Markups,
   ProjectInfo,
   Sheet,
   TakeoffItem,
   ValidationReport,
 } from '../estimate.types';
-import { buildSheet, Row, vnd, WARN_STYLE } from './sheet-builder';
+import { buildSheet, Cell, Row, WARN_STYLE } from './sheet-builder';
 
 export interface DrawingLite {
   id: string;
@@ -38,11 +45,20 @@ export interface ComposeInput {
   projectInfo: ProjectInfo;
   takeoff: TakeoffItem[];
   costSummary: CostSummary;
+  markups: Markups;
   validation: ValidationReport;
   drawings: DrawingLite[];
   typeCounts: EntityTypeCount[];
   doors: EntityLite[]; // door/window entities (đã cap ở service)
 }
+
+// ---- tên sheet (dùng trong cross-sheet reference) ----
+export const BOQ_SHEET = '01. Tổng hợp BOQ (đầy đủ)';
+export const COST_SHEET = '06. Tổng hợp chi phí';
+const qn = (n: string) => `'${n.replace(/'/g, "''")}'`; // quote sheet name cho formula
+
+/** Ô công thức: giữ `v` (precompute, cache) + `f` (công thức Univer tự recalc). */
+const fc = (formula: string, cache: number): Cell => ({ v: cache, f: formula });
 
 // ---- helpers (thuần) ----
 
@@ -61,7 +77,7 @@ export function drawingIdOfTakeoff(id: string): string | null {
   return m ? m[1] : null;
 }
 
-/** Chi phí theo nhóm công tác (group). */
+/** Chi phí theo nhóm công tác (group), giữ thứ tự chèn. */
 function costByGroup(takeoff: TakeoffItem[]): Map<string, number> {
   const m = new Map<string, number>();
   for (const t of takeoff) {
@@ -70,13 +86,40 @@ function costByGroup(takeoff: TakeoffItem[]): Map<string, number> {
   }
   return m;
 }
+/** Nhóm đã sắp theo chi phí giảm dần — DÙNG CHUNG cho Dashboard & Cost Summary để địa chỉ khớp. */
+function sortedGroups(takeoff: TakeoffItem[]): [string, number][] {
+  return [...costByGroup(takeoff).entries()].sort((a, b) => b[1] - a[1]);
+}
+
+// ---- BOQ layout (không title → header ở cellData row0 = A1 row1, data từ A1 row2) ----
+const BOQ_FIRST = 2;
+const boqLast = (n: number) => Math.max(BOQ_FIRST, n + 1); // A1 row cuối vùng data
+
+// ---- Cost layout (có title → base=2; A1 row = rowIndex + 3) ----
+// rows: [header, ...G groups, TỔNG TRỰC TIẾP, blank, "BẬC", A,B,C,D,E,F]
+const costGroupRow = (g: number) => 4 + g; // A1 row của group thứ g (0-based)
+const costDirectTotalRow = (G: number) => 4 + G; // TỔNG TRỰC TIẾP
+const costLadderRow = (G: number) => ({
+  A: G + 7, B: G + 8, C: G + 9, D: G + 10, E: G + 11, F: G + 12,
+});
 
 // ---- 00. Dashboard ----
 export function composeDashboard(input: ComposeInput): Sheet {
   const { name, projectInfo, takeoff, costSummary, validation, drawings, typeCounts } = input;
   const entTotal = typeCounts.reduce((s, c) => s + c.n, 0);
   const distinct = new Set(takeoff.map((t) => t.name.split(' (')[0])).size;
-  const grp = costByGroup(takeoff);
+  const groups = sortedGroups(takeoff);
+  const G = groups.length;
+  const n = takeoff.length;
+  const bLast = boqLast(n);
+  const B = qn(BOQ_SHEET);
+  const hasData = n > 0;
+
+  // Số công tác (đếm STT cột A vùng data).
+  const cntRows = hasData ? fc(`=COUNT(${B}!A${BOQ_FIRST}:A${bLast})`, n) : 0;
+  // KPI đếm theo loại giá (cột L = "Loại giá").
+  const cntFamily = takeoff.filter((t) => t.familyRep).length;
+  const cntEst = takeoff.filter((t) => t.estimated).length;
 
   const rows: Row[] = [
     ['Chỉ tiêu', 'Giá trị'],
@@ -84,17 +127,28 @@ export function composeDashboard(input: ComposeInput): Sheet {
     ['Tỉnh / Vùng giá', projectInfo.location || '—'],
     ['Số bản vẽ', drawings.length],
     ['Tổng đối tượng nhận diện', entTotal],
-    ['Số công tác (dòng BOQ)', takeoff.length],
+    ['Số công tác (dòng BOQ)', cntRows],
     ['Số công tác khác nhau', distinct],
   ];
-  for (const [g, v] of [...grp.entries()].sort((a, b) => b[1] - a[1])) {
-    rows.push([`— ${g}`, `${vnd(v)} đ`]);
+  // Chi phí từng phần = SUMIF theo Nhóm (cột D) trên cột Thành tiền (cột M) của BOQ — tự recalc.
+  for (const [g, v] of groups) {
+    rows.push([
+      `— ${g}`,
+      hasData ? fc(`=SUMIF(${B}!D${BOQ_FIRST}:D${bLast},"${g}",${B}!M${BOQ_FIRST}:M${bLast})`, v) : 0,
+    ]);
   }
-  rows.push(['TỔNG CHI PHÍ (gồm hệ số)', `${vnd(costSummary.total)} đ`]);
-  rows.push(['Đơn giá đại diện họ mã', takeoff.filter((t) => t.familyRep).length]);
+  // TỔNG CHI PHÍ (gồm hệ số) = ô F tổng dự toán bên Cost Summary.
+  rows.push([
+    'TỔNG CHI PHÍ (gồm hệ số)',
+    hasData ? fc(`=${qn(COST_SHEET)}!C${costLadderRow(G).F}`, costSummary.total) : 0,
+  ]);
+  rows.push([
+    'Đơn giá đại diện họ mã',
+    hasData ? fc(`=COUNTIF(${B}!L${BOQ_FIRST}:L${bLast},"Đại diện họ mã")`, cntFamily) : 0,
+  ]);
   rows.push([
     'Đơn giá ước lượng (cần kiểm chứng)',
-    takeoff.filter((t) => t.estimated).length,
+    hasData ? fc(`=COUNTIF(${B}!L${BOQ_FIRST}:L${bLast},"Ước lượng")`, cntEst) : 0,
   ]);
   rows.push([
     'Điểm tin cậy (AI self-check)',
@@ -127,33 +181,35 @@ export function composeBoqSummary(input: ComposeInput): Sheet {
     const hasPrice = t.unitPrice != null && t.unitPrice > 0;
     const status = !hasPrice ? 'Thiếu giá — cần QS' : t.estimated ? 'Cần kiểm chứng' : 'OK';
     const warn = !hasPrice || t.estimated ? WARN_STYLE : undefined;
+    const a1 = i + BOQ_FIRST; // dòng A1 của dòng data này (header ở row1)
     rows.push([
       i + 1,
       t.code || '', // mã trống → để trống, KHÔNG bịa
       t.name,
       t.group || '',
       t.unit,
-      Math.round((t.quantity ?? 0) * 1000) / 1000,
+      Math.round((t.quantity ?? 0) * 1000) / 1000, // KL (cột F) — ô CƠ SỞ
       (t.note || '').slice(0, 90),
       drw ? `${drw.discipline} · ${drw.name}`.slice(0, 40) : '',
       t.regionLabel || '',
-      hasPrice ? t.unitPrice! : { v: '', s: WARN_STYLE }, // thiếu giá → ô trống tô cảnh báo
+      hasPrice ? t.unitPrice! : { v: '', s: WARN_STYLE }, // Đơn giá (cột J) — ô CƠ SỞ
       (t.source || '').slice(0, 40),
       priceTier(t),
-      hasPrice ? lineTotal(t) : { v: '', s: WARN_STYLE },
+      // Thành tiền (cột M) = KL × Đơn giá — CÔNG THỨC, sửa KL/đơn giá là tự cập nhật.
+      hasPrice ? fc(`=F${a1}*J${a1}`, lineTotal(t)) : { v: '', s: WARN_STYLE },
       warn ? { v: status, s: warn } : status,
     ]);
   });
   return buildSheet({
     id: 'boq-summary',
-    name: '01. Tổng hợp BOQ (đầy đủ)',
+    name: BOQ_SHEET,
     composerKey: 'boq-summary',
     rows,
     widths: [40, 90, 240, 150, 55, 80, 300, 150, 70, 90, 200, 130, 110, 130],
   });
 }
 
-// ---- 02. Validation (AI self-check) ----
+// ---- 02. Validation (AI self-check) — BE compute, không formula ----
 export function composeValidation(input: ComposeInput): Sheet {
   const { validation } = input;
   const sev: Record<string, string> = { error: 'Lỗi', warn: 'Cảnh báo', info: 'Thông tin' };
@@ -229,7 +285,7 @@ export function composeDrawingIndex(input: ComposeInput): Sheet {
   });
 }
 
-// ---- 05. Door Schedule (data THẬT từ entity) ----
+// ---- 05. Door Schedule (data THẬT từ entity + thống kê tự tham chiếu) ----
 export function composeDoorSchedule(input: ComposeInput): Sheet {
   const { doors, drawings } = input;
   const discOf = new Map(drawings.map((d) => [d.id, d.discipline]));
@@ -247,7 +303,20 @@ export function composeDoorSchedule(input: ComposeInput): Sheet {
       'đếm CÁI (m² cần mặt đứng)',
     ]);
   });
-  if (rows.length === 1) rows.push(['—', '—', 'Chưa nhận diện cửa/lỗ mở', '', '', '', '']);
+  if (rows.length === 1) {
+    rows.push(['—', '—', 'Chưa nhận diện cửa/lỗ mở', '', '', '', '']);
+  } else {
+    // Thống kê tự tham chiếu cột Loại (cột C) của chính sheet này — data A1 row 4..(3+N).
+    const N = doors.length;
+    const first = 4;
+    const last = 3 + N;
+    const nDoor = doors.filter((o) => o.type === 'door').length;
+    const nWin = N - nDoor;
+    rows.push(['', '', '', '', '', '', '']);
+    rows.push([{ v: 'THỐNG KÊ', s: { bl: 1 } }, '', '', '', '', '', '']);
+    rows.push(['', '', 'Tổng cửa đi', '', fc(`=COUNTIF(C${first}:C${last},"Cửa đi")`, nDoor), '', '']);
+    rows.push(['', '', 'Tổng cửa sổ/lỗ mở', '', fc(`=COUNTIF(C${first}:C${last},"Cửa sổ/lỗ mở")`, nWin), '', '']);
+  }
   return buildSheet({
     id: 'door-schedule',
     name: '05. Thống kê cửa',
@@ -258,34 +327,61 @@ export function composeDoorSchedule(input: ComposeInput): Sheet {
   });
 }
 
-// ---- 06. Cost Summary (nhóm + bậc chi phí A→F) ----
+// ---- 06. Cost Summary (nhóm + bậc chi phí A→F) — TOÀN CÔNG THỨC ----
 export function composeCostSummary(input: ComposeInput): Sheet {
-  const { takeoff, costSummary: cs } = input;
-  const grp = costByGroup(takeoff);
-  const totAll = [...grp.values()].reduce((s, v) => s + v, 0) || 1;
+  const { takeoff, costSummary: cs, markups: mk } = input;
+  const groups = sortedGroups(takeoff);
+  const G = groups.length;
+  const totAll = groups.reduce((s, [, v]) => s + v, 0);
+  const n = takeoff.length;
+  const bLast = boqLast(n);
+  const B = qn(BOQ_SHEET);
+  const hasData = n > 0;
+  const dtRow = costDirectTotalRow(G);
+  const L = costLadderRow(G);
 
   const rows: Row[] = [['Nhóm công tác', 'Số công tác', 'Thành tiền (đ)', '% chi phí']];
-  for (const [g, v] of [...grp.entries()].sort((a, b) => b[1] - a[1])) {
-    const n = takeoff.filter((t) => (t.group || 'Khác') === g).length;
-    rows.push([g, n, vnd(v), `${((v / totAll) * 100).toFixed(1)}%`]);
-  }
-  rows.push(['TỔNG TRỰC TIẾP (chưa hệ số)', takeoff.length, vnd(totAll), '100%']);
-  // Bậc chi phí A→F
+  groups.forEach(([g, v], i) => {
+    const r = costGroupRow(i);
+    const cnt = takeoff.filter((t) => (t.group || 'Khác') === g).length;
+    rows.push([
+      g,
+      cnt,
+      // Thành tiền nhóm = SUMIF trên BOQ theo nhóm (cột A của sheet này giữ tên nhóm).
+      hasData ? fc(`=SUMIF(${B}!D${BOQ_FIRST}:D${bLast},A${r},${B}!M${BOQ_FIRST}:M${bLast})`, v) : 0,
+      // % = tỷ trọng trên tổng trực tiếp.
+      hasData ? fc(`=IFERROR(C${r}/C${dtRow},0)`, totAll ? v / totAll : 0) : 0,
+    ]);
+  });
+  // TỔNG TRỰC TIẾP = tổng các nhóm.
+  rows.push([
+    'TỔNG TRỰC TIẾP (chưa hệ số)',
+    n,
+    G > 0 ? fc(`=SUM(C${costGroupRow(0)}:C${costGroupRow(G - 1)})`, totAll) : 0,
+    G > 0 ? fc(`=IFERROR(C${dtRow}/C${dtRow},0)`, totAll ? 1 : 0) : 0,
+  ]);
+  // Bậc chi phí A→F — công thức nối nhau, đổi 1 giá dưới BOQ là chạy hết chuỗi.
   rows.push(['', '', '', '']);
   rows.push([{ v: 'BẬC CHI PHÍ (A→F)', s: { bl: 1 } }, '', '', '']);
-  const ladder: [string, number][] = [
-    ['A. Chi phí trực tiếp', cs.directTotal],
-    ['B. Chi phí chung', cs.overhead],
-    ['C. Thu nhập chịu thuế tính trước', cs.profit],
-    ['D. Thuế VAT', cs.vat],
-    ['E. Dự phòng', cs.contingency],
-    ['F. TỔNG DỰ TOÁN', cs.total],
+  const oh = mk.overheadPct / 100;
+  const pr = mk.profitPct / 100;
+  const vat = mk.vatPct / 100;
+  const cont = mk.contingencyPct / 100;
+  const preTax = cs.directTotal + cs.overhead + cs.profit;
+  const ladder: [string, Cell | number][] = [
+    ['A. Chi phí trực tiếp', fc(`=C${dtRow}`, cs.directTotal)],
+    ['B. Chi phí chung', fc(`=ROUND(C${L.A}*${oh},0)`, cs.overhead)],
+    ['C. Thu nhập chịu thuế tính trước', fc(`=ROUND((C${L.A}+C${L.B})*${pr},0)`, cs.profit)],
+    ['D. Thuế VAT', fc(`=ROUND((C${L.A}+C${L.B}+C${L.C})*${vat},0)`, cs.vat)],
+    ['E. Dự phòng', fc(`=ROUND((C${L.A}+C${L.B}+C${L.C}+C${L.D})*${cont},0)`, cs.contingency)],
+    ['F. TỔNG DỰ TOÁN', fc(`=C${L.A}+C${L.B}+C${L.C}+C${L.D}+C${L.E}`, cs.total)],
   ];
-  for (const [k, v] of ladder) rows.push([k, '', vnd(v), '']);
+  void preTax;
+  for (const [k, v] of ladder) rows.push([k, '', v, '']);
 
   return buildSheet({
     id: 'cost-summary',
-    name: '06. Tổng hợp chi phí',
+    name: COST_SHEET,
     composerKey: 'cost-summary',
     title: 'TỔNG HỢP CHI PHÍ',
     rows,
