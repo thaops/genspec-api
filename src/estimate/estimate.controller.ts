@@ -27,6 +27,7 @@ import { TakeoffEngineService } from './takeoff-engine.service';
 import { ExportF1Service } from './export-f1.service';
 import { ExportThdtService } from './export-thdt.service';
 import { ExportTmdtService } from './export-tmdt.service';
+import { univerSheetsToXlsxBuffer } from './univer-to-excel';
 
 @UseGuards(JwtAuthGuard)
 @Controller()
@@ -222,6 +223,23 @@ export class EstimateController {
     @Body('messages') messages: any[],
   ) {
     return this.estimates.saveConversation(userId, id, messages ?? []);
+  }
+
+  /**
+   * Export đúng Workbook người dùng đang thấy (WYSIWYG): dựng lại từ snapshot Univer
+   * trong state.sheets — giữ nguyên formula/style/merge/width/hidden/freeze.
+   * KHÔNG ép về template F1.
+   */
+  @Get('estimates/:id/export-xlsx')
+  async exportXlsx(@CurrentUser('userId') userId: string, @Param('id') id: string, @Res() res: Response) {
+    const estimate = await this.estimates.getOne(userId, id);
+    const buffer = await univerSheetsToXlsxBuffer((estimate as any).sheets ?? []);
+    const safe = estimate.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'du-toan';
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${safe}.xlsx"`,
+    });
+    res.send(buffer);
   }
 
   @Get('estimates/:id/export-f1')
