@@ -36,6 +36,11 @@ export class AuthService {
     const ok = await bcrypt.compare(dto.password, doc.passwordHash);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
 
+    if (doc.status && doc.status !== 'ACTIVE') {
+      throw new UnauthorizedException(`Account is ${doc.status.toLowerCase()}`);
+    }
+
+    await this.users.touchLastLogin(doc._id.toString());
     const user = toPublicUser(doc);
     return { accessToken: this.sign(user), user };
   }

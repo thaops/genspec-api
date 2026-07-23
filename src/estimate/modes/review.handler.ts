@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AiService } from '../../ai/ai.service';
+import { AiService, AiUsageContext } from '../../ai/ai.service';
 import { WorkbookContext } from '../context-builder.service';
 import { StreamEvent } from '../copilot.types';
 import { runReviewTools } from '../tools/tool-registry';
@@ -23,7 +23,7 @@ interface Finding {
 export class ReviewModeHandler {
   constructor(private readonly ai: AiService) {}
 
-  async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = ''): AsyncGenerator<StreamEvent> {
+  async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = '', usageCtx?: AiUsageContext): AsyncGenerator<StreamEvent> {
     // If user has selected a specific range, skip full rule engine — just answer about that area
     const hasFocus = !!context.focusedData;
     const location = (workbook as any)?.projectInfo?.location as string | undefined;
@@ -117,7 +117,7 @@ export class ReviewModeHandler {
         const q = location?.trim()
           ? `${base} tại ${location} (ưu tiên công bố giá Sở Xây dựng ${location}, quý gần nhất)`
           : `${base} Việt Nam`;
-        const result = await this.ai.research(q);
+        const result = await this.ai.research(q, usageCtx);
         if (result.text) {
           webContext = result.text.slice(0, 2000);
           webSources = result.sources.slice(0, 5);
@@ -130,7 +130,7 @@ export class ReviewModeHandler {
     const prompt = this.buildPrompt(context, message, findings, history, webContext, hasFocus, location);
     let reply = '';
     try {
-      for await (const chunk of this.ai.stream([{ text: prompt }])) {
+      for await (const chunk of this.ai.stream([{ text: prompt }], { ctx: usageCtx })) {
         if (chunk.thought) {
           yield { event: 'thinking', data: { text: chunk.text } };
           continue;
@@ -147,7 +147,7 @@ export class ReviewModeHandler {
     if (!reply.trim()) {
       yield { event: 'step', data: { text: 'Đang tổng hợp câu trả lời…' } };
       try {
-        for await (const chunk of this.ai.stream([{ text: prompt }], { thinkingBudget: 0 })) {
+        for await (const chunk of this.ai.stream([{ text: prompt }], { thinkingBudget: 0, ctx: usageCtx })) {
           if (chunk.thought) continue;
           reply += chunk.text;
           yield { event: 'token', data: { text: chunk.text } };

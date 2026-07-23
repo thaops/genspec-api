@@ -95,4 +95,20 @@ export class CloudinaryService {
       expires_at: Math.floor(Date.now() / 1000) + expiresInSeconds,
     });
   }
+
+  /** Admin API usage stats (storage/bandwidth/credits) — for Admin Dashboard. */
+  async usage(): Promise<{ storageBytes: number; bandwidthBytes: number; credits: number } | null> {
+    if (!this.configured) return null;
+    try {
+      const res = await (cloudinary.api as any).usage();
+      return {
+        storageBytes: res.storage?.usage ?? 0,
+        bandwidthBytes: res.bandwidth?.usage ?? 0,
+        credits: res.credits?.usage ?? 0,
+      };
+    } catch (err) {
+      this.logger.warn(`Cloudinary usage() failed: ${(err as Error).message}`);
+      return null;
+    }
+  }
 }

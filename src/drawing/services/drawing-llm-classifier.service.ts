@@ -163,7 +163,7 @@ export class DrawingLlmClassifierService {
       'Trả JSON {results:[{stableId,type,confidence(0..1),reason ngắn tiếng Việt}]}.\n\n' +
       JSON.stringify(items);
 
-    const raw = await this.ai.generateJson([{ text: prompt }], RESULT_SCHEMA);
+    const raw = await this.ai.generateJson([{ text: prompt }], RESULT_SCHEMA, { source: 'drawing_classify' });
     const parsed = JSON.parse(raw) as { results?: LlmResult[] };
     return parsed.results ?? [];
   }

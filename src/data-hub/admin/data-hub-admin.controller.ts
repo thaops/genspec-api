@@ -1,12 +1,15 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/jwt-auth.guard';
+import { RolesGuard } from '../../common/roles.guard';
+import { Roles } from '../../common/roles.decorator';
 import { SourceRegistryService } from '../sources/source-registry.service';
 import { CrawlerRunnerService } from '../crawlers/crawler-runner.service';
 import { ReviewAgentService } from '../agents/review-agent.service';
 import { PriceAgentService } from '../agents/price-agent.service';
 import { LegalAgentService } from '../agents/legal-agent.service';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('admin')
 @Controller('data-hub')
 export class DataHubAdminController {
   constructor(

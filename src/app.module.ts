@@ -15,6 +15,9 @@ import { StorageModule } from './storage/storage.module';
 import { UsersModule } from './users/users.module';
 import { DrawingModule } from './drawing/drawing.module';
 import { QueueModule } from './queue/queue.module';
+import { UsageModule } from './usage/usage.module';
+import { AuditModule } from './audit/audit.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 const isAdmin = process.env.DATAHUB_ADMIN === 'true';
 const redisUrl = process.env.REDIS_URL;
@@ -45,6 +48,9 @@ const redisUrl = process.env.REDIS_URL;
     EstimateModule,
     DrawingModule,
     ...(redisUrl ? [QueueModule] : []),
+    UsageModule,
+    AuditModule,
+    DashboardModule,
   ],
   controllers: [AppController, NotificationController],
   providers: [AppService],

@@ -260,7 +260,7 @@ export class PriceWebLookupService {
       `Danh sách: ${names}. Nêu CON SỐ cụ thể từng công tác, NGÀY/quý công bố và trích nguồn. Nhiều mốc thời gian → lấy số MỚI NHẤT.`;
     try {
       const research = await Promise.race([
-        this.ai.research(query),
+        this.ai.research(query, { source: 'price_lookup' }),
         new Promise<{ text: string; sources: { title?: string; uri?: string }[] }>((r) =>
           setTimeout(() => r({ text: '', sources: [] }), LOOKUP_TIMEOUT_MS),
         ),
@@ -283,6 +283,7 @@ export class PriceWebLookupService {
           },
         ],
         BATCH_EXTRACT_SCHEMA,
+        { source: 'price_lookup' },
       );
       const parsed = JSON.parse(raw) as { items?: { id?: number; unitPriceVnd?: number; rawPrice?: string; publishDate?: string }[] };
       const items = parsed.items ?? [];
@@ -358,6 +359,7 @@ export class PriceWebLookupService {
             },
           ],
           ESTIMATE_SCHEMA,
+          { source: 'price_lookup' },
         ),
         new Promise<string>((r) => setTimeout(() => r('{"items":[]}'), LOOKUP_TIMEOUT_MS)),
       ]);
@@ -384,7 +386,7 @@ export class PriceWebLookupService {
     let sources: { title?: string; uri?: string }[] = [];
     let reason = 'none';
     try {
-      const research = await this.ai.research(buildPriceQuery(q.workName, q.unit, province));
+      const research = await this.ai.research(buildPriceQuery(q.workName, q.unit, province), { source: 'price_lookup' });
       if (research.sources.length === 0 || !research.text) {
         reason = 'grounding';
       } else {
@@ -400,6 +402,7 @@ export class PriceWebLookupService {
             },
           ],
           EXTRACT_SCHEMA,
+          { source: 'price_lookup' },
         );
         const parsed = JSON.parse(raw) as { found?: boolean; unitPriceVnd?: number; rawPrice?: string; publishDate?: string };
         const price = parsed.unitPriceVnd;

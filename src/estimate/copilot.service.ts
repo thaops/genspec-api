@@ -4,7 +4,7 @@ import * as zlib from 'node:zlib';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { AiService } from '../ai/ai.service';
+import { AiService, AiUsageContext } from '../ai/ai.service';
 import { DrawingSceneEntity, DrawingSceneDocument } from '../drawing/schemas/drawing-scene.schema';
 import { INSUNITS_TO_METERS } from '../drawing/services/drawing-unit';
 import { EstimateService } from './estimate.service';
@@ -134,13 +134,15 @@ export class CopilotService {
       yield { event: 'step', data: { text: 'Chế độ đọc — bật quyền chỉnh sửa để AI đề xuất thay đổi' } };
     }
 
+    const usageCtx: AiUsageContext = { userId, estimateId: id, sessionId: chatSessionId, source: 'copilot', mode };
+
     if (mode === 'read') {
-      yield* this.readHandler.handle(doc as any, context, message, history, editPermission);
+      yield* this.readHandler.handle(doc as any, context, message, history, editPermission, usageCtx);
       return;
     }
 
     if (mode === 'review') {
-      yield* this.reviewHandler.handle(doc as any, context, message, history);
+      yield* this.reviewHandler.handle(doc as any, context, message, history, usageCtx);
       return;
     }
 
@@ -154,7 +156,7 @@ export class CopilotService {
       yield { event: 'step', data: { text: 'Thu thập dữ liệu giá thị trường…' } };
       // Heartbeat every 3s so the UI never sits silent during the ~20s
       // grounded-search wait — the user must see movement within a second.
-      const researchPromise = this.ai.research(this.researchQuery(state, message));
+      const researchPromise = this.ai.research(this.researchQuery(state, message), usageCtx);
       const t0 = Date.now();
       for (;;) {
         const winner = await Promise.race([
@@ -171,7 +173,7 @@ export class CopilotService {
       yield { event: 'step', data: { text: `Tham chiếu ${research.sources.length} nguồn giá` } };
     }
 
-    yield* this.editHandler.handle(state, context, message, files, research, history, activeSheetId);
+    yield* this.editHandler.handle(state, context, message, files, research, history, activeSheetId, usageCtx);
   }
 
   /**
@@ -328,7 +330,7 @@ Trả về JSON array (chỉ JSON, không markdown, không text thêm):
 ]`;
 
     try {
-      const raw = await this.ai.generate([{ text: prompt }]);
+      const raw = await this.ai.generate([{ text: prompt }], { userId, estimateId: id, source: 'insights' });
       const clean = raw.replace(/```(?:json)?\n?|\n?```/g, '').trim();
       const parsed = JSON.parse(clean);
       return Array.isArray(parsed) ? (parsed as InsightItem[]).slice(0, 8) : [];
@@ -443,7 +445,7 @@ Trả về JSON array (CHỈ JSON, không markdown, không text thêm):
 Trả về 6-8 kết quả chính xác nhất, mới nhất. trustScore từ 70-98 dựa vào độ chính thức của nguồn.`;
 
     try {
-      const raw = await this.ai.reviewGemini(prompt);
+      const raw = await this.ai.reviewGemini(prompt, { source: 'feed' });
       const start = raw.indexOf('[');
       const end = raw.lastIndexOf(']');
       if (start === -1 || end === -1) return [];

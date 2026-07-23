@@ -264,7 +264,7 @@ export class NormWebLookupService {
       failReason = 'none';
       try {
         // Bước 1 — GROUNDED SEARCH (Gemini + googleSearch).
-        const research = await this.ai.research(query);
+        const research = await this.ai.research(query, { source: 'norm_lookup' });
         srcCount = research.sources.length;
         // Rào 1: không có grounding source → KHÔNG TÌM THẤY, vứt text.
         if (srcCount === 0 || !research.text) {
@@ -282,6 +282,7 @@ export class NormWebLookupService {
               },
             ],
             EXTRACT_SCHEMA,
+            { source: 'norm_lookup' },
           );
           const parsed = JSON.parse(raw) as { found?: boolean; codes?: { code?: string; name?: string }[] };
           extractFound = !!parsed.found && (parsed.codes?.length ?? 0) > 0;

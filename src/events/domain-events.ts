@@ -145,3 +145,50 @@ export class JobFailedEvent {
     public readonly canRetry: boolean,
   ) {}
 }
+
+// ---------- AI Usage / Audit Domain Events (Admin Portal) ----------
+
+export interface AiUsagePayload {
+  requestId: string;
+  traceId?: string;
+  userId?: string;
+  estimateId?: string;
+  sessionId?: string;
+  source: string;
+  mode?: string;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedInputTokens?: number;
+  reasoningTokens?: number;
+  toolTokens?: number;
+  inputPricePer1M: number;
+  outputPricePer1M: number;
+  costUsd: number;
+  latencyMs: number;
+  status: 'success' | 'error' | 'timeout';
+  errorMessage?: string;
+}
+
+// Fire-and-forget: emitted (not awaited) right after an AI call finishes so a
+// slow/failed Mongo write can never delay or break the AI response itself.
+export class AiUsageRecordedEvent {
+  static readonly EVENT = 'ai.usage.recorded';
+  constructor(public readonly payload: AiUsagePayload) {}
+}
+
+export interface AuditLogPayload {
+  actorId: string;
+  actorEmail?: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  meta?: Record<string, unknown>;
+}
+
+export class AuditLogRecordedEvent {
+  static readonly EVENT = 'audit.recorded';
+  constructor(public readonly payload: AuditLogPayload) {}
+}

@@ -5,6 +5,8 @@ export const COLLECTIONS = {
   schemas: 'schemas',
   exports: 'exports',
   estimates: 'estimates',
+  aiUsage: 'ai_usage',
+  auditLogs: 'audit_logs',
 } as const;
 
 export type ProjectStatus =

@@ -1,11 +1,34 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { randomUUID } from 'node:crypto';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { AiUsageRecordedEvent } from '../events/domain-events';
+import { computeCostUsd, getModelPricing } from './pricing.config';
 
 export type GeminiPart = { inlineData: { data: string; mimeType: string } } | { text: string };
 
 /** One streamed chunk — `thought: true` carries the model's reasoning summary. */
 export type StreamChunk = { text: string; thought: boolean };
+
+/** Attribution for AiUsage tracking — all fields optional, purely additive. */
+export interface AiUsageContext {
+  userId?: string;
+  estimateId?: string;
+  sessionId?: string;
+  requestId?: string;
+  traceId?: string;
+  source?: string;
+  mode?: string;
+}
+
+interface UsageMeta {
+  model?: string;
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
+  cachedContentTokenCount?: number;
+}
 
 @Injectable()
 export class AiService {
@@ -16,7 +39,10 @@ export class AiService {
   private readonly geminiEstimateModels: string[];
   private readonly thinkingBudget: number;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {
     this.geminiKey = this.config.get<string>('GEMINI_API_KEY');
     // Default gemini-2.5-flash — đo thật 07/2026 với key hiện tại (đã bật billing):
     // grounding (Google Search) CHẠY, trả 3-16 groundingChunks, latency 3-13s. Đây vẫn
@@ -49,16 +75,69 @@ export class AiService {
     return !!this.gemini;
   }
 
-  async research(query: string): Promise<{ text: string; sources: { title?: string; uri?: string }[] }> {
-    const viaGemini = await this.researchGemini(query);
+  /**
+   * Fire-and-forget: emits AiUsageRecordedEvent (not awaited) right after a call
+   * finishes so a slow/failed Mongo write can never delay or break the AI
+   * response. Provider-agnostic shape — any future non-Gemini provider maps
+   * into the same fields.
+   */
+  private recordUsage(
+    ctx: AiUsageContext | undefined,
+    meta: UsageMeta | undefined,
+    latencyMs: number,
+    status: 'success' | 'error' | 'timeout',
+    errorMessage?: string,
+  ) {
+    const model = meta?.model ?? this.geminiEstimateModels[0];
+    const inputTokens = meta?.promptTokenCount ?? 0;
+    const outputTokens = meta?.candidatesTokenCount ?? 0;
+    const totalTokens = meta?.totalTokenCount ?? inputTokens + outputTokens;
+    const pricing = getModelPricing(model);
+    this.eventEmitter.emit(
+      AiUsageRecordedEvent.EVENT,
+      new AiUsageRecordedEvent({
+        requestId: ctx?.requestId ?? randomUUID(),
+        traceId: ctx?.traceId,
+        userId: ctx?.userId,
+        estimateId: ctx?.estimateId,
+        sessionId: ctx?.sessionId,
+        source: ctx?.source ?? 'other',
+        mode: ctx?.mode,
+        provider: 'gemini',
+        model,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        cachedInputTokens: meta?.cachedContentTokenCount,
+        inputPricePer1M: pricing.inputPer1M,
+        outputPricePer1M: pricing.outputPer1M,
+        costUsd: computeCostUsd(inputTokens, outputTokens, pricing),
+        latencyMs,
+        status,
+        errorMessage,
+      }),
+    );
+  }
+
+  async research(
+    query: string,
+    ctx?: AiUsageContext,
+  ): Promise<{ text: string; sources: { title?: string; uri?: string }[] }> {
+    const start = Date.now();
+    const usage: UsageMeta = {};
+    const viaGemini = await this.researchGemini(query, usage);
+    const latencyMs = Date.now() - start;
     if (viaGemini) {
+      this.recordUsage(ctx, usage, latencyMs, 'success');
       return viaGemini;
     }
+    this.recordUsage(ctx, usage, latencyMs, 'error', 'research: no result on any model');
     return { text: '', sources: [] };
   }
 
   private async researchGemini(
     query: string,
+    usage: UsageMeta,
   ): Promise<{ text: string; sources: { title?: string; uri?: string }[] } | null> {
     if (!this.gemini) {
       return null;
@@ -85,6 +164,8 @@ export class AiService {
             setTimeout(() => rej(new Error('research timeout')), Math.min(ATTEMPT_MS, budget)),
           );
           const r = await Promise.race([model.generateContent(query), timeout]);
+          usage.model = modelName;
+          Object.assign(usage, r.response.usageMetadata ?? {});
           const text = r.response.text();
           const meta = (
             r.response.candidates?.[0] as {
@@ -118,7 +199,9 @@ export class AiService {
     return null;
   }
 
-  async reviewGemini(prompt: string): Promise<string> {
+  async reviewGemini(prompt: string, ctx?: AiUsageContext): Promise<string> {
+    const start = Date.now();
+    const usage: UsageMeta = {};
     if (!this.gemini) {
       return '';
     }
@@ -130,6 +213,9 @@ export class AiService {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const r = await model.generateContent(prompt);
+          usage.model = modelName;
+          Object.assign(usage, r.response.usageMetadata ?? {});
+          this.recordUsage(ctx, usage, Date.now() - start, 'success');
           return r.response.text();
         } catch (err) {
           if (!this.isTransient(err)) {
@@ -140,100 +226,128 @@ export class AiService {
         }
       }
     }
+    this.recordUsage(ctx, usage, Date.now() - start, 'error', 'reviewGemini failed on all models');
     return '';
   }
 
-  async *stream(parts: GeminiPart[], opts?: { thinkingBudget?: number }): AsyncGenerator<StreamChunk> {
+  async *stream(parts: GeminiPart[], opts?: { thinkingBudget?: number; ctx?: AiUsageContext }): AsyncGenerator<StreamChunk> {
     if (!this.geminiKey) {
       throw new Error('No AI backend available');
     }
     yield* this.streamGemini(parts, opts);
   }
 
-  private async *streamGemini(parts: GeminiPart[], opts?: { thinkingBudget?: number }): AsyncGenerator<StreamChunk> {
-    const budget = opts?.thinkingBudget ?? this.thinkingBudget;
-    const body = JSON.stringify({
-      contents: [{ role: 'user', parts }],
-      generationConfig: {
-        temperature: 0.2,
-        // Dynamic thinking with thought summaries streamed back — surfaced to the
-        // client as `thinking` events so the UI can show live reasoning.
-        // budget 0 disables thinking entirely (used as retry when the model
-        // burns its whole output on thoughts and returns no answer text).
-        thinkingConfig: budget === 0 ? { thinkingBudget: 0 } : { thinkingBudget: budget, includeThoughts: true },
-      },
-    });
-    let lastErr: unknown;
-    for (const model of this.geminiEstimateModels) {
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.geminiKey}`;
-        let res: Response;
-        try {
-          res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-        } catch (err) {
-          lastErr = err;
-          await this.sleep(1200 * attempt);
-          continue;
-        }
-        if (res.status === 429 || res.status === 503 || res.status === 500) {
-          lastErr = new Error(`Gemini stream HTTP ${res.status}`);
-          await this.sleep(Math.min(1500 * attempt * attempt, 6000));
-          continue;
-        }
-        if (!res.ok || !res.body) {
-          throw new Error(`Gemini stream HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
-        }
-        const reader = res.body.getReader();
-        const dec = new TextDecoder();
-        let buf = '';
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) {
-            return;
+  private async *streamGemini(
+    parts: GeminiPart[],
+    opts?: { thinkingBudget?: number; ctx?: AiUsageContext },
+  ): AsyncGenerator<StreamChunk> {
+    const start = Date.now();
+    const usage: UsageMeta = {};
+    let status: 'success' | 'error' = 'success';
+    let errorMessage: string | undefined;
+    try {
+      const budget = opts?.thinkingBudget ?? this.thinkingBudget;
+      const body = JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig: {
+          temperature: 0.2,
+          // Dynamic thinking with thought summaries streamed back — surfaced to the
+          // client as `thinking` events so the UI can show live reasoning.
+          // budget 0 disables thinking entirely (used as retry when the model
+          // burns its whole output on thoughts and returns no answer text).
+          thinkingConfig: budget === 0 ? { thinkingBudget: 0 } : { thinkingBudget: budget, includeThoughts: true },
+        },
+      });
+      let lastErr: unknown;
+      for (const model of this.geminiEstimateModels) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          usage.model = model;
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.geminiKey}`;
+          let res: Response;
+          try {
+            res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+          } catch (err) {
+            lastErr = err;
+            await this.sleep(1200 * attempt);
+            continue;
           }
-          buf = (buf + dec.decode(value, { stream: true })).replace(/\r/g, '');
-          let i: number;
-          while ((i = buf.indexOf('\n\n')) >= 0) {
-            const block = buf.slice(0, i);
-            buf = buf.slice(i + 2);
-            const dataLine = block.split('\n').find((l) => l.startsWith('data:'));
-            if (!dataLine) {
-              continue;
+          if (res.status === 429 || res.status === 503 || res.status === 500) {
+            lastErr = new Error(`Gemini stream HTTP ${res.status}`);
+            await this.sleep(Math.min(1500 * attempt * attempt, 6000));
+            continue;
+          }
+          if (!res.ok || !res.body) {
+            throw new Error(`Gemini stream HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
+          }
+          const reader = res.body.getReader();
+          const dec = new TextDecoder();
+          let buf = '';
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) {
+              return;
             }
-            const json = dataLine.slice(5).trim();
-            if (!json || json === '[DONE]') {
-              continue;
+            buf = (buf + dec.decode(value, { stream: true })).replace(/\r/g, '');
+            let i: number;
+            while ((i = buf.indexOf('\n\n')) >= 0) {
+              const block = buf.slice(0, i);
+              buf = buf.slice(i + 2);
+              const dataLine = block.split('\n').find((l) => l.startsWith('data:'));
+              if (!dataLine) {
+                continue;
+              }
+              const json = dataLine.slice(5).trim();
+              if (!json || json === '[DONE]') {
+                continue;
+              }
+              try {
+                const obj = JSON.parse(json) as {
+                  candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
+                  usageMetadata?: UsageMeta;
+                };
+                if (obj.usageMetadata) Object.assign(usage, obj.usageMetadata);
+                // Thought parts stream separately (thought: true) so downstream
+                // parsers only ever see answer text in non-thought chunks.
+                const partsArr = obj.candidates?.[0]?.content?.parts ?? [];
+                const thoughtTx = partsArr.filter((p) => p.thought).map((p) => p.text ?? '').join('');
+                const tx = partsArr.filter((p) => !p.thought).map((p) => p.text ?? '').join('');
+                if (thoughtTx) {
+                  yield { text: thoughtTx, thought: true };
+                }
+                if (tx) {
+                  yield { text: tx, thought: false };
+                }
+              } catch {}
             }
-            try {
-              const obj = JSON.parse(json) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
-              // Thought parts stream separately (thought: true) so downstream
-              // parsers only ever see answer text in non-thought chunks.
-              const partsArr = obj.candidates?.[0]?.content?.parts ?? [];
-              const thoughtTx = partsArr.filter((p) => p.thought).map((p) => p.text ?? '').join('');
-              const tx = partsArr.filter((p) => !p.thought).map((p) => p.text ?? '').join('');
-              if (thoughtTx) {
-                yield { text: thoughtTx, thought: true };
-              }
-              if (tx) {
-                yield { text: tx, thought: false };
-              }
-            } catch {}
           }
         }
       }
+      status = 'error';
+      errorMessage = (lastErr as Error)?.message ?? 'Gemini stream failed';
+      throw lastErr ?? new Error('Gemini stream failed');
+    } catch (err) {
+      status = 'error';
+      errorMessage = (err as Error).message;
+      throw err;
+    } finally {
+      this.recordUsage(opts?.ctx, usage, Date.now() - start, status, errorMessage);
     }
-    throw lastErr ?? new Error('Gemini stream failed');
   }
 
-  async generate(parts: GeminiPart[]): Promise<string> {
-    const viaGemini = await this.generateGemini(parts);
+  async generate(parts: GeminiPart[], ctx?: AiUsageContext): Promise<string> {
+    const start = Date.now();
+    const usage: UsageMeta = {};
+    const viaGemini = await this.generateGemini(parts, usage);
+    const latencyMs = Date.now() - start;
     if (viaGemini != null) {
+      this.recordUsage(ctx, usage, latencyMs, 'success');
       return viaGemini;
     }
+    this.recordUsage(ctx, usage, latencyMs, 'error', 'No AI backend available');
     throw new Error('No AI backend available');
   }
 
-  private async generateGemini(parts: GeminiPart[]): Promise<string | null> {
+  private async generateGemini(parts: GeminiPart[], usage: UsageMeta): Promise<string | null> {
     if (!this.gemini) {
       return null;
     }
@@ -245,6 +359,8 @@ export class AiService {
             contents: [{ role: 'user', parts: parts as unknown as never }],
             generationConfig: { responseMimeType: 'application/json', temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } } as unknown as never,
           });
+          usage.model = modelName;
+          Object.assign(usage, r.response.usageMetadata ?? {});
           return r.response.text();
         } catch (err) {
           if (!this.isTransient(err)) {
@@ -264,8 +380,11 @@ export class AiService {
    * payload in prose/markdown. Same model-fallback + transient-retry chain
    * as generate(). Returns the raw JSON text.
    */
-  async generateJson(parts: GeminiPart[], schema?: object): Promise<string> {
+  async generateJson(parts: GeminiPart[], schema?: object, ctx?: AiUsageContext): Promise<string> {
+    const start = Date.now();
+    const usage: UsageMeta = {};
     if (!this.gemini) {
+      this.recordUsage(ctx, usage, Date.now() - start, 'error', 'No AI backend available');
       throw new Error('No AI backend available');
     }
     for (const modelName of this.geminiEstimateModels) {
@@ -281,6 +400,9 @@ export class AiService {
               thinkingConfig: { thinkingBudget: 0 },
             } as unknown as never,
           });
+          usage.model = modelName;
+          Object.assign(usage, r.response.usageMetadata ?? {});
+          this.recordUsage(ctx, usage, Date.now() - start, 'success');
           return r.response.text();
         } catch (err) {
           if (!this.isTransient(err)) {
@@ -291,6 +413,7 @@ export class AiService {
         }
       }
     }
+    this.recordUsage(ctx, usage, Date.now() - start, 'error', 'generateJson failed on all models');
     throw new Error('Gemini generateJson failed on all models');
   }
 
@@ -304,8 +427,10 @@ export class AiService {
     parts: GeminiPart[],
     functionDeclarations: unknown[],
     executor: (name: string, args: Record<string, any>) => unknown,
-    opts?: { maxSteps?: number },
+    opts?: { maxSteps?: number; ctx?: AiUsageContext },
   ): Promise<string | null> {
+    const start = Date.now();
+    const usage: UsageMeta = {};
     if (!this.gemini) return null;
     const maxSteps = opts?.maxSteps ?? 4;
     for (const modelName of this.geminiEstimateModels) {
@@ -320,8 +445,13 @@ export class AiService {
             contents: contents as unknown as never,
             generationConfig: { temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } } as unknown as never,
           });
+          usage.model = modelName;
+          Object.assign(usage, r.response.usageMetadata ?? {});
           const calls = (typeof r.response.functionCalls === 'function' ? r.response.functionCalls() : []) ?? [];
-          if (!calls.length) return r.response.text();
+          if (!calls.length) {
+            this.recordUsage(opts?.ctx, usage, Date.now() - start, 'success');
+            return r.response.text();
+          }
           // Append lượt model (chứa functionCall) + kết quả tool (functionResponse).
           const modelParts = r.response.candidates?.[0]?.content?.parts ?? [];
           contents.push({ role: 'model', parts: modelParts });
@@ -334,15 +464,20 @@ export class AiService {
         }
         // Hết bước — 1 lượt cuối KHÔNG tool để lấy kết luận.
         const fin = await model.generateContent({ contents: contents as unknown as never });
+        usage.model = modelName;
+        Object.assign(usage, fin.response.usageMetadata ?? {});
+        this.recordUsage(opts?.ctx, usage, Date.now() - start, 'success');
         return fin.response.text();
       } catch (err) {
         if (!this.isTransient(err)) {
           this.logger.warn(`runToolLoop (${modelName}) failed: ${(err as Error).message}`);
+          this.recordUsage(opts?.ctx, usage, Date.now() - start, 'error', (err as Error).message);
           return null;
         }
         await this.sleep(1500);
       }
     }
+    this.recordUsage(opts?.ctx, usage, Date.now() - start, 'error', 'runToolLoop failed on all models');
     return null;
   }
 

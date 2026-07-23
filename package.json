@@ -39,6 +39,7 @@
     "class-validator": "^0.14.2",
     "cloudinary": "^2.7.0",
     "exceljs": "^4.4.0",
+    "ioredis": "^5.4.1",
     "meilisearch": "^0.58.0",
     "mongoose": "^8.9.5",
     "passport": "^0.7.0",

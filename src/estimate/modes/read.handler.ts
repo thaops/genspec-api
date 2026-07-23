@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AiService } from '../../ai/ai.service';
+import { AiService, AiUsageContext } from '../../ai/ai.service';
 import { WorkbookContext } from '../context-builder.service';
 import { StreamEvent } from '../copilot.types';
 import { searchWorkbook } from '../tools/tool-registry';
@@ -17,7 +17,7 @@ const PRICE_ASK_INTENT = /(giá|đơn giá|vật liệu|nhân công|ca máy|thé
 export class ReadModeHandler {
   constructor(private readonly ai: AiService) {}
 
-  async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = '', editPermission = false): AsyncGenerator<StreamEvent> {
+  async *handle(workbook: Workbook, context: WorkbookContext, message: string, history = '', editPermission = false, usageCtx?: AiUsageContext): AsyncGenerator<StreamEvent> {
     yield { event: 'step', data: { text: 'Đọc cấu trúc Workbook…' } };
     const location = (workbook as any)?.projectInfo?.location as string | undefined;
 
@@ -52,7 +52,7 @@ export class ReadModeHandler {
           hints.push(`Câu hỏi về giá → tra theo tỉnh ${location}, ưu tiên công bố giá Sở Xây dựng ${location}, số MỚI NHẤT.`);
         }
         const webQuery = hints.length ? `${message}\n(${hints.join(' ')})` : message;
-        const result = await this.ai.research(webQuery);
+        const result = await this.ai.research(webQuery, usageCtx);
         if (result.text) {
           const sourceList = result.sources.slice(0, 5).map((s) => `- ${s.title ?? s.uri}: ${s.uri}`).join('\n');
           webContext = [
@@ -82,7 +82,7 @@ export class ReadModeHandler {
     const prompt = this.buildPrompt(context, message, searchContext, webContext, webSearchFailed, history, editPermission, location);
     let reply = '';
     try {
-      for await (const chunk of this.ai.stream([{ text: prompt }])) {
+      for await (const chunk of this.ai.stream([{ text: prompt }], { ctx: usageCtx })) {
         if (chunk.thought) {
           yield { event: 'thinking', data: { text: chunk.text } };
           continue;
@@ -100,7 +100,7 @@ export class ReadModeHandler {
     if (!reply.trim()) {
       yield { event: 'step', data: { text: 'Đang tổng hợp câu trả lời…' } };
       try {
-        for await (const chunk of this.ai.stream([{ text: prompt }], { thinkingBudget: 0 })) {
+        for await (const chunk of this.ai.stream([{ text: prompt }], { thinkingBudget: 0, ctx: usageCtx })) {
           if (chunk.thought) continue;
           reply += chunk.text;
           yield { event: 'token', data: { text: chunk.text } };

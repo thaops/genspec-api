@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AiService, GeminiPart } from '../../ai/ai.service';
+import { AiService, AiUsageContext, GeminiPart } from '../../ai/ai.service';
 import { CatalogService } from '../../catalog/catalog.service';
 import { WorkbookContext } from '../context-builder.service';
 import { StreamEvent } from '../copilot.types';
@@ -158,6 +158,7 @@ export class EditModeHandler {
     history = '',
     /** Sheet người dùng đang mở — mọi rescue phải ghi vào ĐÚNG sheet này, không mặc định sheets[0]. */
     activeSheetId?: string,
+    usageCtx?: AiUsageContext,
   ): AsyncGenerator<StreamEvent> {
     // CHỈ liệt kê mã/tên/đơn vị để LLM chọn mã hiệu. KHÔNG in đơn giá ở đây —
     // giá seed là số bịa; giá thật chỉ lấy từ normRef (import) + priceCtxLite bên dưới.
@@ -229,7 +230,7 @@ export class EditModeHandler {
           ],
           AGENT_TOOL_DECLARATIONS as unknown as unknown[],
           (name, args) => executeAgentTool(state, name, args),
-          { maxSteps: 4 },
+          { maxSteps: 4, ctx: usageCtx },
         )
         .catch(() => null);
       if (g && g.trim()) grounding = g.trim();
@@ -250,7 +251,7 @@ export class EditModeHandler {
     let lastStep = '';
 
     try {
-      for await (const chunk of this.ai.stream(streamParts)) {
+      for await (const chunk of this.ai.stream(streamParts, { ctx: usageCtx })) {
         if (chunk.thought) {
           yield { event: 'thinking', data: { text: chunk.text } };
           continue;
@@ -301,10 +302,10 @@ export class EditModeHandler {
         // JSON mode + responseSchema: the model can't wrap the payload in prose,
         // so the "nói mà không làm" failure mode disappears at the source.
         try {
-          fallbackRaw = await this.ai.generateJson(fbParts, EDIT_REPLY_SCHEMA);
+          fallbackRaw = await this.ai.generateJson(fbParts, EDIT_REPLY_SCHEMA, usageCtx);
         } catch (jsonErr) {
           this.logger.warn(`generateJson fallback failed, using generate(): ${(jsonErr as Error).message}`);
-          fallbackRaw = await this.ai.generate(fbParts);
+          fallbackRaw = await this.ai.generate(fbParts, usageCtx);
         }
         reply = this.parse(fallbackRaw);
       } catch (err) {
@@ -410,7 +411,7 @@ export class EditModeHandler {
       const layer = focus === 'completeness' ? 'thiếu sót & khối lượng' : 'đơn giá & benchmark';
       yield { event: 'step', data: { text: `Kiểm tra ${layer} — vòng ${round}…` } };
 
-      const res = await this.reviewPass(state, reply, validation, benchmark, focus);
+      const res = await this.reviewPass(state, reply, validation, benchmark, focus, usageCtx);
       if (res) {
         yield { event: 'step', data: { text: `Cải thiện trust ${validation.score} → ${res.validation.score}` } };
         reply = res.reply;
@@ -654,11 +655,12 @@ export class EditModeHandler {
     validation: ValidationReport,
     benchmark: Benchmark | undefined,
     focus: ReviewFocus,
+    usageCtx?: AiUsageContext,
   ): Promise<{ reply: EditReply; state: EstimateState; validation: ValidationReport } | null> {
     try {
-      const critique = await this.ai.reviewGemini(this.buildReviewPrompt(base, reply, validation, benchmark, focus));
+      const critique = await this.ai.reviewGemini(this.buildReviewPrompt(base, reply, validation, benchmark, focus), usageCtx);
       const fixed = this.parse(
-        await this.ai.generate([{ text: this.buildCritiquePrompt(base, reply, validation, benchmark, focus, critique) }]),
+        await this.ai.generate([{ text: this.buildCritiquePrompt(base, reply, validation, benchmark, focus, critique) }], usageCtx),
       );
       if (fixed.actions.length === 0) return null;
       const fixedState = applyActions(base, fixed.actions).state;
